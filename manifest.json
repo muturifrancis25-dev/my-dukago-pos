@@ -3,15 +3,15 @@
   "short_name": "My DukaGO POS",
   "description": "Offline-first point of sale for small dukas, minimarts and wholesalers",
   "start_url": "./index.html",
+  "id": "./index.html",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#efe6d3",
   "theme_color": "#12241f",
   "icons": [
-    {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='96' fill='%230f2620'/%3E%3Ctext x='96' y='128' font-family='sans-serif' font-size='72' font-weight='800' fill='%23e2a034' text-anchor='middle'%3EMD%3C/text%3E%3C/svg%3E",
-      "sizes": "192x192",
-      "type": "image/svg+xml"
-    }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
