@@ -290,7 +290,7 @@
   .staff-chip.selected{border-color:var(--marigold); background:var(--marigold-pale);}
   .staff-chip .role-tag{font-family:var(--mono); font-size:9.5px; text-transform:uppercase; color:var(--muted); background:var(--bg); padding:3px 7px; border-radius:5px;}
 
-  .pin-dots{display:flex; justify-content:center; gap:12px; margin-bottom:20px;}
+  .pin-dots{display:flex; justify-content:center; gap:clamp(6px,2vw,10px); margin-bottom:20px; flex-wrap:wrap;}
   .pin-dot{width:14px; height:14px; border-radius:50%; border:2px solid var(--line); background:transparent; transition:background .1s, border-color .1s;}
   .pin-dot.filled{background:var(--marigold); border-color:var(--marigold);}
   .pin-dot.shake{animation:shake .35s;}
@@ -475,6 +475,13 @@
       <p id="profileStatus" class="hint" style="margin:10px 0 0;"></p>
     </div>
     <div class="panel">
+      <h3>Your Shop Code</h3>
+      <p class="hint">Give this to anyone joining your shop on their own phone — cashier, supervisor, another till. They'll enter it once, and their device pulls in your staff list, products, and settings automatically.</p>
+      <div style="background:var(--bg); border-radius:10px; padding:16px; text-align:center;">
+        <div id="shopCodeDisplay" style="font-family:var(--mono); font-size:28px; font-weight:800; letter-spacing:4px; color:var(--teal-dark);">—</div>
+      </div>
+    </div>
+    <div class="panel">
       <h3>This till / pay station</h3>
       <p class="hint">Only matters if there's more than one till — a supermarket with several pay stations, for example. This label is set per device, not synced, so each till can be told apart in the header and on its receipts.</p>
       <div class="form-row" style="grid-template-columns:220px;">
@@ -535,16 +542,16 @@
           <option value="supervisor">Supervisor</option>
           <option value="admin">Admin</option>
         </select>
-        <input id="newStaffPin" placeholder="4-digit PIN" maxlength="4" inputmode="numeric">
+        <input id="newStaffPin" placeholder="PIN — 4 digits, or 6 for Admin" maxlength="6" inputmode="numeric">
         <button class="primary-btn" id="addStaffBtn" style="grid-column:span 1;">Add staff</button>
       </div>
     </div>
     <div class="panel">
       <h3>Roles, in short</h3>
       <p class="hint" style="line-height:1.6;">
-        <b>Cashier</b> — sells only. Voiding a line or clearing a cart needs sign-off.<br>
-        <b>Supervisor</b> — everything a cashier can do, plus can approve voids with their own PIN.<br>
-        <b>Admin</b> — full access: Stock, Reports, Sync setup, and assigning everyone else's role.
+        <b>Cashier</b> — sells only, 4-digit PIN. Voiding a line or clearing a cart needs sign-off.<br>
+        <b>Supervisor</b> — everything a cashier can do, plus can approve voids with their own 4-digit PIN.<br>
+        <b>Admin</b> — full access: Stock, Reports, Sync setup, and assigning everyone else's role. Admin PINs are 6 digits — longer on purpose, so it's harder for a cashier to glance at the keypad and pick it up.
       </p>
     </div>
     <div class="panel">
@@ -728,6 +735,40 @@
 </main>
 
 <!-- Login screen — silent PIN entry, identity is resolved from the PIN itself -->
+<!-- Shop onboarding — shown only on a genuinely first-ever boot, before any login screen.
+     This is what makes "cashier joins on her own phone" possible: it's how a device learns
+     which shop it belongs to. -->
+<div class="login-screen hide" id="shopOnboardingScreen">
+  <div class="login-card" style="text-align:left;">
+    <div class="login-mark" style="margin:0 auto 14px;">MD</div>
+    <h2 style="text-align:center;">Welcome to My DukaGO POS</h2>
+    <p style="text-align:center; margin-bottom:18px;">Is this device setting up a brand-new shop, or joining one that already exists?</p>
+
+    <div id="shopChoiceStep">
+      <button class="modal-confirm" id="shopSetupNewBtn" style="width:100%; padding:14px; margin-bottom:10px;">I'm setting up a new shop</button>
+      <button class="modal-cancel" id="shopJoinExistingBtn" style="width:100%; padding:14px;">I'm joining an existing shop</button>
+      <p style="font-size:11px; color:var(--muted); text-align:center; margin-top:14px;">
+        Already set this shop up before, and seeing this screen again? That usually means the browser lost its data (a
+        clear, a reinstall, a different browser). Choose <b>"joining an existing shop"</b> and enter your original Shop
+        Code — picking "setting up a new shop" here creates a second, separate, empty shop instead of getting your real one back.
+      </p>
+    </div>
+
+    <div id="shopJoinStep" style="display:none;">
+      <p style="font-size:12.5px; color:var(--muted);">Ask your shop's admin for the Shop Code they were given when they set up — it looks like <code>KAMAU4X</code>.</p>
+      <input id="shopCodeInput" type="text" placeholder="Shop Code" style="width:100%; text-align:center; letter-spacing:2px; font-size:18px; font-family:var(--mono); text-transform:uppercase; padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px;">
+      <p id="shopJoinStatus" style="font-size:11.5px; color:var(--clay); min-height:16px; margin:0 0 10px;"></p>
+      <button class="modal-confirm" id="shopJoinConfirmBtn" style="width:100%; padding:13px;">Join this shop</button>
+      <button class="modal-cancel" id="shopJoinBackBtn" style="width:100%; padding:11px; margin-top:8px;">Back</button>
+    </div>
+
+    <div id="shopSetupStep" style="display:none; text-align:center;">
+      <div class="mpesa-spinner" style="margin:20px auto;"></div>
+      <p id="shopSetupStatus" style="font-size:13px;">Setting up your shop…</p>
+    </div>
+  </div>
+</div>
+
 <div class="login-screen" id="loginScreen">
   <!-- Rotating real photos — one per business type this till serves.
        Free-to-use, commercially licensed photography (Pexels), not illustrations or AI. -->
@@ -746,7 +787,7 @@
     <h2>My DukaGO POS</h2>
     <p>Enter your PIN to start this till.</p>
     <div class="pin-dots" id="pinDots">
-      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
     <div class="keypad" id="loginKeypad">
       <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
@@ -763,7 +804,7 @@
   <div class="modal-box">
     <h3 id="pinModalTitle">Admin access</h3>
     <p id="pinModalSub">Enter an admin PIN to open Stock, Reports and Sync setup.</p>
-    <input id="pinInput" type="password" inputmode="numeric" maxlength="4" placeholder="••••">
+    <input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="PIN">
     <div class="modal-actions">
       <button class="modal-cancel" id="pinCancelBtn">Cancel</button>
       <button class="modal-confirm" id="pinConfirmBtn">Confirm</button>
@@ -856,7 +897,7 @@
 <script>
 /* =========================================================================
    SOKO — role-based till: Cashier / Supervisor / Admin
-   Demo PIN for every seeded staff member: 1234
+   Demo PIN for the default Admin account: 123456
    (in production each PIN is set per-person at onboarding and checked
    against the backend, not stored client-side)
    ========================================================================= */
@@ -1013,6 +1054,18 @@ let db, cart = [], isOnline = false, activeCat = 'All', searchTerm = '';
 let vatEnabled = false, vatRate = 16; // VAT is off by default — admin turns it on in Sync & Setup
 let businessProfile = {storeName:'', ownerName:'', phone:'', address:'', location:''};
 let tillLabel = 'Till 1'; // configurable per device — matters for a supermarket with several pay stations
+
+// ---------- Shop identity — what makes "cashier joins on her own phone" possible ----------
+// PLATFORM_SUPABASE_URL/KEY belong to YOU, the platform operator, not individual shop owners.
+// Set these once (Admin → Sync & Setup still has an override field for testing, but this is
+// the real default every deployed copy of the app should ship with). The anon key is meant to
+// be public — Supabase's Row Level Security policies are what actually keep one shop's data
+// safe from another, not secrecy of this key.
+const PLATFORM_SUPABASE_URL = '';
+const PLATFORM_SUPABASE_KEY = '';
+let shopId = null;   // internal UUID, never shown to anyone
+let shopCode = null; // short human-shareable code, e.g. "KAMAU4X"
+let lastPullSync = null;
 let receiptAction = 'ask'; // 'ask' | 'print' | 'pdf' | 'skip' — how receipts are offered after a sale
 let receiptPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — affects the printable receipt layout only
 let gdriveClientId = '', gdriveFileId = null, gdriveAccessToken = null, gdriveAutoOn = false, gdriveAutoTimer = null;
@@ -1115,6 +1168,7 @@ async function applyBusinessTypes(typeIds, {announce=true} = {}){
   activeCat = 'All';
   currentBusinessTypes = ids;
   await put('settings', {key:'active_business_types', value: ids});
+  await queuePush('settings_upsert', {key:'active_business_types', value: ids});
 
   const subtitle = selected.length>1 ? selected.map(t=>t.subtitle).join(' + ') : selected[0].subtitle;
   $('storeSubtitle').textContent = `${tillLabel} · ${subtitle}`;
@@ -1139,8 +1193,16 @@ async function applyBusinessTypes(typeIds, {announce=true} = {}){
 async function seedUsersIfEmpty(){
   if((await getAll('users')).length) return;
   // Fresh install: only the Admin account exists, on the default PIN.
-  // Admin signs in with 1234, then creates every other account from Staff.
-  await put('users', {id:'u_admin', name:'Admin', role:'admin', pin:'1234', active:true});
+  // Admin signs in with 123456, then creates every other account from Staff.
+  // Admin PINs are 6 digits — longer than staff PINs on purpose, so a cashier
+  // glancing at the keypad can't as easily pick up the admin PIN by watching.
+  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:'123456', active:true};
+  await put('users', adminUser);
+  // This founding admin account has to sync out too — otherwise the very person who set
+  // up the shop could never sign in as themselves on a second device, only staff they
+  // add afterward would. Only push if this device already belongs to a shop (it will,
+  // by the time this runs during either the new-shop or join-shop boot path).
+  if(shopId) await queuePush('staff_upsert', adminUser);
 }
 
 function fmtKsh(n){ return 'KSh ' + n.toLocaleString('en-KE'); }
@@ -1393,6 +1455,7 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
     if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
     lines.push({sku:item.sku,name:item.name,qty:item.qty,price:item.price,cost:(p.cost||0),btype:(p.btype||'duka')});
     await put('products', p);
+    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
   }
   const change = tendered - total;
   const sale = {
@@ -1445,10 +1508,12 @@ async function addStock(){
     p={sku,name,price,stock:qty,cat,cost:cost||0,btype:resolveTypeForCategory(cat)};
   }
   await put('products', p);
-  await put('sync_queue', {type:'stock_update', payload:{sku,name,price,delta:qty,cat,outlet_id:OUTLET_ID}, ts:Date.now()});
+  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
   // Log it as a purchase for the Reports "stock received" numbers — only when actual units came in
   if(qtyProvided && qty>0){
-    await put('stock_movements', {sku, name, qty, cost: cost||0, btype: resolveTypeForCategory(cat), ts:new Date().toISOString()});
+    const movement = {sku, name, qty, cost: cost||0, btype: resolveTypeForCategory(cat), ts:new Date().toISOString()};
+    await put('stock_movements', movement);
+    await queuePush('stock_movement', movement);
   }
   log(`Stock ${isNew?'added':'updated'}: ${name} (${sku})${qtyProvided?' +'+qty:''}. Queued for sync.`,'warn');
   logAudit(isNew ? 'Added new product' : 'Updated product', `${name} (${sku})`);
@@ -1697,7 +1762,11 @@ async function renderReports(){
 }
 
 // ---------- Sync engine ----------
-let supaUrl = localStorage.getItem('supa_url')||'', supaKey = localStorage.getItem('supa_key')||'';
+// supaUrl/supaKey default to YOUR platform's own Supabase project (baked in above), so
+// individual shop owners never see or configure this — the per-user fields below exist only
+// as a manual override for testing, not the normal path once PLATFORM_SUPABASE_URL is set.
+let supaUrl = localStorage.getItem('supa_url') || PLATFORM_SUPABASE_URL || '';
+let supaKey = localStorage.getItem('supa_key') || PLATFORM_SUPABASE_KEY || '';
 $('supaUrl').value = supaUrl; $('supaKey').value = supaKey;
 $('saveSupaBtn').addEventListener('click', ()=>{
   const url = $('supaUrl').value.trim(), key = $('supaKey').value.trim();
@@ -1713,22 +1782,37 @@ $('saveSupaBtn').addEventListener('click', ()=>{
   if(supaUrl&&supaKey){ log('Supabase credentials saved. Live sync active next cycle.','ok'); toast('Backend connected'); }
   else log('No credentials set — running in simulated sync mode.','warn');
 });
+function backendLive(){
+  return !!(supaUrl && supaKey && /^https:\/\/.+\.supabase\.co\/?$/.test(supaUrl));
+}
+function sbHeaders(extra){
+  return Object.assign({'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, extra||{});
+}
 async function pushToSupabase(item){
-  const table = item.type==='sale' ? 'sales' : 'stock_movements';
+  let table, body, prefer='return=minimal';
+  if(item.type==='sale'){ table='sales'; body=Object.assign({shop_id:shopId}, item.payload); }
+  else if(item.type==='stock_movement'){ table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
+  else if(item.type==='staff_upsert'){ table='staff'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else if(item.type==='product_upsert'){ table='products'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else if(item.type==='settings_upsert'){ table='shop_settings'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
   const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`,'Prefer':'return=minimal'},
-    body: JSON.stringify(item.payload)
+    method:'POST', headers: sbHeaders({'Prefer':prefer}),
+    body: JSON.stringify(body)
   });
   if(!res.ok) throw new Error('Supabase rejected the row: '+res.status);
 }
+// Every local change that another device needs to see goes through here — stamps updated_at
+// so pull-sync's last-write-wins comparison has something to compare against.
+async function queuePush(type, payload){
+  const stamped = Object.assign({}, payload, {updated_at: new Date().toISOString()});
+  await put('sync_queue', {type, payload: stamped, ts: Date.now()});
+  updatePendingBadge();
+}
 async function runSyncLoop(){
-  if(!isOnline) return;
+  if(!isOnline || !shopId) return;
   const queue = await getAll('sync_queue'); if(queue.length===0) return;
-  // A stored URL that isn't genuinely a Supabase project address (leftover test text,
-  // truncated paste, etc.) would otherwise retry a doomed fetch every cycle forever —
-  // fall back to simulated sync instead of hammering a broken address.
-  const live = !!(supaUrl && supaKey && /^https:\/\/.+\.supabase\.co\/?$/.test(supaUrl));
+  const live = backendLive();
   log(`Sync started — ${queue.length} item(s) to push (${live?'live Supabase':'simulated'}).`);
   for(const item of queue){
     try{
@@ -1742,6 +1826,125 @@ async function runSyncLoop(){
     }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); break; }
   }
   updatePendingBadge(); renderReports();
+  if(live) await pullShopData();
+}
+
+// ---------- Shop identity: what makes "cashier joins on her own phone" possible ----------
+function makeShopCode(){
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I — avoids look-alike mistakes when read aloud
+  let code = '';
+  for(let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
+  return code;
+}
+function makeShopId(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'shop_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+}
+async function loadShopIdentity(){
+  const savedId = await getSetting('shop_id');
+  const savedCode = await getSetting('shop_code');
+  shopId = savedId ? savedId.value : null;
+  shopCode = savedCode ? savedCode.value : null;
+}
+async function setupNewShop(){
+  shopId = makeShopId();
+  shopCode = makeShopCode();
+  await put('settings', {key:'shop_id', value:shopId});
+  await put('settings', {key:'shop_code', value:shopCode});
+  if(backendLive()){
+    try{
+      await fetch(`${supaUrl}/rest/v1/shops`, {
+        method:'POST', headers: sbHeaders({'Prefer':'return=minimal'}),
+        body: JSON.stringify({id:shopId, code:shopCode, name: businessProfile.storeName || 'New shop'})
+      });
+    }catch(e){ log('Could not register shop with backend yet — will still work locally: '+e.message, 'warn'); }
+  }
+  logAudit('Shop set up', `Code: ${shopCode}`);
+}
+async function joinExistingShop(code){
+  if(!backendLive()){
+    return {ok:false, message:'This device isn\'t connected to the shared backend yet — ask whoever manages the app to finish that setup first.'};
+  }
+  try{
+    const res = await fetch(`${supaUrl}/rest/v1/shops?code=eq.${encodeURIComponent(code)}&select=id,code,name`, {
+      headers: sbHeaders()
+    });
+    if(!res.ok) return {ok:false, message:'Could not reach the backend — check your connection and try again.'};
+    const rows = await res.json();
+    if(!rows || rows.length===0) return {ok:false, message:'No shop found with that code — double-check it with your admin.'};
+    shopId = rows[0].id;
+    shopCode = rows[0].code;
+    await put('settings', {key:'shop_id', value:shopId});
+    await put('settings', {key:'shop_code', value:shopCode});
+    await pullShopData(true); // full pull — this device has nothing locally yet
+    logAudit('Joined shop', `Code: ${shopCode}`);
+    return {ok:true};
+  }catch(e){
+    return {ok:false, message:'Could not reach the backend: '+e.message};
+  }
+}
+
+// ---------- Pull sync — the other half that makes this genuinely bidirectional ----------
+// Last-write-wins by updated_at. Known, disclosed limitation: two devices changing the exact
+// same record at nearly the same moment can have one silently overwrite the other — reasonable
+// for a first real version, not yet the "reconciled" approach a very large deployment may want.
+async function pullShopData(fullPull){
+  if(!backendLive() || !shopId) return;
+  try{
+    // Staff — never overwrite a PIN with something older; skip re-pulling your own live session
+    const staffRes = await fetch(`${supaUrl}/rest/v1/staff?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(staffRes.ok){
+      const remoteStaff = await staffRes.json();
+      const localStaff = await getAll('users');
+      for(const rs of remoteStaff){
+        const ls = localStaff.find(u=>u.id===rs.id);
+        if(!ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
+          await put('users', {id:rs.id, name:rs.name, role:rs.role, pin:rs.pin, active:rs.active!==false, updated_at:rs.updated_at});
+        }
+      }
+    }
+    // Products / stock
+    const prodRes = await fetch(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(prodRes.ok){
+      const remoteProducts = await prodRes.json();
+      const localProducts = await getAll('products');
+      for(const rp of remoteProducts){
+        const lp = localProducts.find(p=>p.sku===rp.sku);
+        if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
+          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, updated_at:rp.updated_at});
+        }
+      }
+    }
+    // Shared settings (business profile, business type, VAT, receipt prefs)
+    const settingsRes = await fetch(`${supaUrl}/rest/v1/shop_settings?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(settingsRes.ok){
+      const remoteSettings = await settingsRes.json();
+      for(const rs of remoteSettings){
+        const local = await getSetting(rs.key);
+        if(!local || !local.updated_at || new Date(rs.updated_at) > new Date(local.updated_at)){
+          await put('settings', {key:rs.key, value:rs.value, updated_at:rs.updated_at});
+        }
+      }
+      // re-apply anything that changed so this device reflects it immediately
+      await loadBusinessProfile();
+      await loadSettingsPanelValues();
+    }
+    // Sales from OTHER devices — so the admin can see a cashier's phone sales too
+    const sinceClause = (!fullPull && lastPullSync) ? `&ts=gt.${encodeURIComponent(lastPullSync)}` : '';
+    const salesRes = await fetch(`${supaUrl}/rest/v1/sales?shop_id=eq.${shopId}${sinceClause}&select=*`, {headers: sbHeaders()});
+    if(salesRes.ok){
+      const remoteSales = await salesRes.json();
+      for(const rs of remoteSales){
+        const existing = await new Promise(res=>{ const r=tx('sales').get(rs.id); r.onsuccess=()=>res(r.result); });
+        if(!existing) await put('sales', Object.assign({}, rs, {synced:true}));
+      }
+    }
+    lastPullSync = new Date().toISOString();
+    await put('settings', {key:'last_pull_sync', value:lastPullSync});
+    renderProductGrid(); renderCart();
+  }catch(e){
+    log('Pull sync failed this cycle: '+e.message, 'warn');
+  }
 }
 async function updatePendingBadge(){
   const queue = await getAll('sync_queue');
@@ -1807,7 +2010,9 @@ async function saveVatSettings(showToast){
   const rate = parseFloat($('vatRateInput').value);
   if(isNaN(rate) || rate<0 || rate>100){ toast('Enter a valid VAT rate between 0 and 100'); return; }
   vatRate = rate;
-  await put('settings', {key:'vat', value:{enabled:vatEnabled, rate:vatRate}});
+  const value = {enabled:vatEnabled, rate:vatRate};
+  await put('settings', {key:'vat', value});
+  await queuePush('settings_upsert', {key:'vat', value});
   logAudit('Updated VAT settings', `${vatEnabled?'On':'Off'} @ ${vatRate}%`);
   renderCart(); // refresh the tax line on the till immediately
   if(showToast) toast(vatEnabled ? `VAT on at ${vatRate}%` : 'VAT off');
@@ -2144,12 +2349,15 @@ function populateProfileForm(){
     ? ''
     : 'Not filled in yet — receipts and the till header show "My DukaGO POS" until this is saved.';
   $('tillLabelInput').value = tillLabel;
+  $('shopCodeDisplay').textContent = shopCode || 'Not set up yet';
 }
 $('saveTillLabelBtn').addEventListener('click', async ()=>{
   const label = $('tillLabelInput').value.trim();
   if(!label){ toast('Enter a till label'); return; }
   tillLabel = label;
   await put('settings', {key:'till_label', value:tillLabel});
+  // Deliberately NOT pushed to the shared backend — this is what tells two tills at the
+  // same shop apart, so it has to stay local to this one device, never overwritten by another.
   $('storeSubtitle').textContent = `${tillLabel} · ${$('storeSubtitle').textContent.split(' · ').slice(1).join(' · ')}`;
   logAudit('Updated till label', tillLabel);
   toast('Till label saved');
@@ -2167,10 +2375,11 @@ $('saveProfileBtn').addEventListener('click', async ()=>{
     address: $('profAddress').value.trim(),
   };
   await put('settings', {key:'business_profile', value:businessProfile});
+  await queuePush('settings_upsert', {key:'business_profile', value:businessProfile});
   applyStoreNameToUI();
   logAudit('Updated business profile', `${storeName}${businessProfile.location?' — '+businessProfile.location:''}`);
   $('profileStatus').textContent = 'Saved.';
-  toast('Business profile saved');
+  toast('Business profile saved'+(shopId ? ' — every till at this shop will pick it up' : ''));
 });
 
 async function renderBizGrid(){
@@ -2344,8 +2553,16 @@ async function renderStaffTable(){
       const users2 = await getAll('users');
       const u = users2.find(x=>x.id===id);
       const oldRole = u.role;
+      // Promoting to Admin needs a 6-digit PIN first — don't silently leave an admin
+      // account protected by a short cashier-length PIN.
+      if(sel.value==='admin' && !/^\d{6}$/.test(u.pin)){
+        toast(`Set a 6-digit PIN for ${u.name} first (Change PIN), then promote to Admin`);
+        sel.value = oldRole;
+        return;
+      }
       u.role = sel.value;
       await put('users', u);
+      await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:u.active!==false});
       toast(`${u.name} is now ${sel.value}`);
       logAudit('Changed staff role', `${u.name}: ${oldRole} → ${sel.value}`);
       renderStaffTable();
@@ -2361,22 +2578,28 @@ async function renderStaffTable(){
         await del('users', id);
         toast('Staff member removed');
         logAudit('Removed staff account', `${u.name} (${u.role})`);
+        // Note: removal doesn't currently propagate to other devices — revoke is the
+        // sync-safe way to disable someone; a hard remove is a known local-only gap for now.
       } else if(act==='revoke'){
         if(id===currentUser?.id){ toast("Can't revoke the account you're signed in as"); return; }
         u.active = false; await put('users', u);
+        await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:false});
         toast(u.name+"'s access revoked — their PIN no longer signs in");
         logAudit('Revoked staff access', `${u.name} (${u.role})`);
       } else if(act==='reactivate'){
         u.active = true; await put('users', u);
+        await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:true});
         toast(u.name+"'s access restored");
         logAudit('Reactivated staff access', `${u.name} (${u.role})`);
       } else if(act==='pin'){
-        const newPin = prompt(`New 4-digit PIN for ${u.name}:`);
+        const requiredLen = u.role==='admin' ? 6 : 4;
+        const newPin = prompt(`New ${requiredLen}-digit PIN for ${u.name}:`);
         if(newPin===null) return;
-        if(!/^\d{4}$/.test(newPin)){ toast('PIN must be exactly 4 digits'); return; }
+        if(!new RegExp(`^\\d{${requiredLen}}$`).test(newPin)){ toast(`PIN must be exactly ${requiredLen} digits for ${u.role==='admin'?'an admin':'this role'}`); return; }
         const clash = users2.find(x=>x.id!==id && x.pin===newPin && x.active!==false);
         if(clash){ toast('That PIN is already in use by '+clash.name); return; }
         u.pin = newPin; await put('users', u);
+        await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:u.active!==false});
         toast(u.name+"'s PIN updated");
         logAudit('Changed staff PIN', `${u.name} (${u.role})`);
         if(id===currentUser?.id) currentUser.pin = newPin;
@@ -2389,15 +2612,18 @@ $('addStaffBtn').addEventListener('click', async ()=>{
   const name = $('newStaffName').value.trim();
   const role = $('newStaffRole').value;
   const pin = $('newStaffPin').value.trim();
+  const requiredLen = role==='admin' ? 6 : 4;
   if(!name){ toast('Enter a name'); return; }
-  if(!/^\d{4}$/.test(pin)){ toast('Enter a 4-digit PIN'); return; }
+  if(!new RegExp(`^\\d{${requiredLen}}$`).test(pin)){ toast(`Enter a ${requiredLen}-digit PIN${role==='admin'?' (admin accounts need 6 digits)':''}`); return; }
   const users = await getAll('users');
   const clash = users.find(u=>u.pin===pin && u.active!==false);
   if(clash){ toast('That PIN is already in use by '+clash.name+' — pick a different one'); return; }
-  await put('users', {id:'u_'+Date.now(), name, role, pin, active:true});
+  const newUser = {id:'u_'+Date.now(), name, role, pin, active:true};
+  await put('users', newUser);
+  await queuePush('staff_upsert', newUser);
   $('newStaffName').value=''; $('newStaffPin').value='';
   renderStaffTable();
-  toast(name+' added as '+role);
+  toast(name+' added as '+role+(shopId ? ' — will sync to their phone once they join with your Shop Code' : ''));
   logAudit('Added staff account', `${name} (${role})`);
 });
 
@@ -2557,7 +2783,13 @@ $('lockBackofficeBtn').addEventListener('click', async ()=>{
 });
 
 // ---------- Login screen — silent PIN entry, no name picker ----------
+// Cashiers/supervisors use 4-digit PINs; admin accounts require 6 digits (harder for a
+// cashier to casually observe or guess). Since we don't know in advance which length is
+// being typed, a match is attempted at 4 digits first — if nothing matches, entry continues
+// up to 6 and is tried again there.
 let pinBuffer = '';
+const PIN_LENGTHS = [4, 6];
+const MAX_PIN_LENGTH = 6;
 function updatePinDots(){
   const dots = document.querySelectorAll('#pinDots .pin-dot');
   dots.forEach((d,i)=> d.classList.toggle('filled', i < pinBuffer.length));
@@ -2568,20 +2800,30 @@ function shakePinDots(){
     setTimeout(()=>d.classList.remove('shake'), 350);
   });
 }
+async function tryPinCheckpoint(){
+  if(!PIN_LENGTHS.includes(pinBuffer.length)) return;
+  if(pinBuffer.length === 4){
+    const users = await getAll('users');
+    const match = users.find(x => x.pin===pinBuffer && x.active!==false);
+    if(match){ attemptLogin(); return; }
+    if(pinBuffer.length < MAX_PIN_LENGTH) return; // no 4-digit match — keep accepting more digits, might be an admin PIN
+  }
+  if(pinBuffer.length === MAX_PIN_LENGTH){ attemptLogin(); }
+}
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
   const k = btn.dataset.k;
   if(k==='clear'){ pinBuffer=''; updatePinDots(); return; }
   if(k==='back'){ pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
-  if(pinBuffer.length>=4) return;
+  if(pinBuffer.length>=MAX_PIN_LENGTH) return;
   pinBuffer += k;
   updatePinDots();
-  if(pinBuffer.length===4) setTimeout(attemptLogin, 120);
+  setTimeout(tryPinCheckpoint, 120);
 });
 // A physical/USB numeric keypad or keyboard works too
 document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
-  if(/^[0-9]$/.test(e.key) && pinBuffer.length<4){ pinBuffer+=e.key; updatePinDots(); if(pinBuffer.length===4) setTimeout(attemptLogin,120); }
+  if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){ pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120); }
   if(e.key==='Backspace'){ pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
 });
 // ---------- Login screen scene rotation ----------
@@ -2633,11 +2875,11 @@ async function attemptLogin(){
   try{ sessionStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
   toast(resumedCart ? `Welcome back, ${u.name} — your cart is just as you left it` : 'Signed in as '+u.name);
   logAudit('Signed in', resumedCart ? `resumed a paused cart (${cart.length} item(s))` : '');
-  if(u.role==='admin' && u.pin==='1234'){
+  if(u.role==='admin' && u.pin==='123456'){
     setTimeout(()=>toast("You're still on the default PIN — change it under Admin → Staff"), 2200);
   }
   if(u.role==='admin' && !businessProfile.storeName){
-    setTimeout(()=>toast("Set up your business profile under Admin → Business"), u.pin==='1234' ? 4600 : 2200);
+    setTimeout(()=>toast("Set up your business profile under Admin → Business"), u.pin==='123456' ? 4600 : 2200);
   }
   scanInput.focus();
 }
@@ -2686,6 +2928,17 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 (async function init(){
   $('themeToggleBtn').textContent = document.documentElement.getAttribute('data-theme')==='dark' ? '☀️' : '🌙';
   db = await openDB();
+  await loadShopIdentity();
+  if(!shopId){
+    // Genuinely first-ever boot on this device — find out if it's setting up a new shop
+    // or joining one that already exists, before seeding any default data.
+    $('shopOnboardingScreen').classList.remove('hide');
+    return; // finishBoot() runs once the person picks a path, see the handlers below
+  }
+  await finishBoot();
+})();
+
+async function finishBoot(){
   await seedIfEmpty();
   await seedUsersIfEmpty();
   await ensureTodaySnapshot();
@@ -2713,7 +2966,48 @@ $('themeToggleBtn').addEventListener('click', ()=>{
     try{ await navigator.serviceWorker.register('sw.js'); log('Offline app-shell caching enabled.','ok'); }
     catch(e){ log('Service worker not registered — page reload still needs network this time (see note in Sync & Setup).','warn'); }
   }
-})();
+}
+
+// ---------- Shop onboarding screen wiring ----------
+$('shopSetupNewBtn').addEventListener('click', async ()=>{
+  const confirmed = confirm('Create a brand-new, empty shop on this device?\n\nOnly choose this if you\'ve genuinely never set up a shop before. If you\'re rejoining a shop you already created, cancel this and use "I\'m joining an existing shop" with your Shop Code instead.');
+  if(!confirmed) return;
+  $('shopChoiceStep').style.display='none';
+  $('shopSetupStep').style.display='block';
+  $('shopSetupStatus').textContent = 'Setting up your shop…';
+  await setupNewShop();
+  $('shopOnboardingScreen').classList.add('hide');
+  await finishBoot();
+  setTimeout(()=>toast(`Your Shop Code is ${shopCode} — give it to any cashier joining on their own phone`), 1500);
+});
+$('shopJoinExistingBtn').addEventListener('click', ()=>{
+  $('shopChoiceStep').style.display='none';
+  $('shopJoinStep').style.display='block';
+  $('shopCodeInput').focus();
+});
+$('shopJoinBackBtn').addEventListener('click', ()=>{
+  $('shopJoinStep').style.display='none';
+  $('shopChoiceStep').style.display='block';
+  $('shopJoinStatus').textContent='';
+});
+$('shopJoinConfirmBtn').addEventListener('click', async ()=>{
+  const code = $('shopCodeInput').value.trim().toUpperCase();
+  if(!code){ $('shopJoinStatus').textContent='Enter a shop code'; return; }
+  $('shopJoinStatus').style.color='var(--muted)';
+  $('shopJoinStatus').textContent='Joining…';
+  const result = await joinExistingShop(code);
+  if(result.ok){
+    $('shopJoinStep').style.display='none';
+    $('shopSetupStep').style.display='block';
+    $('shopSetupStatus').textContent = 'Joined! Pulling in the shop\'s staff and products…';
+    $('shopOnboardingScreen').classList.add('hide');
+    await finishBoot();
+    toast('Joined the shop — sign in with the PIN your admin gave you');
+  } else {
+    $('shopJoinStatus').style.color='var(--clay)';
+    $('shopJoinStatus').textContent = result.message;
+  }
+});
 </script>
 <div id="receiptPrintArea"></div>
 </body>
