@@ -1830,6 +1830,17 @@ async function registerNewShop(){
   }
   logAudit('Shop set up');
 }
+// Updates the shops table's name column once a real business name is known, so it's
+// identifiable in the Supabase dashboard among many shops instead of staying "New shop".
+async function updateShopNameInBackend(name){
+  if(!backendLive() || !shopId) return;
+  try{
+    await fetch(`${supaUrl}/rest/v1/shops?id=eq.${shopId}`, {
+      method:'PATCH', headers: sbHeaders({'Prefer':'return=minimal'}),
+      body: JSON.stringify({name})
+    });
+  }catch(e){ /* cosmetic only — never block the actual profile save over this */ }
+}
 // Looks up a PIN across EVERY shop on the platform — this is what lets someone type their own
 // PIN on a brand-new device and be found automatically, with no code to type anywhere.
 async function lookupPinGlobally(pinValue){
@@ -2361,6 +2372,7 @@ $('saveProfileBtn').addEventListener('click', async ()=>{
   };
   await put('settings', {key:'business_profile', value:businessProfile});
   await queuePush('settings_upsert', {key:'business_profile', value:businessProfile});
+  await updateShopNameInBackend(storeName); // so it's identifiable in the shops table, not stuck as "New shop"
   applyStoreNameToUI();
   logAudit('Updated business profile', `${storeName}${businessProfile.location?' — '+businessProfile.location:''}`);
   $('profileStatus').textContent = 'Saved.';
