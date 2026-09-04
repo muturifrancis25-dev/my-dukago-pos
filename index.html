@@ -570,6 +570,7 @@
     <div class="panel">
       <h3>Audit log</h3>
       <p class="hint">Every sign-in, staff change, business-type change, void approval, and admin-access event, timestamped. This tab is visible only when you're actually signed in as an Admin — a manager-override PIN can't reach it.</p>
+      <button class="primary-btn" id="exportAuditBtn" style="margin-bottom:14px;">⬇ Export to Excel</button>
       <div class="table-scroll"><table><thead><tr><th>Time</th><th>Who</th><th>Role</th><th>Action</th><th>Details</th></tr></thead>
       <tbody id="auditTable"></tbody></table></div>
     </div>
@@ -578,6 +579,7 @@
   <!-- ============ REPORTS (admin) ============ -->
   <section class="view" id="view-reports">
     <div class="cat-row" id="reportPeriodRow" style="margin-bottom:14px;"></div>
+    <button class="primary-btn" id="exportReportsBtn" style="margin-bottom:14px;">⬇ Export to Excel</button>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="slabel" id="statSalesLabel">Sales — today</div><div class="sval" id="statSalesCount">0</div></div>
@@ -1736,6 +1738,126 @@ async function renderReports(){
     });
   }
 }
+
+// ---------- Excel export — Reports and Audit Log ----------
+// Loaded on demand, only when someone actually clicks Export — the core offline selling
+// experience never depends on this or needs any internet connection for it.
+function loadSheetJS(){
+  return new Promise((resolve, reject)=>{
+    if(window.XLSX){ resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = ()=> resolve();
+    script.onerror = ()=> reject(new Error('Could not load the Excel export library — check the internet connection'));
+    document.head.appendChild(script);
+    setTimeout(()=> reject(new Error('Timed out loading the Excel export library')), 10000);
+  });
+}
+function safeFilenamePart(s){
+  return (s||'My-DukaGO-POS').trim().replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'My-DukaGO-POS';
+}
+$('exportReportsBtn').addEventListener('click', async ()=>{
+  const btn = $('exportReportsBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Preparing file…'; btn.disabled = true;
+  try{
+    await loadSheetJS();
+    const periodLabel = REPORT_PERIODS.find(p=>p.id===reportPeriod).label;
+    const allSales = await getAll('sales');
+    const allMovements = await getAll('stock_movements');
+    const sales = allSales.filter(s => withinPeriod(s.ts, reportPeriod) && (!s.btypes || s.btypes.some(bt => currentBusinessTypes.includes(bt))))
+      .sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    const movements = allMovements.filter(m => withinPeriod(m.ts, reportPeriod) && (!m.btype || currentBusinessTypes.includes(m.btype)))
+      .sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+
+    // Sheet 1: every sale, one row per sale, full line-item detail flattened into one cell
+    const salesRows = sales.map(s => ({
+      'Date/Time': new Date(s.ts).toLocaleString('en-KE',{hour12:false}),
+      'Cashier': s.cashier || '',
+      'Till': s.till || '',
+      'Items': s.lines.map(l=>`${l.qty}x ${l.name}`).join(', '),
+      'Subtotal': s.subtotal,
+      'VAT': s.tax || 0,
+      'Total': s.total,
+      'Payment method': s.method,
+      'M-Pesa code': s.mpesaCode || '',
+      'Synced': s.synced ? 'Yes' : 'No',
+    }));
+    const revenue = sales.reduce((a,x)=>a+x.total,0);
+    const vatCollected = sales.reduce((a,x)=>a+(x.tax||0),0);
+    const cogs = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+(l.qty*(l.cost||0)),0),0);
+    const purchasesCost = movements.reduce((a,m)=>a+(m.qty*(m.cost||0)),0);
+    const itemCount = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+l.qty,0),0);
+    const cashTotal = sales.filter(s=>s.method==='cash').reduce((a,x)=>a+x.total,0);
+    const mpesaTotal = sales.filter(s=>s.method==='mpesa').reduce((a,x)=>a+x.total,0);
+
+    // Sheet 2: the same summary numbers shown on screen, so the file matches what was seen
+    const summaryRows = [
+      {Metric:'Period', Value: periodLabel},
+      {Metric:'Business type(s)', Value: currentBusinessTypes.map(id=>(allBusinessTypes()[id]||{}).label||id).join(' + ')},
+      {Metric:'Sales count', Value: sales.length},
+      {Metric:'Revenue', Value: revenue},
+      {Metric:'VAT collected (not counted in Profit)', Value: vatCollected},
+      {Metric:'Cost of goods sold', Value: cogs},
+      {Metric:'Profit', Value: (revenue - vatCollected) - cogs},
+      {Metric:'Items sold', Value: itemCount},
+      {Metric:'Stock purchased (cost)', Value: purchasesCost},
+      {Metric:'', Value:''},
+      {Metric:'Cash sales total', Value: cashTotal},
+      {Metric:'M-Pesa sales total', Value: mpesaTotal},
+      {Metric:'', Value:''},
+      {Metric:'Exported', Value: new Date().toLocaleString('en-KE',{hour12:false})},
+      {Metric:'Shop', Value: businessProfile.storeName || 'My DukaGO POS'},
+    ];
+
+    // Sheet 3: stock received in the period
+    const purchaseRows = movements.map(m => ({
+      'Date/Time': new Date(m.ts).toLocaleString('en-KE',{hour12:false}),
+      'Product': m.name,
+      'Qty received': m.qty,
+      'Cost': m.cost ? m.cost*m.qty : '',
+    }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salesRows), 'Sales');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(purchaseRows), 'Stock received');
+    const filename = `${safeFilenamePart(businessProfile.storeName)}-Sales-${periodLabel.replace(/\s+/g,'')}-${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    logAudit('Exported sales report to Excel', `${periodLabel} — ${sales.length} sale(s)`);
+    toast('Excel file downloaded');
+  }catch(e){
+    toast('Export failed: '+e.message);
+  }finally{
+    btn.textContent = originalText; btn.disabled = false;
+  }
+});
+$('exportAuditBtn').addEventListener('click', async ()=>{
+  const btn = $('exportAuditBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Preparing file…'; btn.disabled = true;
+  try{
+    await loadSheetJS();
+    const logs = (await getAll('audit_log')).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+    const rows = logs.map(l => ({
+      'Date/Time': new Date(l.ts).toLocaleString('en-KE',{hour12:false}),
+      'Who': l.actor || '',
+      'Role': l.role || '',
+      'Action': l.action || '',
+      'Details': l.details || '',
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Audit Log');
+    const filename = `${safeFilenamePart(businessProfile.storeName)}-AuditLog-${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    logAudit('Exported audit log to Excel', `${logs.length} entries`);
+    toast('Excel file downloaded');
+  }catch(e){
+    toast('Export failed: '+e.message);
+  }finally{
+    btn.textContent = originalText; btn.disabled = false;
+  }
+});
 
 // ---------- Sync engine ----------
 // supaUrl/supaKey default to YOUR platform's own Supabase project (baked in above), so
