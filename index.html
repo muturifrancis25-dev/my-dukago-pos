@@ -1120,7 +1120,7 @@ async function seedIfEmpty(){
 }
 let CAT_TO_TYPE = {}; // category name -> business type id, built on merge, used to file new stock correctly
 
-async function applyBusinessTypes(typeIds, {announce=true} = {}){
+async function applyBusinessTypes(typeIds, {announce=true, pushToBackend=true} = {}){
   const types = allBusinessTypes();
   const ids = (Array.isArray(typeIds) ? typeIds : [typeIds]).filter(id => types[id]);
   if(ids.length===0) return;
@@ -1151,7 +1151,11 @@ async function applyBusinessTypes(typeIds, {announce=true} = {}){
   activeCat = 'All';
   currentBusinessTypes = ids;
   await put('settings', {key:'active_business_types', value: ids});
-  await queuePush('settings_upsert', {key:'active_business_types', value: ids});
+  // Only push a REAL, deliberate choice — never the fallback default used when booting or
+  // restoring, and never a value that just came FROM a pull. Pushing indiscriminately here
+  // is what let a fresh device's temporary "duka" default silently overwrite a shop's real
+  // business type in the backend before that device had pulled the real setting down.
+  if(pushToBackend) await queuePush('settings_upsert', {key:'active_business_types', value: ids});
 
   const subtitle = selected.length>1 ? selected.map(t=>t.subtitle).join(' + ') : selected[0].subtitle;
   $('storeSubtitle').textContent = `${tillLabel} · ${subtitle}`;
@@ -1916,15 +1920,21 @@ async function pullShopData(fullPull){
     const settingsRes = await fetch(`${supaUrl}/rest/v1/shop_settings?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(settingsRes.ok){
       const remoteSettings = await settingsRes.json();
+      let pulledBusinessTypes = null;
       for(const rs of remoteSettings){
         const local = await getSetting(rs.key);
         if(!local || !local.updated_at || new Date(rs.updated_at) > new Date(local.updated_at)){
           await put('settings', {key:rs.key, value:rs.value, updated_at:rs.updated_at});
+          if(rs.key==='active_business_types') pulledBusinessTypes = rs.value;
         }
       }
-      // re-apply anything that changed so this device reflects it immediately
+      // Re-apply anything that changed so this device actually reflects it on screen right
+      // away — saving to storage alone isn't enough, the live UI needs updating too. Business
+      // type specifically must NOT re-push here (pushToBackend:false) — it just came FROM the
+      // backend, so pushing it back is redundant, and doing so was the other half of this bug.
       await loadBusinessProfile();
       await loadSettingsPanelValues();
+      if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
     }
     // Sales from OTHER devices — so the admin can see a cashier's phone sales too
     const sinceClause = (!fullPull && lastPullSync) ? `&ts=gt.${encodeURIComponent(lastPullSync)}` : '';
@@ -3049,7 +3059,7 @@ $('themeToggleBtn').addEventListener('click', ()=>{
     const legacy = await getSetting('business_type'); // migrate from the old single-type setting
     savedTypes = legacy ? {value:[legacy.value]} : null;
   }
-  await applyBusinessTypes(savedTypes ? savedTypes.value : ['duka'], {announce:false});
+  await applyBusinessTypes(savedTypes ? savedTypes.value : ['duka'], {announce:false, pushToBackend:false});
   isOnline = navigator.onLine; // start from the browser's real network state, not a blind guess
   await updatePendingBadge();
   $('toggleNetBtn').textContent = isOnline ? 'Force offline (test)' : 'Force online (test)';
