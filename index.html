@@ -2012,6 +2012,8 @@ async function loadSettingsPanelValues(){
   if(!gdriveAccessToken){
     $('gdriveStatus').textContent = gdriveClientId ? 'Not connected yet — tap Connect.' : 'Save a Client ID first.';
   }
+  renderCart(); // if VAT changed on another device and just got pulled in, reflect it on an
+                // active till screen immediately — don't wait for the next unrelated cart edit
 }
 async function saveVatSettings(showToast){
   const rate = parseFloat($('vatRateInput').value);
