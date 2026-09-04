@@ -475,11 +475,8 @@
       <p id="profileStatus" class="hint" style="margin:10px 0 0;"></p>
     </div>
     <div class="panel">
-      <h3>Your Shop Code</h3>
-      <p class="hint">Give this to anyone joining your shop on their own phone — cashier, supervisor, another till. They'll enter it once, and their device pulls in your staff list, products, and settings automatically.</p>
-      <div style="background:var(--bg); border-radius:10px; padding:16px; text-align:center;">
-        <div id="shopCodeDisplay" style="font-family:var(--mono); font-size:28px; font-weight:800; letter-spacing:4px; color:var(--teal-dark);">—</div>
-      </div>
+      <h3>How staff join this shop</h3>
+      <p class="hint">There's no code to hand out — a staff member's own PIN <i>is</i> their identity. Add them under Staff below with their name, role, and a PIN, then tell them that PIN. They can type it into this same app on their own phone, anywhere, anytime — the app finds this shop automatically and pulls everything in.</p>
     </div>
     <div class="panel">
       <h3>This till / pay station</h3>
@@ -534,7 +531,7 @@
   <section class="view" id="view-staff">
     <div class="panel">
       <h3>Add staff</h3>
-      <p class="hint">Each person needs their own PIN — signing in is PIN-only, so My DukaGO POS identifies who's signing in from the PIN itself. No duplicates allowed.</p>
+      <p class="hint">Each person needs their own PIN — checked as unique across every shop on the platform, not just this one. Give someone their PIN and they can sign in with it on their own phone, anywhere, and the app finds this shop automatically.</p>
       <div class="form-row">
         <input id="newStaffName" placeholder="Full name">
         <select id="newStaffRole">
@@ -735,37 +732,24 @@
 </main>
 
 <!-- Login screen — silent PIN entry, identity is resolved from the PIN itself -->
-<!-- Shop onboarding — shown only on a genuinely first-ever boot, before any login screen.
-     This is what makes "cashier joins on her own phone" possible: it's how a device learns
-     which shop it belongs to. -->
-<div class="login-screen hide" id="shopOnboardingScreen">
-  <div class="login-card" style="text-align:left;">
-    <div class="login-mark" style="margin:0 auto 14px;">MD</div>
-    <h2 style="text-align:center;">Welcome to My DukaGO POS</h2>
-    <p style="text-align:center; margin-bottom:18px;">Is this device setting up a brand-new shop, or joining one that already exists?</p>
-
-    <div id="shopChoiceStep">
-      <button class="modal-confirm" id="shopSetupNewBtn" style="width:100%; padding:14px; margin-bottom:10px;">I'm setting up a new shop</button>
-      <button class="modal-cancel" id="shopJoinExistingBtn" style="width:100%; padding:14px;">I'm joining an existing shop</button>
-      <p style="font-size:11px; color:var(--muted); text-align:center; margin-top:14px;">
-        Already set this shop up before, and seeing this screen again? That usually means the browser lost its data (a
-        clear, a reinstall, a different browser). Choose <b>"joining an existing shop"</b> and enter your original Shop
-        Code — picking "setting up a new shop" here creates a second, separate, empty shop instead of getting your real one back.
-      </p>
+<!-- Set Admin PIN screen — shown automatically the moment the default 1234 is typed on a
+     device that's never been set up before. This is the entire "onboarding" experience —
+     no menu, no choice, nothing to explain to a shopkeeper. Type 1234, set a real PIN, done. -->
+<div class="login-screen hide" id="setAdminPinScreen">
+  <div class="login-card">
+    <div class="login-mark">MD</div>
+    <h2>Welcome!</h2>
+    <p id="setPinStepLabel">Choose a 6-digit PIN — this becomes your permanent Admin login for this shop.</p>
+    <div class="pin-dots" id="setPinDots">
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
-
-    <div id="shopJoinStep" style="display:none;">
-      <p style="font-size:12.5px; color:var(--muted);">Ask your shop's admin for the Shop Code they were given when they set up — it looks like <code>KAMAU4X</code>.</p>
-      <input id="shopCodeInput" type="text" placeholder="Shop Code" style="width:100%; text-align:center; letter-spacing:2px; font-size:18px; font-family:var(--mono); text-transform:uppercase; padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px;">
-      <p id="shopJoinStatus" style="font-size:11.5px; color:var(--clay); min-height:16px; margin:0 0 10px;"></p>
-      <button class="modal-confirm" id="shopJoinConfirmBtn" style="width:100%; padding:13px;">Join this shop</button>
-      <button class="modal-cancel" id="shopJoinBackBtn" style="width:100%; padding:11px; margin-top:8px;">Back</button>
+    <div class="keypad" id="setPinKeypad">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
     </div>
-
-    <div id="shopSetupStep" style="display:none; text-align:center;">
-      <div class="mpesa-spinner" style="margin:20px auto;"></div>
-      <p id="shopSetupStatus" style="font-size:13px;">Setting up your shop…</p>
-    </div>
+    <p id="setPinError" style="color:var(--clay); font-size:12px; min-height:16px; margin-top:10px; text-align:center;"></p>
   </div>
 </div>
 
@@ -896,10 +880,10 @@
 
 <script>
 /* =========================================================================
-   SOKO — role-based till: Cashier / Supervisor / Admin
-   Demo PIN for the default Admin account: 123456
-   (in production each PIN is set per-person at onboarding and checked
-   against the backend, not stored client-side)
+   My DukaGO POS — role-based till: Cashier / Supervisor / Admin
+   Type 1234 on a device that's never been set up before to start a new shop —
+   it immediately prompts for a real 6-digit Admin PIN, checked for uniqueness
+   across the whole platform. 1234 itself is never a stored, working credential.
    ========================================================================= */
 const OUTLET_ID = 'outlet_001';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
@@ -1061,10 +1045,9 @@ let tillLabel = 'Till 1'; // configurable per device — matters for a supermark
 // the real default every deployed copy of the app should ship with). The anon key is meant to
 // be public — Supabase's Row Level Security policies are what actually keep one shop's data
 // safe from another, not secrecy of this key.
-const PLATFORM_SUPABASE_URL = '';
-const PLATFORM_SUPABASE_KEY = '';
-let shopId = null;   // internal UUID, never shown to anyone
-let shopCode = null; // short human-shareable code, e.g. "KAMAU4X"
+const PLATFORM_SUPABASE_URL = 'https://duoshfyiiplvtoasxghn.supabase.co';
+const PLATFORM_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1b3NoZnlpaXBsdnRvYXN4Z2huIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MTUxMzYsImV4cCI6MjEwNDA5MTEzNn0.jRY-NwwTzjsTH8xORB03fw0lVaNps0PcZE_WbBxyMsk';
+let shopId = null; // internal UUID, never shown to anyone — a PIN is what identifies a person now
 let lastPullSync = null;
 let receiptAction = 'ask'; // 'ask' | 'print' | 'pdf' | 'skip' — how receipts are offered after a sale
 let receiptPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — affects the printable receipt layout only
@@ -1190,20 +1173,9 @@ async function applyBusinessTypes(typeIds, {announce=true} = {}){
     logAudit(selected.length>1 ? 'Combined business types' : 'Switched business type', label);
   }
 }
-async function seedUsersIfEmpty(){
-  if((await getAll('users')).length) return;
-  // Fresh install: only the Admin account exists, on the default PIN.
-  // Admin signs in with 123456, then creates every other account from Staff.
-  // Admin PINs are 6 digits — longer than staff PINs on purpose, so a cashier
-  // glancing at the keypad can't as easily pick up the admin PIN by watching.
-  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:'123456', active:true};
-  await put('users', adminUser);
-  // This founding admin account has to sync out too — otherwise the very person who set
-  // up the shop could never sign in as themselves on a second device, only staff they
-  // add afterward would. Only push if this device already belongs to a shop (it will,
-  // by the time this runs during either the new-shop or join-shop boot path).
-  if(shopId) await queuePush('staff_upsert', adminUser);
-}
+// No auto-seeded admin anymore — "1234" is a pure bootstrap trigger recognized at login,
+// never a real stored credential. The first real user only gets created once someone
+// finishes the "set your Admin PIN" flow that 1234 triggers. See tryPinCheckpoint().
 
 function fmtKsh(n){ return 'KSh ' + n.toLocaleString('en-KE'); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove('show'),1800); }
@@ -1808,6 +1780,10 @@ async function queuePush(type, payload){
   const stamped = Object.assign({}, payload, {updated_at: new Date().toISOString()});
   await put('sync_queue', {type, payload: stamped, ts: Date.now()});
   updatePendingBadge();
+  // Try to push immediately rather than waiting for the periodic interval — matters most for
+  // staff: someone just added as a cashier may walk straight to her own phone within seconds,
+  // and she can only be found there once her record has actually reached the backend.
+  if(isOnline) runSyncLoop();
 }
 async function runSyncLoop(){
   if(!isOnline || !shopId) return;
@@ -1829,59 +1805,69 @@ async function runSyncLoop(){
   if(live) await pullShopData();
 }
 
-// ---------- Shop identity: what makes "cashier joins on her own phone" possible ----------
-function makeShopCode(){
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I — avoids look-alike mistakes when read aloud
-  let code = '';
-  for(let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
-  return code;
-}
+// ---------- Shop identity: a PIN IS the identity now — no code to generate or share ----------
 function makeShopId(){
   if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
   return 'shop_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
 }
 async function loadShopIdentity(){
   const savedId = await getSetting('shop_id');
-  const savedCode = await getSetting('shop_code');
   shopId = savedId ? savedId.value : null;
-  shopCode = savedCode ? savedCode.value : null;
 }
-async function setupNewShop(){
+// Creates the shop record itself. Does NOT create any user — that only happens once the new
+// admin PIN is confirmed (see the setAdminPinScreen flow), so a half-finished setup never
+// leaves a real, usable "1234" account sitting in the database.
+async function registerNewShop(){
   shopId = makeShopId();
-  shopCode = makeShopCode();
   await put('settings', {key:'shop_id', value:shopId});
-  await put('settings', {key:'shop_code', value:shopCode});
   if(backendLive()){
     try{
       await fetch(`${supaUrl}/rest/v1/shops`, {
         method:'POST', headers: sbHeaders({'Prefer':'return=minimal'}),
-        body: JSON.stringify({id:shopId, code:shopCode, name: businessProfile.storeName || 'New shop'})
+        body: JSON.stringify({id:shopId, name:'New shop'})
       });
     }catch(e){ log('Could not register shop with backend yet — will still work locally: '+e.message, 'warn'); }
   }
-  logAudit('Shop set up', `Code: ${shopCode}`);
+  logAudit('Shop set up');
 }
-async function joinExistingShop(code){
-  if(!backendLive()){
-    return {ok:false, message:'This device isn\'t connected to the shared backend yet — ask whoever manages the app to finish that setup first.'};
-  }
+// Looks up a PIN across EVERY shop on the platform — this is what lets someone type their own
+// PIN on a brand-new device and be found automatically, with no code to type anywhere.
+async function lookupPinGlobally(pinValue){
+  if(!backendLive()) return null;
   try{
-    const res = await fetch(`${supaUrl}/rest/v1/shops?code=eq.${encodeURIComponent(code)}&select=id,code,name`, {
-      headers: sbHeaders()
-    });
-    if(!res.ok) return {ok:false, message:'Could not reach the backend — check your connection and try again.'};
+    const res = await fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()});
+    if(!res.ok) return null;
     const rows = await res.json();
-    if(!rows || rows.length===0) return {ok:false, message:'No shop found with that code — double-check it with your admin.'};
-    shopId = rows[0].id;
-    shopCode = rows[0].code;
-    await put('settings', {key:'shop_id', value:shopId});
-    await put('settings', {key:'shop_code', value:shopCode});
-    await pullShopData(true); // full pull — this device has nothing locally yet
-    logAudit('Joined shop', `Code: ${shopCode}`);
-    return {ok:true};
-  }catch(e){
-    return {ok:false, message:'Could not reach the backend: '+e.message};
+    return (rows && rows.length) ? rows[0] : null;
+  }catch(e){ return null; }
+}
+// Pulls one specific shop's data down by shop_id — used once a global PIN lookup reveals
+// which shop a person belongs to.
+async function pullSpecificShop(targetShopId){
+  const prevShopId = shopId;
+  shopId = targetShopId;
+  await put('settings', {key:'shop_id', value:shopId});
+  await pullShopData(true);
+  logAudit('Auto-joined shop via PIN lookup', prevShopId ? `was ${prevShopId}` : 'first shop on this device');
+}
+// Checked before saving ANY new or changed PIN — local first (works offline), then the whole
+// platform if online. A PIN must be unique everywhere, not just within one shop, since a PIN
+// alone is what identifies a person now.
+async function isPinGloballyUnique(pinValue, excludeUserId){
+  const localUsers = await getAll('users');
+  const localClash = localUsers.find(u=>u.pin===pinValue && u.id!==excludeUserId && u.active!==false);
+  if(localClash) return {unique:false, ownerName:localClash.name, checkedRemote:false};
+  if(backendLive()){
+    try{
+      const res = await fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=id,name`, {headers: sbHeaders()});
+      if(res.ok){
+        const rows = await res.json();
+        const remoteClash = rows.find(r=>r.id!==excludeUserId);
+        if(remoteClash) return {unique:false, ownerName:remoteClash.name, checkedRemote:true};
+      }
+    }catch(e){ /* couldn't verify remotely — fall through as locally-unique-but-unconfirmed */ }
   }
+  return {unique:true, checkedRemote: backendLive()};
 }
 
 // ---------- Pull sync — the other half that makes this genuinely bidirectional ----------
@@ -2349,7 +2335,6 @@ function populateProfileForm(){
     ? ''
     : 'Not filled in yet — receipts and the till header show "My DukaGO POS" until this is saved.';
   $('tillLabelInput').value = tillLabel;
-  $('shopCodeDisplay').textContent = shopCode || 'Not set up yet';
 }
 $('saveTillLabelBtn').addEventListener('click', async ()=>{
   const label = $('tillLabelInput').value.trim();
@@ -2596,8 +2581,8 @@ async function renderStaffTable(){
         const newPin = prompt(`New ${requiredLen}-digit PIN for ${u.name}:`);
         if(newPin===null) return;
         if(!new RegExp(`^\\d{${requiredLen}}$`).test(newPin)){ toast(`PIN must be exactly ${requiredLen} digits for ${u.role==='admin'?'an admin':'this role'}`); return; }
-        const clash = users2.find(x=>x.id!==id && x.pin===newPin && x.active!==false);
-        if(clash){ toast('That PIN is already in use by '+clash.name); return; }
+        const uniqueCheck = await isPinGloballyUnique(newPin, u.id);
+        if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
         u.pin = newPin; await put('users', u);
         await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:u.active!==false});
         toast(u.name+"'s PIN updated");
@@ -2615,15 +2600,14 @@ $('addStaffBtn').addEventListener('click', async ()=>{
   const requiredLen = role==='admin' ? 6 : 4;
   if(!name){ toast('Enter a name'); return; }
   if(!new RegExp(`^\\d{${requiredLen}}$`).test(pin)){ toast(`Enter a ${requiredLen}-digit PIN${role==='admin'?' (admin accounts need 6 digits)':''}`); return; }
-  const users = await getAll('users');
-  const clash = users.find(u=>u.pin===pin && u.active!==false);
-  if(clash){ toast('That PIN is already in use by '+clash.name+' — pick a different one'); return; }
+  const uniqueCheck = await isPinGloballyUnique(pin, null);
+  if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
   const newUser = {id:'u_'+Date.now(), name, role, pin, active:true};
   await put('users', newUser);
   await queuePush('staff_upsert', newUser);
   $('newStaffName').value=''; $('newStaffPin').value='';
   renderStaffTable();
-  toast(name+' added as '+role+(shopId ? ' — will sync to their phone once they join with your Shop Code' : ''));
+  toast(name+' added as '+role+' — they can sign in with this PIN on their own phone, anywhere');
   logAudit('Added staff account', `${name} (${role})`);
 });
 
@@ -2783,10 +2767,11 @@ $('lockBackofficeBtn').addEventListener('click', async ()=>{
 });
 
 // ---------- Login screen — silent PIN entry, no name picker ----------
-// Cashiers/supervisors use 4-digit PINs; admin accounts require 6 digits (harder for a
-// cashier to casually observe or guess). Since we don't know in advance which length is
-// being typed, a match is attempted at 4 digits first — if nothing matches, entry continues
-// up to 6 and is tried again there.
+// Cashiers/supervisors use 4-digit PINs; admin accounts use 6 digits (harder for a cashier to
+// casually observe or guess). A match is attempted at 4 digits first, then at 6, checking this
+// device's own local staff first, then — if nothing local matches and it isn't the "1234"
+// bootstrap trigger — the whole platform. That's what lets a PIN alone find its shop on a
+// brand-new device, with nothing to type but the PIN itself.
 let pinBuffer = '';
 const PIN_LENGTHS = [4, 6];
 const MAX_PIN_LENGTH = 6;
@@ -2802,13 +2787,36 @@ function shakePinDots(){
 }
 async function tryPinCheckpoint(){
   if(!PIN_LENGTHS.includes(pinBuffer.length)) return;
-  if(pinBuffer.length === 4){
-    const users = await getAll('users');
-    const match = users.find(x => x.pin===pinBuffer && x.active!==false);
-    if(match){ attemptLogin(); return; }
-    if(pinBuffer.length < MAX_PIN_LENGTH) return; // no 4-digit match — keep accepting more digits, might be an admin PIN
+
+  // The default bootstrap trigger — only means anything on a device that's never been set up.
+  if(pinBuffer.length===4 && pinBuffer==='1234' && !shopId){
+    const enteredPin = pinBuffer;
+    pinBuffer=''; updatePinDots();
+    beginSetAdminPinFlow();
+    return;
   }
-  if(pinBuffer.length === MAX_PIN_LENGTH){ attemptLogin(); }
+
+  // This device's own local staff first — works instantly, works offline.
+  const users = await getAll('users');
+  const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
+  if(localMatch){ attemptLogin(); return; }
+
+  // Not found locally. If online, check the whole platform — this is what lets someone
+  // type their own real PIN on a fresh device and be found automatically, no code needed.
+  if(isOnline && backendLive()){
+    const remoteMatch = await lookupPinGlobally(pinBuffer);
+    if(remoteMatch){
+      await pullSpecificShop(remoteMatch.shop_id);
+      attemptLogin(); // local data now has this person in it — try again
+      return;
+    }
+  }
+
+  if(pinBuffer.length < MAX_PIN_LENGTH) return; // might still be a 6-digit PIN in progress
+  // Nothing matched at either length, anywhere.
+  toast('Incorrect PIN');
+  shakePinDots();
+  pinBuffer=''; setTimeout(updatePinDots, 200);
 }
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
@@ -2826,6 +2834,83 @@ document.addEventListener('keydown', e=>{
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){ pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120); }
   if(e.key==='Backspace'){ pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
 });
+
+// ---------- Set Admin PIN screen — what "1234" on a fresh device leads into ----------
+let setPinStage = 'enter';
+let setPinFirstEntry = '';
+let setPinBuffer = '';
+function updateSetPinDots(){
+  const dots = document.querySelectorAll('#setPinDots .pin-dot');
+  dots.forEach((d,i)=> d.classList.toggle('filled', i < setPinBuffer.length));
+}
+function shakeSetPinDots(){
+  document.querySelectorAll('#setPinDots .pin-dot').forEach(d=>{
+    d.classList.add('shake'); setTimeout(()=>d.classList.remove('shake'), 350);
+  });
+}
+function resetSetPinFlow(message){
+  setPinStage='enter'; setPinFirstEntry=''; setPinBuffer='';
+  $('setPinStepLabel').textContent = message || 'Choose a 6-digit PIN — this becomes your permanent Admin login for this shop.';
+  updateSetPinDots();
+}
+function beginSetAdminPinFlow(){
+  $('loginScreen').classList.add('hide');
+  stopSceneRotation();
+  $('setPinError').textContent = '';
+  resetSetPinFlow();
+  $('setAdminPinScreen').classList.remove('hide');
+}
+async function handleSetPinDigit(k){
+  if(k==='clear'){ setPinBuffer=''; updateSetPinDots(); return; }
+  if(k==='back'){ setPinBuffer = setPinBuffer.slice(0,-1); updateSetPinDots(); return; }
+  if(setPinBuffer.length>=6) return;
+  setPinBuffer += k;
+  updateSetPinDots();
+  if(setPinBuffer.length < 6) return;
+
+  if(setPinStage==='enter'){
+    setPinFirstEntry = setPinBuffer;
+    setPinBuffer = '';
+    setPinStage = 'confirm';
+    $('setPinError').textContent = '';
+    $('setPinStepLabel').textContent = 'Re-enter it to confirm.';
+    updateSetPinDots();
+    return;
+  }
+
+  // confirm stage
+  if(setPinBuffer !== setPinFirstEntry){
+    $('setPinError').textContent = "Those didn't match — let's try again.";
+    shakeSetPinDots();
+    setTimeout(()=>resetSetPinFlow(), 700);
+    return;
+  }
+  $('setPinError').textContent = 'Checking this PIN is available…';
+  if(!shopId) await registerNewShop(); // creates the shop record itself, first time only
+  const uniqueCheck = await isPinGloballyUnique(setPinFirstEntry, 'u_admin');
+  if(!uniqueCheck.unique){
+    $('setPinError').textContent = `That PIN is already in use — choose a different one.`;
+    shakeSetPinDots();
+    setTimeout(()=>resetSetPinFlow(), 1000);
+    return;
+  }
+  $('setPinError').textContent = '';
+  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:setPinFirstEntry, active:true};
+  await put('users', adminUser);
+  await queuePush('staff_upsert', adminUser);
+  setPinBuffer=''; setPinFirstEntry='';
+  await completeSignIn(adminUser, {isNewSetup:true, skipCartResume:true});
+}
+$('setPinKeypad').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-k]'); if(!btn) return;
+  handleSetPinDigit(btn.dataset.k);
+});
+document.addEventListener('keydown', e=>{
+  if($('setAdminPinScreen').classList.contains('hide')) return;
+  if(/^[0-9]$/.test(e.key)) handleSetPinDigit(e.key);
+  if(e.key==='Backspace') handleSetPinDigit('back');
+});
+
 // ---------- Login screen scene rotation ----------
 // Shows photos for whichever business types are actually active on this till,
 // so a fuel-only outlet doesn't cycle through a carwash photo it doesn't run.
@@ -2857,29 +2942,39 @@ async function attemptLogin(){
   const users = await getAll('users');
   const u = users.find(x => x.pin===pinBuffer && x.active!==false);
   if(!u){
+    // Shouldn't normally be reached — tryPinCheckpoint() already confirms a match exists
+    // before ever calling this — but kept as a safety net.
     toast('Incorrect PIN');
     shakePinDots();
     pinBuffer=''; setTimeout(updatePinDots, 200);
     return;
   }
-  currentUser = u;
   pinBuffer='';
   stopSceneRotation();
+  await completeSignIn(u);
+}
+// Shared by both the normal login path and the "just finished setting up a new Admin PIN"
+// path, so the two can never quietly drift apart and cause a bug in only one of them.
+async function completeSignIn(u, opts={}){
+  currentUser = u;
   $('loginScreen').classList.add('hide');
+  $('setAdminPinScreen').classList.add('hide');
   $('cashierChip').textContent = `${u.name} · ${u.role}`;
   $('backofficeNav').classList.remove('show');
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-till').classList.add('active');
-  const resumedCart = await resumeCartForUser(u.id);
+  const resumedCart = opts.skipCartResume ? false : await resumeCartForUser(u.id);
   renderCart();
   try{ sessionStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
-  toast(resumedCart ? `Welcome back, ${u.name} — your cart is just as you left it` : 'Signed in as '+u.name);
-  logAudit('Signed in', resumedCart ? `resumed a paused cart (${cart.length} item(s))` : '');
-  if(u.role==='admin' && u.pin==='123456'){
-    setTimeout(()=>toast("You're still on the default PIN — change it under Admin → Staff"), 2200);
+  if(opts.isNewSetup){
+    toast('Shop set up! Signed in as Admin.');
+    setTimeout(()=>toast('Add cashiers and supervisors under Admin → Staff — just give them their PIN, they can sign in on their own phone, anywhere.'), 2600);
+  } else {
+    toast(resumedCart ? `Welcome back, ${u.name} — your cart is just as you left it` : 'Signed in as '+u.name);
   }
+  logAudit('Signed in', resumedCart ? `resumed a paused cart (${cart.length} item(s))` : (opts.isNewSetup ? 'new shop set up' : ''));
   if(u.role==='admin' && !businessProfile.storeName){
-    setTimeout(()=>toast("Set up your business profile under Admin → Business"), u.pin==='123456' ? 4600 : 2200);
+    setTimeout(()=>toast("Set up your business profile under Admin → Business"), opts.isNewSetup ? 3600 : 2200);
   }
   scanInput.focus();
 }
@@ -2925,22 +3020,14 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 });
 
 // ---------- Boot ----------
+// No branching here anymore — the same sequence runs every time, whether this device has
+// been set up before or not. The PIN entry logic itself figures out what to do; boot's only
+// job is getting the local database and UI into a ready state.
 (async function init(){
   $('themeToggleBtn').textContent = document.documentElement.getAttribute('data-theme')==='dark' ? '☀️' : '🌙';
   db = await openDB();
   await loadShopIdentity();
-  if(!shopId){
-    // Genuinely first-ever boot on this device — find out if it's setting up a new shop
-    // or joining one that already exists, before seeding any default data.
-    $('shopOnboardingScreen').classList.remove('hide');
-    return; // finishBoot() runs once the person picks a path, see the handlers below
-  }
-  await finishBoot();
-})();
-
-async function finishBoot(){
   await seedIfEmpty();
-  await seedUsersIfEmpty();
   await ensureTodaySnapshot();
   await loadCustomBusinessTypes();
   await loadSettingsPanelValues(); // VAT + receipt prefs, needed before the first sale can be rung up correctly
@@ -2966,48 +3053,7 @@ async function finishBoot(){
     try{ await navigator.serviceWorker.register('sw.js'); log('Offline app-shell caching enabled.','ok'); }
     catch(e){ log('Service worker not registered — page reload still needs network this time (see note in Sync & Setup).','warn'); }
   }
-}
-
-// ---------- Shop onboarding screen wiring ----------
-$('shopSetupNewBtn').addEventListener('click', async ()=>{
-  const confirmed = confirm('Create a brand-new, empty shop on this device?\n\nOnly choose this if you\'ve genuinely never set up a shop before. If you\'re rejoining a shop you already created, cancel this and use "I\'m joining an existing shop" with your Shop Code instead.');
-  if(!confirmed) return;
-  $('shopChoiceStep').style.display='none';
-  $('shopSetupStep').style.display='block';
-  $('shopSetupStatus').textContent = 'Setting up your shop…';
-  await setupNewShop();
-  $('shopOnboardingScreen').classList.add('hide');
-  await finishBoot();
-  setTimeout(()=>toast(`Your Shop Code is ${shopCode} — give it to any cashier joining on their own phone`), 1500);
-});
-$('shopJoinExistingBtn').addEventListener('click', ()=>{
-  $('shopChoiceStep').style.display='none';
-  $('shopJoinStep').style.display='block';
-  $('shopCodeInput').focus();
-});
-$('shopJoinBackBtn').addEventListener('click', ()=>{
-  $('shopJoinStep').style.display='none';
-  $('shopChoiceStep').style.display='block';
-  $('shopJoinStatus').textContent='';
-});
-$('shopJoinConfirmBtn').addEventListener('click', async ()=>{
-  const code = $('shopCodeInput').value.trim().toUpperCase();
-  if(!code){ $('shopJoinStatus').textContent='Enter a shop code'; return; }
-  $('shopJoinStatus').style.color='var(--muted)';
-  $('shopJoinStatus').textContent='Joining…';
-  const result = await joinExistingShop(code);
-  if(result.ok){
-    $('shopJoinStep').style.display='none';
-    $('shopSetupStep').style.display='block';
-    $('shopSetupStatus').textContent = 'Joined! Pulling in the shop\'s staff and products…';
-    $('shopOnboardingScreen').classList.add('hide');
-    await finishBoot();
-    toast('Joined the shop — sign in with the PIN your admin gave you');
-  } else {
-    $('shopJoinStatus').style.color='var(--clay)';
-    $('shopJoinStatus').textContent = result.message;
-  }
-});
+})();
 </script>
 <div id="receiptPrintArea"></div>
 </body>
