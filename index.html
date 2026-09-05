@@ -1888,7 +1888,20 @@ function sbHeaders(extra){
 }
 async function pushToSupabase(item){
   let table, body, prefer='return=minimal';
-  if(item.type==='sale'){ table='sales'; body=Object.assign({shop_id:shopId}, item.payload); }
+  if(item.type==='sale'){
+    table='sales';
+    // Explicit field mapping, not a blind forward of the local object — the local sale
+    // record carries a couple of fields (outlet_id, camelCase mpesaCode) left over from
+    // before the real shop-sync schema existed, which don't match the sales table's actual
+    // columns and were causing every sale to be rejected outright with a 400.
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, cashier:p.cashier, till:p.till, lines:p.lines,
+      subtotal:p.subtotal, tax:p.tax, total:p.total, method:p.method,
+      tendered:p.tendered, change:p.change, mpesa_code:p.mpesaCode||null,
+      btypes:p.btypes, ts:p.ts, synced:true
+    };
+  }
   else if(item.type==='stock_movement'){ table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
   else if(item.type==='staff_upsert'){ table='staff'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
   else if(item.type==='product_upsert'){ table='products'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
@@ -1898,7 +1911,10 @@ async function pushToSupabase(item){
     method:'POST', headers: sbHeaders({'Prefer':prefer}),
     body: JSON.stringify(body)
   });
-  if(!res.ok) throw new Error('Supabase rejected the row: '+res.status);
+  if(!res.ok){
+    const errText = await res.text().catch(()=>'');
+    throw new Error(`Supabase rejected the row: ${res.status}${errText ? ' — '+errText.slice(0,150) : ''}`);
+  }
 }
 // Every local change that another device needs to see goes through here — stamps updated_at
 // so pull-sync's last-write-wins comparison has something to compare against.
