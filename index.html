@@ -1,153 +1,3222 @@
-// supabase/functions/mpesa-initiate/index.ts
-//
-// Called BY THE APP whenever a cashier taps "Pay with M-Pesa". Does three things:
-//   1. Gets a fresh OAuth token from Daraja using the Consumer Key/Secret (kept as
-//      private server-side secrets — never exposed to the till itself).
-//   2. Sends the actual STK Push request, which is what makes the customer's phone buzz.
-//   3. Records a "pending" row in mpesa_requests so the till can poll for the result —
-//      Safaricom's own callback (handled by the mpesa-callback function) is what later
-//      marks this row success/failed once the customer enters their PIN or cancels.
-//
-// Required secrets (set these in Supabase → Edge Functions → Secrets, never in code):
-//   MPESA_ENV              "sandbox" or "production"
-//   MPESA_CONSUMER_KEY
-//   MPESA_CONSUMER_SECRET
-//   MPESA_SHORTCODE        174379 for sandbox
-//   MPESA_PASSKEY
-//   MPESA_CALLBACK_URL     this project's own mpesa-callback function URL
-//   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are provided automatically by Supabase.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#12241f">
+<title>My DukaGO POS — Till</title>
+<script>
+  // Applied before first paint so there's no light-mode flash on a dark-mode reload.
+  try{
+    if(localStorage.getItem('my_duka_theme') === 'dark'){
+      document.documentElement.setAttribute('data-theme','dark');
+    }
+  }catch(e){}
+</script>
+<style>
+  :root{
+    --ink:#2a2118;
+    --bg:#efe6d3;
+    --panel:#fffcf5;
+    --line:#ddccA1;
+    --teal:#163b31;
+    --teal-dark:#0f2620;
+    --marigold:#e2a034;
+    --marigold-dark:#b97a1c;
+    --marigold-pale:#f7e6c4;
+    --gold:#f0b429;
+    --gold-dark:#c6890b;
+    --sage:#4c7a52;
+    --sage-dark:#35573a;
+    --clay:#b33f2e;
+    --muted:#8c7c5e;
+    --accent-text:var(--teal-dark); /* foreground emphasis on a panel — flips in dark mode, chrome (--teal-dark itself) never does */
+    --mono:ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+    --display:-apple-system,BlinkMacSystemFont,'Segoe UI Semibold','Helvetica Neue',Arial,sans-serif;
+    /* legacy aliases so the rest of the stylesheet repaints without a full rewrite */
+    --navy:var(--teal); --navy-dark:var(--teal-dark);
+    --blue:var(--marigold); --blue-dark:var(--marigold-dark); --blue-pale:var(--marigold-pale);
+    --yellow:var(--gold); --yellow-dark:var(--gold-dark);
+    --green:var(--sage); --green-dark:var(--sage-dark);
+    --red:var(--clay);
+  }
+  /* ---- Dark mode ----
+     Chrome (header, buttons, toast, active tab pills) is already a dark teal
+     in light mode and stays exactly as-is here — that's the brand, not a
+     light-mode artifact. What actually changes is the *surface* someone reads
+     off of at night: background, cards, borders, and the handful of text
+     colors that were tuned to sit on a pale panel and would go invisible on
+     a dark one. */
+  html[data-theme="dark"]{
+    --ink:#ece3d1;
+    --bg:#15110d;
+    --panel:#211b15;
+    --line:#3c3226;
+    --muted:#a89a82;
+    --sage-dark:#7fbf82;
+    --clay:#e2695a;
+    --marigold-pale:#3a2e18;
+    --accent-text:#f0c869;
+  }
+  html{ color-scheme: light; }
+  html[data-theme="dark"]{ color-scheme: dark; }
+  body{ transition: background-color .2s, color .2s; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+  html,body{overflow-x:hidden; max-width:100vw;} /* hard safety net: no element can ever drag the whole page sideways again */
+  body{display:flex;flex-direction:column;min-height:100vh;}
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+  /* ================= TOP BAR ================= */
+  header{
+    background:var(--teal-dark); color:#fff; padding:11px 18px;
+    display:flex; align-items:center; justify-content:space-between; z-index:30;
+    border-bottom:3px solid var(--marigold);
+    flex-wrap:wrap; row-gap:8px;
+  }
+  header .left{display:flex; align-items:center; gap:11px; min-width:0; flex:1 1 auto;}
+  header .mark{
+    width:32px;height:32px;border-radius:50%;background:var(--marigold); flex:none;
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--teal-dark);
+    font-family:var(--display);font-size:12px; letter-spacing:-.5px; box-shadow:inset 0 0 0 2px rgba(15,38,32,.25);
+  }
+  header .storeline{min-width:0;}
+  header .storeline b{font-family:var(--display); font-size:16px; letter-spacing:.2px;}
+  header .storeline span{display:block; font-size:10px; color:#9fb3ac; letter-spacing:.5px; text-transform:uppercase; white-space:normal; word-break:break-word;}
+  header .right{display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0; row-gap:6px;}
+  .icon-btn{background:none; border:none; color:#aeb6c4; cursor:pointer; padding:5px; display:flex; align-items:center; border-radius:6px; flex:none;}
+  .icon-btn:hover{color:#fff; background:rgba(255,255,255,.06);}
+  .net-chip{display:flex; align-items:center; gap:5px; font-size:10.5px; font-family:var(--mono); color:#aeb6c4; padding:4px 9px; border-radius:999px; background:rgba(255,255,255,.06); flex:none; white-space:nowrap;}
+  .net-dot{width:6px;height:6px;border-radius:50%; flex:none;}
+  .net-dot.off{background:#e0a94a;} .net-dot.on{background:#5fd897;} .net-dot.pend{background:#e0a94a;animation:pulse 1.3s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .cashier-chip{font-size:11.5px; background:rgba(255,255,255,.08); padding:5px 11px; border-radius:999px; font-weight:600; flex:none; white-space:nowrap;}
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const MPESA_ENV = Deno.env.get('MPESA_ENV') || 'sandbox';
-const CONSUMER_KEY = Deno.env.get('MPESA_CONSUMER_KEY')!;
-const CONSUMER_SECRET = Deno.env.get('MPESA_CONSUMER_SECRET')!;
-const SHORTCODE = Deno.env.get('MPESA_SHORTCODE')!;
-const PASSKEY = Deno.env.get('MPESA_PASSKEY')!;
-const CALLBACK_URL = Deno.env.get('MPESA_CALLBACK_URL')!;
+  /* admin-unlocked back-office nav — every tab always visible (wraps to a 2nd row if needed, never hidden behind a swipe); Exit stays pinned */
+  .backoffice-nav{display:none; align-items:stretch; background:var(--panel); border-bottom:1px solid var(--line); padding:0 0 0 10px;}
+  .backoffice-nav.show{display:flex;}
+  .backoffice-tabs{display:flex; flex-wrap:wrap; gap:2px; min-width:0;}
+  .backoffice-nav button{border:none;background:transparent;padding:10px 14px;font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent; font-family:var(--sans); flex:none; white-space:nowrap;}
+  .backoffice-nav button.active{color:var(--blue-dark); border-bottom-color:var(--blue);}
+  .backoffice-nav .lock-nav{flex:none; color:var(--red); font-size:11.5px; font-weight:700; padding:10px 14px; background:var(--panel); border-left:1px solid var(--line);}
 
-const BASE_URL = MPESA_ENV === 'production'
-  ? 'https://api.safaricom.co.ke'
-  : 'https://sandbox.safaricom.co.ke';
+  main{padding:clamp(10px,1.4vw,22px); width:100%;}
+  .view{display:none;}
+  .view.active{display:block;}
+  @media (min-width:901px){
+    main{flex:1; display:flex; flex-direction:column; min-height:0;}
+    .view{flex:1; min-height:0;}
+    .view.active{display:flex; flex-direction:column;}
+  }
+  #view-stock.active, #view-reports.active, #view-sync.active{display:block;}
 
-function corsHeaders() {
+  /* ================= TILL VIEW ================= */
+  /* Fills whatever viewport it's opened in: fluid left column, full-height panels,
+     collapses to a single stacked column on narrow / phone screens. */
+  .till-grid{
+    display:flex; flex-direction:column;
+    gap: clamp(10px,1.2vw,18px);
+    width:100%; max-width:1900px; margin:0 auto;
+  }
+  @media (min-width:901px){
+    .till-grid{
+      display:grid;
+      grid-template-columns: clamp(260px, 22vw, 400px) 1fr;
+      flex:1; min-height:0;
+    }
+  }
+
+  /* --- Left: receipt panel — styled like a market ticket stub --- */
+  .receipt-panel{
+    background:var(--panel); border-radius:14px; border:1px solid var(--line);
+    display:flex; flex-direction:column; overflow:visible;
+    position:relative; box-shadow:0 1px 0 rgba(42,33,24,.03);
+  }
+  @media (min-width:901px){ .receipt-panel{height:100%; min-height:0;} }
+  .customer-strip{padding:14px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; border-radius:14px 14px 0 0;}
+  .customer-strip .avatar{width:38px;height:38px;border-radius:50%;background:var(--marigold-pale); color:var(--marigold-dark); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; font-family:var(--display);}
+  .customer-strip .cname{font-weight:700; font-size:13.5px; font-family:var(--display);}
+  .customer-strip .csub{font-size:10.5px; color:var(--muted);}
+
+  .scan-row{padding:10px 14px; border-bottom:1px solid var(--line);}
+  .scan-row input{width:100%; padding:10px 11px; border-radius:8px; border:1.5px solid var(--line); font-family:var(--mono); font-size:12.5px;}
+  .scan-row input:focus{outline:2px solid var(--blue); border-color:var(--blue);}
+
+  .receipt-lines{padding:6px 14px; min-height:80px; max-height:260px; overflow-y:auto;}
+  @media (min-width:901px){ .receipt-lines{flex:1; min-height:120px; max-height:none;} }
+  .rline-head{display:grid; grid-template-columns: 1fr 66px 56px 26px; gap:6px; font-size:9.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); padding:8px 0 6px; border-bottom:1px solid var(--line);}
+  .rline{display:grid; grid-template-columns: 1fr 66px 56px 26px; gap:6px; align-items:center; padding:8px 0; border-bottom:1px dashed var(--line); font-size:12px;}
+  .rline > *{min-width:0;}
+  .rline .rqty-stepper{display:flex; align-items:center; justify-content:center; gap:4px; font-family:var(--mono);}
+  .rline .rqty-stepper button{width:19px; height:19px; border-radius:5px; border:1px solid var(--line); background:var(--bg); color:var(--ink); font-weight:700; font-size:12px; cursor:pointer; line-height:1; padding:0;}
+  .rline .rname{font-weight:600; line-height:1.25; overflow-wrap:break-word;}
+  .rline .rqty{font-family:var(--mono); text-align:center;}
+  .rline .rprice{font-family:var(--mono); text-align:right;}
+  .rline .rdel{background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;}
+  .rline .rdel:hover{color:var(--red);}
+  .receipt-empty{color:var(--muted); font-size:12.5px; text-align:center; padding:34px 0;}
+
+  .totals-block{padding:16px 14px 12px; border-top:2px dashed var(--line); position:relative;}
+  .totals-block::before, .totals-block::after{
+    content:''; position:absolute; top:-9px; width:18px; height:18px; border-radius:50%;
+    background:var(--bg); border:1px solid var(--line);
+  }
+  .totals-block::before{ left:-9px; }
+  .totals-block::after{ right:-9px; }
+  .trow{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding:3px 0; font-family:var(--mono);}
+  .trow.grand{font-family:var(--display); font-size:24px; font-weight:700; color:var(--accent-text); padding:9px 0 2px; border-top:1px solid var(--line); margin-top:6px;}
+  .trow.grand span:last-child{font-family:var(--mono);}
+
+  .action-row{display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:14px 14px 16px;}
+  .action-row > *{min-width:0;}
+  .btn-lock{background:var(--gold); color:var(--teal-dark); border:none; border-radius:9px; padding:13px 0; font-weight:700; font-size:12.5px; cursor:pointer; font-family:var(--display);}
+  .btn-clear{background:var(--bg); color:var(--muted); border:none; border-radius:9px; padding:13px 0; font-weight:700; font-size:12.5px; cursor:pointer; font-family:var(--display);}
+  .btn-pay{grid-column:span 2; background:var(--sage); color:#fff; border:none; border-radius:9px; padding:17px 0; font-weight:700; font-size:16px; cursor:pointer; letter-spacing:.4px; font-family:var(--display); box-shadow:0 3px 0 var(--sage-dark);}
+  .btn-pay:active{transform:translateY(2px); box-shadow:0 1px 0 var(--sage-dark);}
+  .btn-pay:disabled{background:#d6cfba; box-shadow:none; cursor:not-allowed;}
+
+  /* --- Right: category + product tiles --- */
+  .tile-panel{display:flex; flex-direction:column;}
+  @media (min-width:901px){ .tile-panel{height:100%; min-height:0;} }
+
+  .cat-row{display:flex; gap:8px; overflow-x:auto; margin-bottom:12px; padding-bottom:2px; flex:none;}
+  .cat-chip{flex:none; background:var(--panel); border:1.5px solid var(--line); color:var(--accent-text); padding:9px 17px; border-radius:999px; font-weight:600; font-size:12.5px; cursor:pointer; font-family:var(--display);}
+  .cat-chip.active{background:var(--teal-dark); border-color:var(--teal-dark); color:#fff;}
+
+  .tile-scroll{padding-right:2px;}
+  @media (min-width:901px){ .tile-scroll{flex:1; min-height:0; overflow-y:auto;} }
+  .tile-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(clamp(120px,11vw,160px),1fr)); gap:clamp(8px,.9vw,14px);}
+  .tile{background:var(--panel); border:1px solid var(--line); border-radius:13px; overflow:hidden; cursor:pointer; text-align:left; padding:0; display:flex; flex-direction:column; transition:box-shadow .15s;}
+  .tile:hover{box-shadow:0 3px 10px rgba(42,33,24,.08);}
+  .tile:active{transform:scale(.97);}
+  .tile .swatch{height:60px; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,.92); font-weight:700; font-size:18px; font-family:var(--display); letter-spacing:.5px; text-shadow:0 1px 2px rgba(0,0,0,.15);}
+  .tile .tile-body{padding:9px 10px 10px;}
+  .tile .tname{font-size:12px; font-weight:600; line-height:1.25; display:block; margin-bottom:5px; min-height:30px; font-family:var(--sans);}
+  .tile .tmeta{display:flex; justify-content:space-between; align-items:center;}
+  .tile .tprice{font-family:var(--mono); font-weight:700; font-size:13px; color:var(--accent-text);}
+  .tile .tstock{font-size:9.5px; color:var(--muted); font-family:var(--mono);}
+  .tile .tstock.low{color:var(--clay); font-weight:700;}
+  .tile.disabled{opacity:.35; cursor:not-allowed;}
+
+  /* ================= BACK OFFICE VIEWS ================= */
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; max-width:1100px; margin-left:auto; margin-right:auto;}
+  .panel h3{margin:0 0 4px; font-size:15px; font-family:var(--display); font-weight:700;}
+  .panel p.hint{margin:0 0 14px; font-size:12px; color:var(--muted);}
+  .form-row{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px;}
+  @media (max-width:700px){.form-row{grid-template-columns:1fr 1fr;}}
+  .form-row input, .form-row select{padding:10px; border-radius:8px; border:1.5px solid var(--line); font-size:13px; font-family:var(--sans); width:100%; min-width:0;}
+  .form-row input:focus, .form-row select:focus{outline:2px solid var(--blue); border-color:var(--blue);}
+  .primary-btn{background:var(--teal-dark); color:#fff; border:none; padding:10px 16px; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer; font-family:var(--display);}
+
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -2px;}
+  .table-scroll table{min-width:520px;}
+  th{text-align:left; padding:8px 6px; color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid var(--bg);}
+  td{padding:9px 6px; border-bottom:1px solid var(--bg); font-family:var(--mono);}
+  td.name{font-family:var(--sans); font-weight:600;}
+  .low-badge{background:#f3ddd6; color:var(--clay); padding:2px 7px; border-radius:5px; font-size:10px; font-weight:700; margin-left:6px;}
+
+  .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; max-width:1100px; margin-left:auto; margin-right:auto;}
+  .stat-card{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px;}
+  .stat-card .slabel{font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted);}
+  .stat-card .sval{font-family:var(--mono); font-size:22px; font-weight:800; color:var(--navy); margin-top:4px;}
+
+  .sync-log{background:var(--navy-dark); color:#c9d3e0; border-radius:10px; padding:12px; font-family:var(--mono); font-size:11.5px; max-height:220px; overflow-y:auto; line-height:1.7;}
+  .sync-log .ok{color:#5fd897;} .sync-log .warn{color:#e0a94a;}
+  .toggle-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--bg); flex-wrap:wrap; gap:10px;}
+  .toggle-row > div:first-child{flex:1 1 200px; min-width:0;}
+  .toggle-row > button{flex:none;}
+
+  /* ================= ADMIN PIN MODAL ================= */
+  .modal-overlay{position:fixed; inset:0; background:rgba(21,28,41,.55); display:none; align-items:center; justify-content:center; z-index:100;}
+  .modal-overlay.show{display:flex;}
+  .modal-box{background:var(--panel); border-radius:14px; padding:22px; width:min(88vw,280px); text-align:center;}
+  .modal-box h3{margin:0 0 4px; font-size:16px; font-family:var(--display);}
+  .modal-box p{margin:0 0 14px; font-size:12px; color:var(--muted);}
+  .modal-box input{width:100%; text-align:center; letter-spacing:6px; font-size:20px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin-bottom:12px;}
+  .modal-box input:focus{outline:2px solid var(--blue); border-color:var(--blue);}
+  .modal-actions{display:flex; gap:8px;}
+  .modal-actions button{flex:1; padding:11px; border-radius:8px; border:none; font-weight:700; font-size:13px; cursor:pointer;}
+  .modal-cancel{background:var(--bg); color:var(--muted);}
+  .modal-confirm{background:var(--navy-dark); color:#fff;}
+
+  .toast{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--teal-dark); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; font-weight:600; z-index:150; opacity:0; pointer-events:none; transition:opacity .25s, bottom .25s;}
+  .toast.show{opacity:1; bottom:26px;}
+
+  /* ================= LOGIN SCREEN — rotating real photos, kept bright ================= */
+  .login-screen{
+    position:fixed; inset:0; z-index:200; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+    padding:clamp(14px,4vw,20px);
+    background:var(--marigold-pale); /* bright fallback shown instantly, and if a photo never loads offline */
+  }
+  .login-screen.hide{display:none;}
+  .scene-layer{
+    position:absolute; inset:0; opacity:0; transition:opacity 1.4s ease-in-out;
+    background-size:cover; background-position:center; background-color:var(--marigold-pale);
+  }
+  .scene-layer.showing{opacity:1;}
+  .scene-overlay{
+    position:absolute; inset:0;
+    /* Light, warm wash — keeps the photo bright and readable rather than moody,
+       with just enough lift at the very bottom for the caption and card to sit on. */
+    background:linear-gradient(180deg, rgba(15,38,32,.12), rgba(15,38,32,.18) 55%, rgba(15,38,32,.52) 100%);
+  }
+  .scene-caption{
+    position:absolute; left:0; right:0; bottom:clamp(14px,4vh,28px); text-align:center;
+    color:#fffdf7; font-family:var(--display); font-weight:700; font-size:clamp(15px,2.8vw,19px);
+    letter-spacing:.4px; text-shadow:0 2px 10px rgba(0,0,0,.5); opacity:.97;
+  }
+  .login-card{
+    position:relative; z-index:2;
+    background:var(--panel); border-radius:16px; padding:clamp(20px,4vw,28px);
+    width:min(90vw, 360px); text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,.45);
+  }
+  .login-mark{
+    width:52px;height:52px;border-radius:50%;background:var(--marigold); color:var(--teal-dark);
+    display:flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:800;
+    font-size:18px; letter-spacing:-.5px; margin:0 auto 12px;
+  }
+  .login-card h2{margin:0 0 4px; font-family:var(--display); font-size:clamp(19px,4vw,22px);}
+  .login-card p{margin:0 0 16px; font-size:12.5px; color:var(--muted);}
+  .staff-picker{display:flex; flex-direction:column; gap:6px; margin-bottom:14px; max-height:200px; overflow-y:auto;}
+  .staff-chip{
+    display:flex; align-items:center; justify-content:space-between; padding:11px 14px;
+    border:1.5px solid var(--line); border-radius:10px; cursor:pointer; background:var(--panel);
+    font-family:var(--sans); font-weight:600; font-size:13px; text-align:left;
+  }
+  .staff-chip.selected{border-color:var(--marigold); background:var(--marigold-pale);}
+  .staff-chip .role-tag{font-family:var(--mono); font-size:9.5px; text-transform:uppercase; color:var(--muted); background:var(--bg); padding:3px 7px; border-radius:5px;}
+
+  .pin-dots{display:flex; justify-content:center; gap:clamp(6px,2vw,10px); margin-bottom:20px; flex-wrap:wrap;}
+  .pin-dot{width:14px; height:14px; border-radius:50%; border:2px solid var(--line); background:transparent; transition:background .1s, border-color .1s;}
+  .pin-dot.filled{background:var(--marigold); border-color:var(--marigold);}
+  .pin-dot.shake{animation:shake .35s;}
+  @keyframes shake{ 0%,100%{transform:translateX(0);} 25%{transform:translateX(-5px);} 75%{transform:translateX(5px);} }
+
+  .keypad{display:grid; grid-template-columns:repeat(3,1fr); gap:clamp(7px,1.8vw,9px);}
+  .keypad button{
+    padding:clamp(12px,3.2vw,15px) 0; border-radius:10px; border:1px solid var(--line); background:var(--panel);
+    font-family:var(--display); font-weight:700; font-size:clamp(15px,3.6vw,17px); cursor:pointer; color:var(--ink);
+  }
+  .keypad button:active{background:var(--marigold-pale);}
+  .keypad button.keypad-sub{font-family:var(--sans); font-size:11.5px; font-weight:600; color:var(--muted);}
+  .login-hint{margin-top:12px !important; font-size:10.5px !important; color:var(--muted) !important;}
+
+  .modal-fingerprint{
+    width:100%; background:var(--bg); border:1.5px dashed var(--line); color:var(--accent-text);
+    padding:10px; border-radius:9px; font-size:12px; font-weight:600; cursor:pointer; margin-bottom:12px;
+    font-family:var(--sans);
+  }
+
+  /* ---- Cash tender modal ---- */
+  #tenderDue{font-family:var(--mono); font-weight:700; color:var(--accent-text); font-size:14px;}
+  #tenderInput{width:100%; text-align:center; font-size:20px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0;}
+  #tenderInput:focus{outline:2px solid var(--marigold); border-color:var(--marigold);}
+  .quick-cash{display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-bottom:10px;}
+  .quick-cash button{background:var(--bg); border:1px solid var(--line); border-radius:7px; padding:7px 10px; font-family:var(--mono); font-size:12px; cursor:pointer;}
+  .change-line{font-family:var(--mono); font-weight:700; font-size:15px; color:var(--sage-dark); min-height:20px;}
+
+  /* ---- Sale complete modal ---- */
+  .sc-amounts{background:var(--bg); border-radius:10px; padding:12px 14px; margin-bottom:12px;}
+  .sc-row{display:flex; justify-content:space-between; font-family:var(--mono); font-size:13px; padding:4px 0; color:var(--muted);}
+  .sc-row.sc-balance{font-family:var(--display); font-size:20px; font-weight:700; color:var(--sage-dark); border-top:1px dashed var(--line); margin-top:4px; padding-top:8px;}
+  .sc-thanks{font-family:var(--display); font-size:16px; font-weight:700; color:var(--teal-dark); margin:0 0 14px;}
+
+  /* ---- M-Pesa STK push modal ---- */
+  #mpesaDue{font-family:var(--mono); font-weight:700; color:var(--teal-dark); font-size:14px; margin:0 0 4px;}
+  .mpesa-spinner{
+    width:38px; height:38px; border-radius:50%; margin:0 auto;
+    border:4px solid var(--line); border-top-color:var(--sage); animation:spin .8s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* ---- Printable receipt — hidden on screen, shown only when printing ---- */
+  #receiptPrintArea{display:none;}
+  @media print{
+    body.printing-receipt > *{ display:none !important; }
+    body.printing-receipt #receiptPrintArea{
+      display:block !important; font-family:'Courier New',monospace; color:#000; margin:0 auto;
+    }
+    #receiptPrintArea.paper-58{ width:58mm; font-size:10px; }
+    #receiptPrintArea.paper-80{ width:80mm; font-size:11.5px; }
+    #receiptPrintArea.paper-a4{ width:100%; font-size:13px; padding:20mm; }
+    .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
+    .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
+    .rcpt-divider{border-top:1px dashed #000; margin:6px 0;}
+    .rcpt-line{display:flex; justify-content:space-between; padding:1px 0;}
+    .rcpt-grand{font-weight:700; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:1.1em;}
+    .rcpt-footer{text-align:center; margin-top:10px; font-weight:700;}
+  }
+
+  /* ---- Payment method row on till ---- */
+  .paymethod-row{display:flex; gap:8px; padding:0 14px 10px;}
+  .paymethod-row button{
+    flex:1; padding:9px 0; border-radius:8px; border:1.5px solid var(--line); background:var(--panel);
+    font-family:var(--display); font-weight:600; font-size:12px; cursor:pointer; color:var(--muted);
+  }
+  .paymethod-row button.active{border-color:var(--teal-dark); background:var(--teal-dark); color:#fff;}
+
+  /* ---- Business type picker ---- */
+  .biz-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:12px;}
+  .biz-card{
+    background:var(--panel); border:2px solid var(--line); border-radius:12px; padding:16px;
+    cursor:pointer; text-align:left; font-family:var(--sans); position:relative;
+  }
+  .biz-card.selected{border-color:var(--marigold); background:var(--marigold-pale);}
+  .biz-card .biz-emoji{font-size:26px; display:block; margin-bottom:8px;}
+  .biz-card .biz-name{font-family:var(--display); font-weight:700; font-size:14px; display:block; margin-bottom:4px;}
+  .biz-card .biz-desc{font-size:11.5px; color:var(--muted); line-height:1.4;}
+  .biz-card .biz-current{
+    position:absolute; top:10px; right:10px; background:var(--sage); color:#fff; font-size:9.5px;
+    font-weight:700; padding:3px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.3px;
+  }
+  .biz-card .biz-check{
+    position:absolute; top:10px; right:10px; width:20px; height:20px; border-radius:6px;
+    border:2px solid var(--line); background:var(--panel); display:flex; align-items:center; justify-content:center;
+    font-size:12px; color:#fff;
+  }
+  .biz-card.checked .biz-check{background:var(--sage); border-color:var(--sage);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="left">
+    <div class="mark">MD</div>
+    <div class="storeline"><b id="storeNameDisplay">My DukaGO POS</b><span id="storeSubtitle">Outlet #001 · Till 1</span></div>
+  </div>
+  <div class="right">
+    <span class="net-chip"><span class="net-dot off" id="netDot"></span><span id="netLabel">Offline</span><span id="pendingLabel"></span></span>
+    <span class="cashier-chip" id="cashierChip">Not signed in</span>
+    <button class="icon-btn" id="themeToggleBtn" title="Light / Dark mode">🌙</button>
+    <button class="icon-btn" id="adminGearBtn" title="Admin">⚙</button>
+    <button class="icon-btn" id="logoutBtn" title="Switch user">⏻</button>
+  </div>
+</header>
+
+<nav class="backoffice-nav" id="backofficeNav">
+  <div class="backoffice-tabs">
+    <button class="active" data-view="business">Business</button>
+    <button data-view="stock">Stock</button>
+    <button data-view="reports">Reports</button>
+    <button data-view="staff" class="admin-only-tab">Staff</button>
+    <button data-view="audit" class="admin-only-tab">Audit Log</button>
+    <button data-view="sync">Sync &amp; Setup</button>
+  </div>
+  <button class="lock-nav" id="lockBackofficeBtn">🔒 Exit</button>
+</nav>
+
+<main>
+
+  <!-- ============ TILL (default / cashier) VIEW ============ -->
+  <section class="view active" id="view-till">
+    <div class="till-grid">
+
+      <!-- Receipt panel -->
+      <div class="receipt-panel">
+        <div class="customer-strip">
+          <div class="avatar">W</div>
+          <div><div class="cname">Walk-in customer</div><div class="csub">No loyalty account</div></div>
+        </div>
+        <div class="scan-row">
+          <input id="scanInput" type="text" placeholder="Scan barcode, or type to search products…" autocomplete="off">
+        </div>
+        <div class="receipt-lines">
+          <div class="rline-head"><span>Item</span><span>Qty</span><span>Price</span><span></span></div>
+          <div id="cartList"><div class="receipt-empty">No items yet — scan or tap a product</div></div>
+        </div>
+        <div class="totals-block">
+          <div class="trow"><span>Subtotal</span><span id="subTotal">KSh 0</span></div>
+          <div class="trow"><span id="taxLabel">Tax (0%)</span><span id="taxTotal">KSh 0</span></div>
+          <div class="trow grand"><span>Total</span><span id="grandTotal">KSh 0</span></div>
+        </div>
+        <div class="paymethod-row" id="payMethodRow">
+          <button class="active" data-method="cash">Cash</button>
+          <button data-method="mpesa">M-Pesa</button>
+        </div>
+        <div class="action-row">
+          <button class="btn-lock" id="lockScreenBtn">🔒 Lock</button>
+          <button class="btn-clear" id="clearCartBtn">Clear</button>
+          <button class="btn-pay" id="checkoutBtn" disabled>PAY</button>
+        </div>
+      </div>
+
+      <!-- Product tiles -->
+      <div class="tile-panel">
+        <div class="cat-row" id="catRow"></div>
+        <div class="tile-scroll">
+          <div class="tile-grid" id="productGrid"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ BUSINESS TYPE (admin) ============ -->
+  <section class="view" id="view-business">
+    <div class="panel">
+      <h3>Business profile</h3>
+      <p class="hint">This is the actual shop's own details — name, owner, contact, and location. It's what prints on receipts and shows in the till header, separate from the My DukaGO POS app itself.</p>
+      <div class="form-row" style="grid-template-columns:1fr 1fr;">
+        <input id="profStoreName" placeholder="Business / shop name">
+        <input id="profOwnerName" placeholder="Owner / manager name">
+      </div>
+      <div class="form-row" style="grid-template-columns:1fr 1fr;">
+        <input id="profPhone" type="tel" placeholder="Phone number" inputmode="numeric">
+        <input id="profLocation" placeholder="Town / area (e.g. Kasarani, Nairobi)">
+      </div>
+      <div class="form-row" style="grid-template-columns:1fr;">
+        <input id="profAddress" placeholder="Physical address / building, street (optional)">
+      </div>
+      <button class="primary-btn" id="saveProfileBtn">Save business profile</button>
+      <p id="profileStatus" class="hint" style="margin:10px 0 0;"></p>
+    </div>
+    <div class="panel">
+      <h3>How staff join this shop</h3>
+      <p class="hint">There's no code to hand out — a staff member's own PIN <i>is</i> their identity. Add them under Staff below with their name, role, and a PIN, then tell them that PIN. They can type it into this same app on their own phone, anywhere, anytime — the app finds this shop automatically and pulls everything in.</p>
+    </div>
+    <div class="panel">
+      <h3>This till / pay station</h3>
+      <p class="hint">Only matters if there's more than one till — a supermarket with several pay stations, for example. This label is set per device, not synced, so each till can be told apart in the header and on its receipts.</p>
+      <div class="form-row" style="grid-template-columns:220px;">
+        <input id="tillLabelInput" placeholder="e.g. Till 1, Checkout A">
+      </div>
+      <button class="primary-btn" id="saveTillLabelBtn">Save till label</button>
+    </div>
+    <div class="panel">
+      <h3>Business type</h3>
+      <p class="hint">This sets what the sales screen looks like — categories, starter catalog, and whether items are tracked as stock or sold as a service. Switching doesn't delete anything you've already added; it just loads that type's starter items in.</p>
+      <div class="toggle-row">
+        <div><b style="font-size:13px; font-family:var(--display);">Combine multiple types</b><br><span class="hint" style="margin:0;">Running more than one business from this till? Turn this on to pick several — e.g. Duka + Carwash — in one go.</span></div>
+        <button class="primary-btn" id="combineModeBtn">Turn on</button>
+      </div>
+      <div class="biz-grid" id="bizGrid"></div>
+      <button class="btn-pay" id="applyCombineBtn" style="display:none; margin-top:14px; width:100%;">Apply combination</button>
+    </div>
+  </section>
+
+  <!-- ============ STOCK (admin) ============ -->
+  <section class="view" id="view-stock">
+    <div class="panel">
+      <h3>Feed stock</h3>
+      <p class="hint">Log new stock received. Only shown and sold for the currently active business type — switch business type first if you're adding SKUs for a different one. Cost price is what it feeds Reports' profit numbers — worth filling in even if you skip it at first.</p>
+      <div class="form-row">
+        <input id="newSku" placeholder="SKU / barcode">
+        <input id="newName" placeholder="Product name">
+        <select id="newCat">
+          <option value="Groceries">Groceries</option>
+          <option value="Drinks">Drinks</option>
+          <option value="Household">Household</option>
+          <option value="Airtime">Airtime</option>
+          <option value="Other">Other</option>
+        </select>
+        <input id="newQty" type="number" placeholder="Qty received (blank = no change / service if new)" min="1">
+        <input id="newCost" type="number" placeholder="Cost price / unit (KSh, optional)" min="0">
+        <input id="newPrice" type="number" placeholder="Sell price (KSh)" min="0">
+      </div>
+      <button class="primary-btn" id="addStockBtn">Add to stock</button>
+      <p id="editingNotice" class="hint" style="margin:10px 0 0;"></p>
+    </div>
+    <div class="panel">
+      <h3>Inventory</h3>
+      <div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th><th>SKU</th><th>Stock on hand</th><th>Cost</th><th>Price</th><th>Margin</th><th></th></tr></thead>
+      <tbody id="stockTable"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ STAFF (admin) ============ -->
+  <section class="view" id="view-staff">
+    <div class="panel">
+      <h3>Add staff</h3>
+      <p class="hint">Each person needs their own PIN — checked as unique across every shop on the platform, not just this one. Give someone their PIN and they can sign in with it on their own phone, anywhere, and the app finds this shop automatically.</p>
+      <div class="form-row">
+        <input id="newStaffName" placeholder="Full name">
+        <select id="newStaffRole">
+          <option value="cashier">Cashier</option>
+          <option value="supervisor">Supervisor</option>
+          <option value="admin">Admin</option>
+        </select>
+        <input id="newStaffPin" placeholder="PIN — 4 digits, or 6 for Admin" maxlength="6" inputmode="numeric">
+        <button class="primary-btn" id="addStaffBtn" style="grid-column:span 1;">Add staff</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Roles, in short</h3>
+      <p class="hint" style="line-height:1.6;">
+        <b>Cashier</b> — sells only, 4-digit PIN. Voiding a line or clearing a cart needs sign-off.<br>
+        <b>Supervisor</b> — everything a cashier can do, plus can approve voids with their own 4-digit PIN.<br>
+        <b>Admin</b> — full access: Stock, Reports, Sync setup, and assigning everyone else's role. Admin PINs are 6 digits — longer on purpose, so it's harder for a cashier to glance at the keypad and pick it up.
+      </p>
+    </div>
+    <div class="panel">
+      <h3>Staff list</h3>
+      <p class="hint">Role is a dropdown you can change any time — promote a cashier to supervisor without deleting their account. Revoke turns off someone's PIN without deleting their sales history. You can have as many active cashiers as you need.</p>
+      <div class="table-scroll"><table><thead><tr><th>Name</th><th>Role</th><th>PIN</th><th>Status</th><th></th></tr></thead>
+      <tbody id="staffTable"></tbody></table></div>
+    </div>
+    <div class="panel">
+      <h3>Attendance — sign-in times</h3>
+      <p class="hint">Every sign-in and sign-out, whether from the header logout or the till's Lock button, most recent first.</p>
+      <div class="table-scroll"><table><thead><tr><th>Name</th><th>Role</th><th>Signed in</th><th>Signed out</th><th>Duration</th></tr></thead>
+      <tbody id="attendanceTable"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ AUDIT LOG (admin only, no override) ============ -->
+  <section class="view" id="view-audit">
+    <div class="panel">
+      <h3>Audit log</h3>
+      <p class="hint">Every sign-in, staff change, business-type change, void approval, and admin-access event, timestamped. This tab is visible only when you're actually signed in as an Admin — a manager-override PIN can't reach it.</p>
+      <button class="primary-btn" id="exportAuditBtn" style="margin-bottom:14px;">⬇ Export to Excel</button>
+      <div class="table-scroll"><table><thead><tr><th>Time</th><th>Who</th><th>Role</th><th>Action</th><th>Details</th></tr></thead>
+      <tbody id="auditTable"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ REPORTS (admin) ============ -->
+  <section class="view" id="view-reports">
+    <div class="cat-row" id="reportPeriodRow" style="margin-bottom:14px;"></div>
+    <button class="primary-btn" id="exportReportsBtn" style="margin-bottom:14px;">⬇ Export to Excel</button>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="slabel" id="statSalesLabel">Sales — today</div><div class="sval" id="statSalesCount">0</div></div>
+      <div class="stat-card"><div class="slabel" id="statRevenueLabel">Revenue — today</div><div class="sval" id="statRevenue">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel">Items sold</div><div class="sval" id="statItems">0</div></div>
+      <div class="stat-card"><div class="slabel">Stock purchased (cost)</div><div class="sval" id="statPurchases">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel">Profit</div><div class="sval" id="statProfit">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel">Low stock right now</div><div class="sval" id="statLow">0</div></div>
+    </div>
+
+    <div class="panel" id="bizBreakdownWrap">
+      <h3>By business type</h3>
+      <p class="hint">This till is running more than one business — so the combined total above can hide a loser behind a winner. Here's each one on its own.</p>
+      <div class="table-scroll"><table><thead><tr><th>Business</th><th>Revenue</th><th>Profit</th><th>Items sold</th><th>Stock purchased</th></tr></thead>
+      <tbody id="bizBreakdownTable"></tbody></table></div>
+    </div>
+
+    <div class="panel">
+      <h3>By payment method</h3>
+      <p class="hint">Split out so you can see cash vs M-Pesa separately, but they always reconcile back to the same revenue total above.</p>
+      <div class="table-scroll"><table><thead><tr><th>Method</th><th>Sales</th><th>Total</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Cash</td><td id="pmCashCount">0</td><td id="pmCashTotal">KSh 0</td></tr>
+        <tr><td class="name">M-Pesa</td><td id="pmMpesaCount">0</td><td id="pmMpesaTotal">KSh 0</td></tr>
+      </tbody></table></div>
+      <p id="pmReconcile" style="font-family:var(--mono); font-size:12px; color:var(--muted); margin:10px 0 0;"></p>
+      <p id="pmVatNote" style="font-size:11.5px; color:var(--muted); margin:4px 0 0;"></p>
+    </div>
+
+    <div class="panel" id="stockCompareWrap">
+      <h3>Stock: this morning vs now</h3>
+      <p class="hint">Only tracked for today — opening stock is captured once, the first time the till is opened each day.</p>
+      <div class="table-scroll"><table><thead><tr><th>Product</th><th>Opening (this morning)</th><th>Sold today</th><th>Received today</th><th>Now</th></tr></thead>
+      <tbody id="stockCompareTable"></tbody></table></div>
+    </div>
+
+    <div class="panel">
+      <h3 id="salesTableTitle">Sales — today</h3>
+      <div class="table-scroll"><table><thead><tr><th>Time</th><th>Cashier</th><th>Items</th><th>Total</th><th>Synced</th></tr></thead>
+      <tbody id="salesTable"></tbody></table></div>
+    </div>
+
+    <div class="panel">
+      <h3 id="purchasesTableTitle">Stock received — today</h3>
+      <div class="table-scroll"><table><thead><tr><th>Time</th><th>Product</th><th>Qty</th><th>Cost</th></tr></thead>
+      <tbody id="purchasesTable"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ SYNC (admin) ============ -->
+  <section class="view" id="view-sync">
+    <div class="panel">
+      <h3>Tax (VAT)</h3>
+      <p class="hint">Prices on the till are tax-inclusive — VAT is already inside the price shown on each tile, not added at checkout. Turning this on just splits it out on the receipt and in reports so it's visible, without changing what the customer pays. The toggle applies immediately — no separate save needed.</p>
+      <div class="toggle-row">
+        <div><b style="font-size:13px;">Charge VAT</b></div>
+        <button class="primary-btn" id="vatToggleBtn">Turn on</button>
+      </div>
+      <div class="form-row" style="grid-template-columns:160px; margin-top:10px;">
+        <input id="vatRateInput" type="number" placeholder="VAT rate %" min="0" max="100" value="16">
+      </div>
+      <button class="primary-btn" id="saveVatBtn">Save VAT rate</button>
+    </div>
+
+    <div class="panel">
+      <h3>Receipts &amp; printer</h3>
+      <p class="hint">
+        A web page can't tell whether a printer is physically plugged in — browsers don't allow that for privacy
+        reasons. Instead, "Print" opens the normal print dialog: if a printer is set up on this device, it shows
+        up there and prints for real; if not, the same dialog lets you choose "Save as PDF." One button covers
+        both cases — that's genuinely how it needs to work from a browser.
+      </p>
+      <div class="form-row" style="grid-template-columns:1fr 1fr;">
+        <select id="receiptActionSelect">
+          <option value="ask">Ask after every sale</option>
+          <option value="print">Always open print dialog</option>
+          <option value="skip">Never offer a receipt</option>
+        </select>
+        <select id="receiptPaperSelect">
+          <option value="58mm">58mm thermal roll</option>
+          <option value="80mm">80mm thermal roll</option>
+          <option value="a4">A4 / letter page</option>
+        </select>
+      </div>
+      <button class="primary-btn" id="saveReceiptBtn">Save receipt settings</button>
+      <button class="primary-btn" id="testPrintBtn" style="background:var(--sage); margin-left:8px;">Test print</button>
+    </div>
+
+    <div class="panel">
+      <h3>Backend connection</h3>
+      <p class="hint">Paste your Supabase project keys to switch from simulated to live sync across every outlet.</p>
+      <div class="form-row" style="grid-template-columns:1fr 1fr;">
+        <input id="supaUrl" placeholder="Supabase Project URL">
+        <input id="supaKey" placeholder="Supabase anon public key">
+      </div>
+      <button class="primary-btn" id="saveSupaBtn">Save &amp; connect</button>
+    </div>
+
+    <div class="panel">
+      <h3>Personal backup — Google Drive</h3>
+      <p class="hint">
+        Separate from the backend above: this backs this outlet's own data up into the signed-in owner's
+        own Google Drive — private to them, not shared with any other outlet. The backup includes the full
+        audit log and staff list (never PINs), so an admin can open that file from any device — their laptop,
+        another phone, anywhere — and review exactly what every cashier did since they signed in, without
+        needing to be at the till itself. It's a snapshot from the last backup, not a live feed — for that,
+        someone would need to trigger "Back up now" first. Needs a Google Cloud OAuth Client ID (free, one per
+        deployment) and the page served over http/https — it won't work opened as a raw file, and Google
+        requires your Gmail added as a "test user" on the OAuth screen until the app is verified.
+      </p>
+      <div class="form-row" style="grid-template-columns:1fr;">
+        <input id="gdriveClientId" placeholder="Google OAuth Client ID (ends in .apps.googleusercontent.com)">
+      </div>
+      <button class="primary-btn" id="saveGdriveClientBtn">Save Client ID</button>
+      <div class="toggle-row" style="margin-top:12px;">
+        <div><b style="font-size:13px;">Connection</b><br><span class="hint" id="gdriveStatus" style="margin:0;">Not connected.</span></div>
+        <button class="primary-btn" id="gdriveConnectBtn" disabled>Connect Google Drive</button>
+      </div>
+      <div class="toggle-row">
+        <div><b style="font-size:13px;">Auto-backup every 5 min while connected</b></div>
+        <button class="primary-btn" id="gdriveAutoBtn" disabled>Turn on</button>
+      </div>
+      <button class="primary-btn" id="gdriveBackupNowBtn" style="background:var(--sage); margin-top:4px;" disabled>Back up now</button>
+      <p id="gdriveLastBackup" class="hint" style="margin:10px 0 0;"></p>
+    </div>
+    <div class="panel">
+      <h3>Online / offline behavior</h3>
+      <p class="hint">This isn't a toggle you manage day to day — it's automatic.</p>
+      <p style="font-size:13px; line-height:1.6;">
+        The till watches the device's real network state. Lose signal mid-sale and nothing changes for the
+        cashier — sales keep ringing up, stock keeps deducting, everything queues locally. The moment the
+        connection is back, queued sales and stock updates drain to the backend on their own. The button below
+        is only there to test that flow on demand, without physically switching off wifi.
+        <br><br>
+        One thing to set up once you host this for real: the page itself needs to survive a reload with zero
+        network too — that's what <code style="background:var(--bg);padding:2px 6px;border-radius:5px;">manifest.json</code>
+        and <code style="background:var(--bg);padding:2px 6px;border-radius:5px;">sw.js</code> (included alongside
+        this file) handle. Host all three together and open the till once while online — after that, it opens
+        offline, cold, with no connection at all.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="toggle-row">
+        <div><b style="font-size:13px;">Simulate connectivity</b><br><span class="hint" style="margin:0;">Test how offline sales queue, then flush on reconnect.</span></div>
+        <button id="toggleNetBtn" class="primary-btn">Go online</button>
+      </div>
+      <h3 style="margin-top:14px;">Sync log</h3>
+      <div class="sync-log" id="syncLog"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Login screen — silent PIN entry, identity is resolved from the PIN itself -->
+<!-- Set Admin PIN screen — shown automatically the moment the default 1234 is typed on a
+     device that's never been set up before. This is the entire "onboarding" experience —
+     no menu, no choice, nothing to explain to a shopkeeper. Type 1234, set a real PIN, done. -->
+<div class="login-screen hide" id="setAdminPinScreen">
+  <div class="login-card">
+    <div class="login-mark">MD</div>
+    <h2>Welcome!</h2>
+    <p id="setPinStepLabel">Choose a 6-digit PIN — this becomes your permanent Admin login for this shop.</p>
+    <div class="pin-dots" id="setPinDots">
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+    </div>
+    <div class="keypad" id="setPinKeypad">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
+    </div>
+    <p id="setPinError" style="color:var(--clay); font-size:12px; min-height:16px; margin-top:10px; text-align:center;"></p>
+  </div>
+</div>
+
+<div class="login-screen" id="loginScreen">
+  <!-- Rotating real photos — one per business type this till serves.
+       Free-to-use, commercially licensed photography (Pexels), not illustrations or AI. -->
+  <div class="scene-layer showing" id="scene-duka" style="background-image:url('https://images.pexels.com/photos/30020992/pexels-photo-30020992.jpeg?auto=compress&cs=tinysrgb&w=1600')"></div>
+  <div class="scene-layer" id="scene-fuel" style="background-image:url('https://images.pexels.com/photos/188024/pexels-photo-188024.jpeg?auto=compress&cs=tinysrgb&w=1600')"></div>
+  <div class="scene-layer" id="scene-gas" style="background-image:url('https://images.pexels.com/photos/35382734/pexels-photo-35382734.jpeg?auto=compress&cs=tinysrgb&w=1600')"></div>
+  <div class="scene-layer" id="scene-water" style="background-image:url('https://images.pexels.com/photos/15524063/pexels-photo-15524063.jpeg?auto=compress&cs=tinysrgb&w=1600')"></div>
+  <div class="scene-layer" id="scene-carwash" style="background-image:url('https://images.pexels.com/photos/5693651/pexels-photo-5693651.jpeg?auto=compress&cs=tinysrgb&w=1600')"></div>
+  <div class="scene-layer" id="scene-chemist" style="background-image:url('https://images.pexels.com/photos/208512/pexels-photo-208512.jpeg?auto=compress&cs=tinysrgb&w=1600')"></div>
+
+  <div class="scene-overlay"></div>
+  <div class="scene-caption" id="sceneCaption">Every sale accounted for.</div>
+
+  <div class="login-card">
+    <div class="login-mark">MD</div>
+    <h2>My DukaGO POS</h2>
+    <p>Enter your PIN to start this till.</p>
+    <div class="pin-dots" id="pinDots">
+      <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+    </div>
+    <div class="keypad" id="loginKeypad">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
+    </div>
+    <p class="login-hint" id="loginHint"></p>
+  </div>
+</div>
+
+<!-- Shared PIN / approval modal -->
+<div class="modal-overlay" id="pinModal">
+  <div class="modal-box">
+    <h3 id="pinModalTitle">Admin access</h3>
+    <p id="pinModalSub">Enter an admin PIN to open Stock, Reports and Sync setup.</p>
+    <input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="PIN">
+    <div class="modal-actions">
+      <button class="modal-cancel" id="pinCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="pinConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cash tender modal -->
+<div class="modal-overlay" id="tenderModal">
+  <div class="modal-box" style="width:min(88vw,300px);">
+    <h3>Cash tendered</h3>
+    <p id="tenderDue">Amount due: KSh 0</p>
+    <input id="tenderInput" type="number" placeholder="Amount received" inputmode="decimal">
+    <div class="quick-cash" id="quickCash"></div>
+    <p id="changeDue" class="change-line"></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="tenderCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="tenderConfirmBtn">Confirm sale</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reason for removing something from the sale — required before any void/clear proceeds -->
+<div class="modal-overlay" id="reasonModal">
+  <div class="modal-box" style="width:min(88vw,310px); text-align:left;">
+    <h3 style="text-align:center;">Why is this being removed?</h3>
+    <p id="reasonContext" style="text-align:center; font-size:12.5px;"></p>
+    <input id="reasonInput" type="text" placeholder="e.g. wrong item scanned, customer changed mind" style="width:100%; padding:11px; border-radius:9px; border:1.5px solid var(--line); font-size:13px; margin:8px 0 4px;">
+    <p id="reasonError" style="color:var(--clay); font-size:11px; min-height:14px; margin:0 0 6px;"></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="reasonCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="reasonConfirmBtn">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- M-Pesa payment — simple manual record for now (customer pays independently to your Till,
+     shows the cashier their confirmation SMS). The real STK-push prompt gets wired in later
+     once the Daraja backend exists; this keeps that door open without blocking daily use. -->
+<div class="modal-overlay" id="mpesaModal">
+  <div class="modal-box" style="width:min(88vw,300px);">
+    <h3>M-Pesa payment</h3>
+    <p id="mpesaDue">Amount due: KSh 0</p>
+    <input id="mpesaCodeInput" type="text" placeholder="M-Pesa code (optional)" style="width:100%; text-align:center; letter-spacing:1px; font-size:14px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px; text-transform:uppercase;">
+    <p style="font-size:11px; color:var(--muted); margin:0 0 14px;">If the customer's confirmation SMS is handy, jot the code down for your own record — or just confirm they've paid.</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="mpesaCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="mpesaSendBtn">Confirm payment received</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sale complete — shown right after payment is confirmed -->
+<div class="modal-overlay" id="saleCompleteModal">
+  <div class="modal-box" style="width:min(88vw,320px);">
+    <h3>✓ Sale complete</h3>
+    <div class="sc-amounts">
+      <div class="sc-row"><span>Amount paid</span><span id="scPaid">KSh 0</span></div>
+      <div class="sc-row"><span id="scReceivedLabel">Received</span><span id="scReceived">KSh 0</span></div>
+      <div class="sc-row sc-balance"><span>Balance</span><span id="scBalance">KSh 0</span></div>
+    </div>
+    <p class="sc-thanks" id="scThanks">Asante! Karibu tena.</p>
+    <div class="modal-actions" id="scReceiptActions">
+      <button class="modal-cancel" id="scSkipBtn">No receipt</button>
+      <button class="modal-confirm" id="scPrintBtn">Print / Save PDF</button>
+    </div>
+    <button class="btn-pay" id="scDoneBtn" style="width:100%; margin-top:10px; padding:13px 0; font-size:14px;">New sale</button>
+  </div>
+</div>
+
+<!-- Add custom business type modal -->
+<div class="modal-overlay" id="addBizModal">
+  <div class="modal-box" style="width:min(88vw,320px); text-align:left;">
+    <h3 style="text-align:center;">Add business type</h3>
+    <p style="text-align:center;">Give it a name, an emoji, and the categories it sells under. You'll add its actual SKUs from Stock afterwards.</p>
+    <div class="form-row" style="grid-template-columns:1fr; margin-bottom:0;">
+      <input id="bizNameInput" placeholder="Business type name (e.g. Pharmacy)">
+      <input id="bizEmojiInput" placeholder="Emoji (optional, e.g. 💊)" maxlength="2">
+      <input id="bizCatsInput" placeholder="Categories, comma-separated (e.g. Medicine, Supplements)">
+    </div>
+    <div class="modal-actions" style="margin-top:12px;">
+      <button class="modal-cancel" id="bizCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="bizConfirmBtn">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   My DukaGO POS — role-based till: Cashier / Supervisor / Admin
+   Type 1234 on a device that's never been set up before to start a new shop —
+   it immediately prompts for a real 6-digit Admin PIN, checked for uniqueness
+   across the whole platform. 1234 itself is never a stored, working credential.
+   ========================================================================= */
+const OUTLET_ID = 'outlet_001';
+const CATS_BY_TYPE = {}; // filled below, keyed by business type id
+let CATS = ['All'];
+let CAT_COLORS = {};
+
+const BUILTIN_BUSINESS_TYPES = {
+  duka: {
+    label:'Duka / General Retail', emoji:'🛒',
+    desc:'Groceries, drinks, household goods, airtime.',
+    subtitle:'General Retail', unitLabel:'stock',
+    cats:['Groceries','Drinks','Household','Airtime','Other'],
+    colors:{Groceries:'#4c7a52', Drinks:'#2f7a8c', Household:'#b33f2e', Airtime:'#e2a034', Other:'#8c7c5e'},
+    starter:[
+      {sku:'5000112637922', name:'Blueband 500g', price:210, stock:24, cat:'Groceries'},
+      {sku:'6161100810018', name:'Mumias Sugar 2kg', price:280, stock:15, cat:'Groceries'},
+      {sku:'6161000970012', name:'Unga Pembe 2kg', price:205, stock:6, cat:'Groceries'},
+      {sku:'8850006315056', name:'Kasuku Cooking Oil 1L', price:320, stock:11, cat:'Groceries'},
+      {sku:'6009880304018', name:'Coca-Cola 500ml', price:70, stock:48, cat:'Drinks'},
+      {sku:'5449000000996', name:'Milo 400g', price:390, stock:3, cat:'Drinks'},
+      {sku:'6161055501234', name:'Minute Maid 1L', price:180, stock:20, cat:'Drinks'},
+      {sku:'6161112211004', name:'Omo Detergent 1kg', price:250, stock:9, cat:'Household'},
+      {sku:'6161099887766', name:'Jik 500ml', price:120, stock:14, cat:'Household'},
+      {sku:'6009183350017', name:'Airtime Scratch KSh100', price:100, stock:60, cat:'Airtime'},
+      {sku:'6009183350024', name:'Airtime Scratch KSh250', price:250, stock:40, cat:'Airtime'},
+      {sku:'6161077665544', name:'Colgate 100ml', price:150, stock:2, cat:'Other'},
+    ]
+  },
+  fuel: {
+    label:'Fuel Station', emoji:'⛽',
+    desc:'Petrol, diesel, kerosene, lubricants, forecourt shop.',
+    subtitle:'Fuel Station', unitLabel:'per litre / unit',
+    cats:['Fuel','Lubricants','Shop','Other'],
+    colors:{Fuel:'#b33f2e', Lubricants:'#8c7c5e', Shop:'#4c7a52', Other:'#e2a034'},
+    starter:[
+      {sku:'FUEL-SUPER-1L', name:'Super Petrol (1L)', price:194, stock:null, cat:'Fuel'},
+      {sku:'FUEL-DIESEL-1L', name:'Diesel (1L)', price:180, stock:null, cat:'Fuel'},
+      {sku:'FUEL-KEROSENE-1L', name:'Kerosene (1L)', price:165, stock:null, cat:'Fuel'},
+      {sku:'LUBE-ENGINE-1L', name:'Engine Oil 1L', price:850, stock:20, cat:'Lubricants'},
+      {sku:'LUBE-GREASE', name:'Grease Tube', price:350, stock:15, cat:'Lubricants'},
+      {sku:'SHOP-WATER-500', name:'Bottled Water 500ml', price:60, stock:40, cat:'Shop'},
+      {sku:'SHOP-CARWASH-ADDON', name:'Quick Wipe-down', price:150, stock:null, cat:'Shop'},
+    ]
+  },
+  gas: {
+    label:'Gas / LPG Refill Station', emoji:'🛢️',
+    desc:'LPG cylinder refills, exchanges, accessories — separate from petrol/diesel forecourts.',
+    subtitle:'Gas Station', unitLabel:'per cylinder / unit',
+    cats:['Gas Cylinders','Accessories','Other'],
+    colors:{'Gas Cylinders':'#2f7a8c', Accessories:'#8c7c5e', Other:'#e2a034'},
+    starter:[
+      {sku:'LPG-6KG', name:'LPG Refill 6kg', price:1250, stock:10, cat:'Gas Cylinders'},
+      {sku:'LPG-13KG', name:'LPG Refill 13kg', price:2600, stock:6, cat:'Gas Cylinders'},
+      {sku:'LPG-3KG', name:'LPG Refill 3kg', price:650, stock:12, cat:'Gas Cylinders'},
+      {sku:'LPG-EXCH-6KG', name:'6kg Cylinder Exchange (empty for full)', price:1150, stock:null, cat:'Gas Cylinders'},
+      {sku:'GAS-REGULATOR', name:'Gas Regulator', price:900, stock:8, cat:'Accessories'},
+      {sku:'GAS-HOSE', name:'Gas Hose Pipe', price:400, stock:15, cat:'Accessories'},
+    ]
+  },
+  water: {
+    label:'Water Refill Centre', emoji:'💧',
+    desc:'Bulk drinking water refills, dispensers, delivery.',
+    subtitle:'Water Refill Centre', unitLabel:'per container',
+    cats:['Refills','Dispensers','Delivery','Other'],
+    colors:{Refills:'#2f7a8c', Dispensers:'#4c7a52', Delivery:'#e2a034', Other:'#8c7c5e'},
+    starter:[
+      {sku:'WATER-5L', name:'5L Refill', price:30, stock:null, cat:'Refills'},
+      {sku:'WATER-10L', name:'10L Refill', price:50, stock:null, cat:'Refills'},
+      {sku:'WATER-20L', name:'20L Refill', price:90, stock:null, cat:'Refills'},
+      {sku:'WATER-JERRYCAN-NEW', name:'New 20L Jerrycan', price:350, stock:25, cat:'Dispensers'},
+      {sku:'WATER-DISPENSER', name:'Table-top Dispenser', price:2200, stock:5, cat:'Dispensers'},
+      {sku:'WATER-DELIVERY', name:'Delivery (per trip)', price:100, stock:null, cat:'Delivery'},
+    ]
+  },
+  carwash: {
+    label:'Carwash', emoji:'🚗',
+    desc:'Wash packages, detailing, add-ons — priced as services.',
+    subtitle:'Carwash', unitLabel:'per service',
+    cats:['Wash Packages','Detailing','Add-ons','Other'],
+    colors:{'Wash Packages':'#2f7a8c', Detailing:'#b33f2e', 'Add-ons':'#e2a034', Other:'#8c7c5e'},
+    starter:[
+      {sku:'WASH-SALOON', name:'Saloon Car Wash', price:300, stock:null, cat:'Wash Packages'},
+      {sku:'WASH-SUV', name:'SUV / 4x4 Wash', price:450, stock:null, cat:'Wash Packages'},
+      {sku:'WASH-MOTORBIKE', name:'Motorbike Wash', price:150, stock:null, cat:'Wash Packages'},
+      {sku:'DETAIL-INTERIOR', name:'Interior Detailing', price:800, stock:null, cat:'Detailing'},
+      {sku:'DETAIL-ENGINE', name:'Engine Bay Wash', price:500, stock:null, cat:'Detailing'},
+      {sku:'ADDON-WAX', name:'Wax & Polish', price:600, stock:null, cat:'Add-ons'},
+      {sku:'ADDON-TYRE', name:'Tyre Shine', price:100, stock:null, cat:'Add-ons'},
+    ]
+  },
+  chemist: {
+    label:'Chemist / Pharmacy', emoji:'💊',
+    desc:'Pain relief, first aid, personal care, prescription-only.',
+    subtitle:'Chemist', unitLabel:'stock',
+    cats:['Prescription Only','Pain & Fever','Cold & Flu','First Aid','Personal Care','Baby & Mother','Other'],
+    colors:{'Prescription Only':'#b33f2e', 'Pain & Fever':'#e2a034', 'Cold & Flu':'#2f7a8c', 'First Aid':'#4c7a52', 'Personal Care':'#6a4c93', 'Baby & Mother':'#e2a034', Other:'#8c7c5e'},
+    starter:[
+      {sku:'CHEM-PARA-500', name:'Paracetamol 500mg (16s)', price:50, stock:60, cat:'Pain & Fever'},
+      {sku:'CHEM-IBUPROFEN-200', name:'Ibuprofen 200mg (10s)', price:80, stock:40, cat:'Pain & Fever'},
+      {sku:'CHEM-ASPIRIN-300', name:'Aspirin 300mg (10s)', price:60, stock:30, cat:'Pain & Fever'},
+      {sku:'CHEM-ORS-SACHET', name:'ORS Rehydration Sachet', price:30, stock:50, cat:'First Aid'},
+      {sku:'CHEM-COUGH-SYRUP', name:'Cough Syrup 100ml', price:180, stock:20, cat:'Cold & Flu'},
+      {sku:'CHEM-ANTIHIST-10', name:'Antihistamine Tablets (10s)', price:120, stock:25, cat:'Cold & Flu'},
+      {sku:'CHEM-VITC-1000', name:'Vitamin C 1000mg (10s)', price:150, stock:30, cat:'Cold & Flu'},
+      {sku:'CHEM-BANDAGE', name:'Elastic Bandage', price:100, stock:20, cat:'First Aid'},
+      {sku:'CHEM-PLASTERS', name:'Adhesive Plasters (box)', price:80, stock:25, cat:'First Aid'},
+      {sku:'CHEM-ANTISEPTIC-100', name:'Antiseptic Solution 100ml', price:150, stock:18, cat:'First Aid'},
+      {sku:'CHEM-COTTON-WOOL', name:'Cotton Wool Roll', price:70, stock:20, cat:'First Aid'},
+      {sku:'CHEM-AMOXICILLIN-500', name:'Amoxicillin 500mg (Rx)', price:250, stock:15, cat:'Prescription Only'},
+      {sku:'CHEM-ANTIMALARIAL', name:'Antimalarial Course (Rx)', price:400, stock:12, cat:'Prescription Only'},
+      {sku:'CHEM-HANDSANITIZER', name:'Hand Sanitizer 100ml', price:100, stock:35, cat:'Personal Care'},
+      {sku:'CHEM-MULTIVITAMIN', name:'Multivitamin Tablets (30s)', price:350, stock:15, cat:'Personal Care'},
+      {sku:'CHEM-BABYDIAPER-M', name:'Baby Diapers, Medium (packet)', price:450, stock:12, cat:'Baby & Mother'},
+      {sku:'CHEM-BABYFORMULA', name:'Infant Formula 400g', price:850, stock:8, cat:'Baby & Mother'},
+    ]
+  },
+  supermarket: {
+    label:'Supermarket', emoji:'🛒',
+    desc:'Full grocery range — produce, bakery, butchery, household, beverages, and more than one till.',
+    subtitle:'Supermarket', unitLabel:'stock',
+    cats:['Fresh Produce','Bakery','Butchery','Groceries','Beverages','Household','Personal Care','Frozen Foods','Electronics','Other'],
+    colors:{'Fresh Produce':'#4c7a52', Bakery:'#e2a034', Butchery:'#b33f2e', Groceries:'#8c7c5e', Beverages:'#2f7a8c', Household:'#6a4c93', 'Personal Care':'#e2a034', 'Frozen Foods':'#2f7a8c', Electronics:'#4c7a52', Other:'#8c7c5e'},
+    starter:[
+      {sku:'SM-TOMATOES-KG', name:'Tomatoes (per kg)', price:120, stock:40, cat:'Fresh Produce'},
+      {sku:'SM-ONIONS-KG', name:'Onions (per kg)', price:100, stock:40, cat:'Fresh Produce'},
+      {sku:'SM-BANANAS-KG', name:'Bananas (per kg)', price:80, stock:30, cat:'Fresh Produce'},
+      {sku:'SM-BREAD-WHITE', name:'White Bread 400g', price:65, stock:35, cat:'Bakery'},
+      {sku:'SM-BREAD-BROWN', name:'Brown Bread 400g', price:70, stock:25, cat:'Bakery'},
+      {sku:'SM-BEEF-KG', name:'Beef (per kg)', price:650, stock:20, cat:'Butchery'},
+      {sku:'SM-CHICKEN-KG', name:'Chicken (per kg)', price:450, stock:20, cat:'Butchery'},
+      {sku:'SM-RICE-2KG', name:'Pishori Rice 2kg', price:280, stock:30, cat:'Groceries'},
+      {sku:'SM-MAIZEFLOUR-2KG', name:'Maize Flour 2kg', price:180, stock:40, cat:'Groceries'},
+      {sku:'SM-COOKINGOIL-2L', name:'Cooking Oil 2L', price:520, stock:25, cat:'Groceries'},
+      {sku:'SM-SODA-2L', name:'Soda 2L', price:150, stock:30, cat:'Beverages'},
+      {sku:'SM-JUICE-1L', name:'Juice 1L', price:200, stock:20, cat:'Beverages'},
+      {sku:'SM-DETERGENT-1KG', name:'Washing Powder 1kg', price:280, stock:20, cat:'Household'},
+      {sku:'SM-TISSUE-PACK', name:'Toilet Tissue (4-pack)', price:220, stock:25, cat:'Household'},
+      {sku:'SM-TOOTHPASTE', name:'Toothpaste 100ml', price:150, stock:30, cat:'Personal Care'},
+      {sku:'SM-SOAP-BAR', name:'Bathing Soap Bar', price:90, stock:40, cat:'Personal Care'},
+      {sku:'SM-ICECREAM-1L', name:'Ice Cream 1L', price:450, stock:12, cat:'Frozen Foods'},
+      {sku:'SM-FROZEN-VEG', name:'Frozen Mixed Vegetables 500g', price:250, stock:15, cat:'Frozen Foods'},
+      {sku:'SM-PHONE-CHARGER', name:'Phone Charger (generic)', price:450, stock:15, cat:'Electronics'},
+      {sku:'SM-BATTERIES-AA', name:'AA Batteries (4-pack)', price:180, stock:20, cat:'Electronics'},
+    ]
+  }
+};
+let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
+function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
+const ROLE_RANK = {cashier:1, supervisor:2, admin:3};
+
+let db, cart = [], isOnline = false, activeCat = 'All', searchTerm = '';
+let vatEnabled = false, vatRate = 16; // VAT is off by default — admin turns it on in Sync & Setup
+let businessProfile = {storeName:'', ownerName:'', phone:'', address:'', location:''};
+let tillLabel = 'Till 1'; // configurable per device — matters for a supermarket with several pay stations
+
+// ---------- Shop identity — what makes "cashier joins on her own phone" possible ----------
+// PLATFORM_SUPABASE_URL/KEY belong to YOU, the platform operator, not individual shop owners.
+// Set these once (Admin → Sync & Setup still has an override field for testing, but this is
+// the real default every deployed copy of the app should ship with). The anon key is meant to
+// be public — Supabase's Row Level Security policies are what actually keep one shop's data
+// safe from another, not secrecy of this key.
+const PLATFORM_SUPABASE_URL = 'https://duoshfyiiplvtoasxghn.supabase.co';
+const PLATFORM_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1b3NoZnlpaXBsdnRvYXN4Z2huIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MTUxMzYsImV4cCI6MjEwNDA5MTEzNn0.jRY-NwwTzjsTH8xORB03fw0lVaNps0PcZE_WbBxyMsk';
+let shopId = null; // internal UUID, never shown to anyone — a PIN is what identifies a person now
+let lastPullSync = null;
+let receiptAction = 'ask'; // 'ask' | 'print' | 'pdf' | 'skip' — how receipts are offered after a sale
+let receiptPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — affects the printable receipt layout only
+let gdriveClientId = '', gdriveFileId = null, gdriveAccessToken = null, gdriveAutoOn = false, gdriveAutoTimer = null;
+let currentBusinessTypes = ['duka']; // array — supports combining multiple business types on one till
+let currentUser = null; // {id, name, role}
+let pinModalMode = null; // 'login' | 'admin_override' | 'approval'
+let pendingApprovalAction = null;
+const $ = id => document.getElementById(id);
+
+// ---------- IndexedDB ----------
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open('soko_pos_db_v1', 5);
+    req.onupgradeneeded = e=>{
+      const d = e.target.result;
+      if(!d.objectStoreNames.contains('products')) d.createObjectStore('products',{keyPath:'sku'});
+      if(!d.objectStoreNames.contains('sales')) d.createObjectStore('sales',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('sync_queue')) d.createObjectStore('sync_queue',{keyPath:'id',autoIncrement:true});
+      if(!d.objectStoreNames.contains('users')) d.createObjectStore('users',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('settings')) d.createObjectStore('settings',{keyPath:'key'});
+      if(!d.objectStoreNames.contains('audit_log')) d.createObjectStore('audit_log',{keyPath:'id',autoIncrement:true});
+      if(!d.objectStoreNames.contains('stock_movements')) d.createObjectStore('stock_movements',{keyPath:'id',autoIncrement:true});
+      if(!d.objectStoreNames.contains('daily_snapshots')) d.createObjectStore('daily_snapshots',{keyPath:'date'});
+    };
+    req.onsuccess = e=>resolve(e.target.result);
+    req.onerror = e=>reject(e);
+  });
+}
+function tx(store, mode='readonly'){ return db.transaction(store,mode).objectStore(store); }
+function getAll(store){ return new Promise(res=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result); }); }
+function put(store,val){ return new Promise(res=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); }); }
+function del(store,key){ return new Promise(res=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); }); }
+function getSetting(key){ return new Promise(res=>{ const r=tx('settings').get(key); r.onsuccess=()=>res(r.result); }); }
+
+async function logAudit(action, details=''){
+  await put('audit_log', {
+    ts: new Date().toISOString(),
+    actor: currentUser ? currentUser.name : 'System',
+    role: currentUser ? currentUser.role : '-',
+    action, details
+  });
+}
+
+// ---------- Daily opening-stock snapshot (for "stock vs this morning") ----------
+function todayKey(){ return new Date().toDateString(); }
+async function ensureTodaySnapshot(){
+  const key = todayKey();
+  const existing = await new Promise(res=>{
+    const r = tx('daily_snapshots').get(key);
+    r.onsuccess = ()=>res(r.result);
+  });
+  if(existing) return;
+  const products = await getAll('products');
+  const stocks = {};
+  products.forEach(p=>{ if(p.stock!==null && p.stock!==undefined) stocks[p.sku] = p.stock; });
+  await put('daily_snapshots', {date:key, stocks});
+}
+async function getTodaySnapshot(){
+  const key = todayKey();
+  return new Promise(res=>{
+    const r = tx('daily_snapshots').get(key);
+    r.onsuccess = ()=>res(r.result ? r.result.stocks : {});
+  });
+}
+
+async function seedIfEmpty(){
+  if((await getAll('products')).length) return;
+  for(const p of BUILTIN_BUSINESS_TYPES.duka.starter) await put('products', {...p, btype:'duka'});
+}
+let CAT_TO_TYPE = {}; // category name -> business type id, built on merge, used to file new stock correctly
+
+async function applyBusinessTypes(typeIds, {announce=true, pushToBackend=true} = {}){
+  const types = allBusinessTypes();
+  const ids = (Array.isArray(typeIds) ? typeIds : [typeIds]).filter(id => types[id]);
+  if(ids.length===0) return;
+  const selected = ids.map(id => types[id]);
+
+  // Merge categories and colors from every selected type. If two types share a category
+  // name (e.g. both have "Other"), the second one is disambiguated with its type label so
+  // products don't get silently mixed together or filed under the wrong business type.
+  const mergedCats = [];
+  const mergedColors = {};
+  CAT_TO_TYPE = {};
+  const catOwner = {};
+  selected.forEach((t, idx)=>{
+    const tid = ids[idx];
+    t.cats.forEach(c=>{
+      let label = c;
+      if(catOwner[c] !== undefined && catOwner[c] !== tid){
+        label = `${c} (${t.label})`;
+      }
+      catOwner[c] = catOwner[c] === undefined ? tid : catOwner[c];
+      mergedCats.push(label);
+      mergedColors[label] = t.colors[c];
+      CAT_TO_TYPE[label] = tid;
+    });
+  });
+  CATS = ['All', ...mergedCats];
+  CAT_COLORS = mergedColors;
+  activeCat = 'All';
+  currentBusinessTypes = ids;
+  await put('settings', {key:'active_business_types', value: ids});
+  // Only push a REAL, deliberate choice — never the fallback default used when booting or
+  // restoring, and never a value that just came FROM a pull. Pushing indiscriminately here
+  // is what let a fresh device's temporary "duka" default silently overwrite a shop's real
+  // business type in the backend before that device had pulled the real setting down.
+  if(pushToBackend) await queuePush('settings_upsert', {key:'active_business_types', value: ids});
+
+  const subtitle = selected.length>1 ? selected.map(t=>t.subtitle).join(' + ') : selected[0].subtitle;
+  $('storeSubtitle').textContent = `${tillLabel} · ${subtitle}`;
+
+  // Load each selected type's starter catalog in — only adds items not already present
+  const existing = await getAll('products');
+  const existingSkus = new Set(existing.map(p=>p.sku));
+  let added = 0;
+  for(const id of ids){
+    for(const p of types[id].starter){
+      if(!existingSkus.has(p.sku)){ await put('products', {...p, btype:id}); existingSkus.add(p.sku); added++; }
+    }
+  }
+  renderCatRow();
+  await renderProductGrid();
+  if(announce){
+    const label = selected.length>1 ? selected.map(t=>t.label).join(' + ') : selected[0].label;
+    toast(added ? `Now on ${label} — ${added} starter item(s) loaded` : `Now on ${label}`);
+    logAudit(selected.length>1 ? 'Combined business types' : 'Switched business type', label);
+  }
+}
+// No auto-seeded admin anymore — "1234" is a pure bootstrap trigger recognized at login,
+// never a real stored credential. The first real user only gets created once someone
+// finishes the "set your Admin PIN" flow that 1234 triggers. See tryPinCheckpoint().
+
+function fmtKsh(n){ return 'KSh ' + n.toLocaleString('en-KE'); }
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove('show'),1800); }
+function initials(name){ return name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
+function log(msg, cls=''){
+  const el=$('syncLog'); const time=new Date().toLocaleTimeString('en-KE',{hour12:false});
+  const line=document.createElement('div'); line.innerHTML=`<span style="opacity:.6">[${time}]</span> <span class="${cls}">${msg}</span>`;
+  el.appendChild(line); el.scrollTop = el.scrollHeight;
+}
+
+// ---------- Category chips ----------
+function populateCatSelect(){
+  const sel = $('newCat');
+  const cats = CATS.filter(c=>c!=='All');
+  sel.innerHTML = cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+function renderCatRow(){
+  const row = $('catRow'); row.innerHTML='';
+  CATS.forEach(c=>{
+    const chip = document.createElement('button');
+    chip.className = 'cat-chip' + (c===activeCat?' active':'');
+    chip.textContent = c;
+    chip.addEventListener('click', ()=>{ activeCat=c; renderCatRow(); renderProductGrid(); });
+    row.appendChild(chip);
+  });
+}
+
+// ---------- Product tiles ----------
+async function renderProductGrid(){
+  const products = await getAll('products');
+  products.sort((a,b)=>a.name.localeCompare(b.name));
+  let filtered = products.filter(p => currentBusinessTypes.includes(p.btype||'duka'));
+  if(activeCat!=='All') filtered = filtered.filter(p=>p.cat===activeCat);
+  if(searchTerm.trim()){
+    const q = searchTerm.trim().toLowerCase();
+    filtered = filtered.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  }
+  const grid = $('productGrid'); grid.innerHTML='';
+  if(filtered.length===0){
+    grid.innerHTML = `<div class="receipt-empty" style="grid-column:1/-1;">No products match${searchTerm?' "'+searchTerm+'"':' this category'} for this business type — add one from Admin → Stock.</div>`;
+    return;
+  }
+  filtered.forEach(p=>{
+    const isService = p.stock===null || p.stock===undefined;
+    const low = !isService && p.stock<=5, out = !isService && p.stock<=0;
+    const tile = document.createElement('button');
+    tile.className = 'tile' + (out?' disabled':'');
+    tile.disabled = out;
+    const color = CAT_COLORS[p.cat] || '#8891a0';
+    tile.innerHTML = `
+      <div class="swatch" style="background:${color}">${initials(p.name)}</div>
+      <div class="tile-body">
+        <span class="tname">${p.name}</span>
+        <div class="tmeta">
+          <span class="tprice">${fmtKsh(p.price)}</span>
+          <span class="tstock ${low?'low':''}">${isService ? '∞' : p.stock}</span>
+        </div>
+      </div>`;
+    tile.addEventListener('click', ()=>addToCart(p.sku));
+    grid.appendChild(tile);
+  });
+}
+
+// ---------- Cart ----------
+async function addToCart(sku){
+  const products = await getAll('products');
+  const p = products.find(x=>x.sku===sku);
+  if(!p){ toast('Unknown barcode: '+sku); return; }
+  const isService = p.stock===null || p.stock===undefined;
+  if(!isService){
+    const inCart = cart.filter(c=>c.sku===sku).reduce((s,c)=>s+c.qty,0);
+    if(inCart>=p.stock){ toast(p.name+' — no more stock'); return; }
+  }
+  const existing = cart.find(c=>c.sku===sku);
+  if(existing) existing.qty+=1; else cart.push({sku:p.sku,name:p.name,price:p.price,qty:1});
+  renderCart();
+}
+function renderCart(){
+  saveLiveCart();
+  const list = $('cartList');
+  if(cart.length===0){
+    list.innerHTML = '<div class="receipt-empty">No items yet — scan or tap a product</div>';
+    $('subTotal').textContent = fmtKsh(0);
+    $('taxLabel').textContent = vatEnabled ? `VAT included (${vatRate}%)` : 'VAT';
+    $('taxTotal').textContent = fmtKsh(0); $('grandTotal').textContent = fmtKsh(0);
+    $('checkoutBtn').disabled = true; return;
+  }
+  list.innerHTML='';
+  let total=0;
+  cart.forEach(item=>{
+    total += item.price*item.qty;
+    const row = document.createElement('div');
+    row.className = 'rline';
+    row.innerHTML = `<span class="rname">${item.name}</span>
+      <span class="rqty-stepper">
+        <button class="qty-dec" data-sku="${item.sku}">−</button>${item.qty}<button class="qty-inc" data-sku="${item.sku}">+</button>
+      </span>
+      <span class="rprice">${fmtKsh(item.price*item.qty)}</span>
+      <button class="rdel" data-sku="${item.sku}">×</button>`;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('.qty-inc').forEach(b=>b.addEventListener('click', ()=> addToCart(b.dataset.sku)));
+  list.querySelectorAll('.qty-dec').forEach(b=>b.addEventListener('click', ()=>{
+    const sku = b.dataset.sku;
+    const item = cart.find(c=>c.sku===sku); if(!item) return;
+    if(item.qty<=1){
+      // Dropping to zero is the same as removing the line — same reason + approval rule applies
+      requestCartRemoval('void_line', {name:item.name, qty:item.qty, price:item.price}, ()=>{ cart=cart.filter(c=>c.sku!==sku); renderCart(); });
+    } else {
+      item.qty -= 1; renderCart();
+    }
+  }));
+  list.querySelectorAll('.rdel').forEach(b=>b.addEventListener('click', ()=>{
+    const sku = b.dataset.sku;
+    const item = cart.find(c=>c.sku===sku); if(!item) return;
+    requestCartRemoval('void_line', {name:item.name, qty:item.qty, price:item.price}, ()=>{ cart=cart.filter(c=>c.sku!==sku); renderCart(); });
+  }));
+  // Prices on the till are tax-inclusive — VAT is extracted out of the total shown,
+  // never added on top of it. What the customer sees on the tile is what they pay.
+  const tax = vatEnabled ? Math.round(total - (total / (1 + vatRate/100))) : 0;
+  const netSubtotal = total - tax;
+  $('subTotal').textContent = fmtKsh(netSubtotal);
+  $('taxLabel').textContent = vatEnabled ? `VAT included (${vatRate}%)` : 'VAT';
+  $('taxTotal').textContent = fmtKsh(tax);
+  $('grandTotal').textContent = fmtKsh(total);
+  $('checkoutBtn').disabled = false;
+}
+
+// ---------- Checkout ----------
+let payMethod = 'cash';
+document.addEventListener('DOMContentLoaded', ()=>{
+  $('payMethodRow').addEventListener('click', e=>{
+    const btn = e.target.closest('button[data-method]'); if(!btn) return;
+    payMethod = btn.dataset.method;
+    $('payMethodRow').querySelectorAll('button').forEach(b=>b.classList.toggle('active', b===btn));
+    $('checkoutBtn').textContent = payMethod==='cash' ? 'PAY' : 'PAY · M-PESA';
+  });
+});
+
+async function checkout(){
+  if(cart.length===0) return;
+  const products = await getAll('products');
+  for(const item of cart){
+    const p = products.find(x=>x.sku===item.sku);
+    const isService = p && (p.stock===null || p.stock===undefined);
+    if(!p || (!isService && p.stock<item.qty)){ toast(`Not enough stock for ${item.name}`); return; }
+  }
+  // Prices are tax-inclusive: the raw cart sum IS the amount charged. VAT is
+  // extracted out of it for the receipt/report breakdown, never added on top.
+  const grandTotal = cart.reduce((s,i)=>s+i.price*i.qty,0);
+  const tax = vatEnabled ? Math.round(grandTotal - (grandTotal / (1 + vatRate/100))) : 0;
+  const netSubtotal = grandTotal - tax;
+  if(payMethod === 'mpesa'){
+    openMpesaModal(netSubtotal, tax, grandTotal);
+  } else {
+    openTenderModal(netSubtotal, tax, grandTotal);
+  }
+}
+
+// ---------- M-Pesa payment ----------
+// For now this just records that the customer paid — same simplicity as cash, since the
+// customer sends the money to your Till independently and shows the cashier their SMS.
+// The real STK-push prompt (phone buzzes, customer enters PIN, automatic confirmation) needs
+// Safaricom's Daraja API behind a real backend — that's a later phase, not blocking daily use.
+function normalizeKenyanPhone(raw){
+  let d = raw.replace(/[^\d+]/g,'');
+  if(d.startsWith('+')) d = d.slice(1);
+  if(d.startsWith('254')) d = '0'+d.slice(3);
+  if(!/^0\d{9}$/.test(d)) return null;
+  return d; // canonical form: 0XXXXXXXXX
+}
+function isSafaricomNumber(d){
+  const p3 = d.slice(0,3);
+  const p4 = d.slice(0,4);
+  if(['070','071','072','074','079'].includes(p3)) return true;
+  if(p4>='0110' && p4<='0115') return true; // Safaricom's 0110–0115 block
+  return false;
+}
+let mpesaPending = null;
+function openMpesaModal(subtotal, tax, total){
+  mpesaPending = {subtotal, tax, total};
+  $('mpesaDue').textContent = 'Amount due: ' + fmtKsh(total);
+  $('mpesaCodeInput').value = '';
+  $('mpesaModal').classList.add('show');
+  $('mpesaCodeInput').focus();
+}
+function closeMpesaModal(){
+  $('mpesaModal').classList.remove('show');
+  mpesaPending = null;
+}
+$('mpesaCancelBtn').addEventListener('click', closeMpesaModal);
+$('mpesaSendBtn').addEventListener('click', async ()=>{
+  if(!mpesaPending) return;
+  const code = $('mpesaCodeInput').value.trim().toUpperCase();
+  const {subtotal, tax, total} = mpesaPending;
+  logAudit('M-Pesa payment recorded', code ? `${fmtKsh(total)} — code ${code}` : `${fmtKsh(total)} — no code given`);
+  mpesaPending = null;
+  $('mpesaModal').classList.remove('show');
+  await finalizeSale('mpesa', subtotal, tax, total, total, code || null);
+});
+
+function openTenderModal(subtotal, tax, grandTotal){
+  $('tenderDue').textContent = 'Amount due: ' + fmtKsh(grandTotal);
+  $('tenderInput').value = '';
+  $('changeDue').textContent = '';
+  const quick = $('quickCash'); quick.innerHTML='';
+  const roundUp = Math.ceil(grandTotal/50)*50;
+  [grandTotal, roundUp, roundUp+50, roundUp+200].filter((v,i,a)=>a.indexOf(v)===i).forEach(amt=>{
+    const b = document.createElement('button');
+    b.textContent = fmtKsh(amt);
+    b.addEventListener('click', ()=>{ $('tenderInput').value = amt; updateChange(grandTotal); });
+    quick.appendChild(b);
+  });
+  $('tenderModal').classList.add('show');
+  $('tenderModal').dataset.subtotal = subtotal;
+  $('tenderModal').dataset.tax = tax;
+  $('tenderModal').dataset.total = grandTotal;
+  $('tenderInput').focus();
+}
+function updateChange(total){
+  const tendered = parseFloat($('tenderInput').value) || 0;
+  const change = tendered - total;
+  $('changeDue').textContent = tendered<=0 ? '' : (change>=0 ? `Change due: ${fmtKsh(change)}` : `Short by ${fmtKsh(-change)}`);
+}
+$('tenderInput').addEventListener('input', ()=>updateChange(parseFloat($('tenderModal').dataset.total||0)));
+$('tenderCancelBtn').addEventListener('click', ()=>$('tenderModal').classList.remove('show'));
+$('tenderConfirmBtn').addEventListener('click', ()=>{
+  const subtotal = parseFloat($('tenderModal').dataset.subtotal||0);
+  const tax = parseFloat($('tenderModal').dataset.tax||0);
+  const total = parseFloat($('tenderModal').dataset.total||0);
+  const tendered = parseFloat($('tenderInput').value) || 0;
+  if(tendered < total){ toast('Amount tendered is less than the total'); return; }
+  $('tenderModal').classList.remove('show');
+  finalizeSale('cash', subtotal, tax, total, tendered);
+});
+
+async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
+  const products = await getAll('products');
+  const lines=[];
+  for(const item of cart){
+    const p = products.find(x=>x.sku===item.sku);
+    if(!p || (p.stock!==null && p.stock!==undefined && p.stock<item.qty)){
+      toast(`Stock changed for ${item.name} — recheck the cart before paying`);
+      return;
+    }
+  }
+  for(const item of cart){
+    const p = products.find(x=>x.sku===item.sku);
+    if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
+    lines.push({sku:item.sku,name:item.name,qty:item.qty,price:item.price,cost:(p.cost||0),btype:(p.btype||'duka')});
+    await put('products', p);
+    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+  }
+  const change = tendered - total;
+  const sale = {
+    id:'sale_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), outlet_id:OUTLET_ID,
+    cashier: currentUser ? currentUser.name : 'Unknown', till: tillLabel, lines, subtotal, tax, total, method, tendered, change,
+    mpesaCode: mpesaCode || null,
+    btypes: [...currentBusinessTypes], // which business type(s) this sale belongs to, for accurate reporting
+    ts:new Date().toISOString(), synced:false
+  };
+  await put('sales', sale);
+  await put('sync_queue', {type:'sale', payload:sale, ts:Date.now()});
+  log(`Sale recorded locally — ${fmtKsh(total)} (${method}), ${lines.length} line(s). Queued for sync.`,'warn');
+  const itemSummary = lines.map(l=>`${l.qty}× ${l.name}`).join(', ');
+  logAudit('Sale completed', `${fmtKsh(total)} via ${method} — ${itemSummary}`);
+  cart=[]; renderCart(); renderProductGrid(); updatePendingBadge();
+  showSaleComplete(sale);
+}
+
+// ---------- Stock feed ----------
+function resolveTypeForCategory(cat){
+  // Uses the map built when business types were merged — correctly handles the case
+  // where two combined types share a category name like "Other".
+  if(CAT_TO_TYPE[cat]) return CAT_TO_TYPE[cat];
+  const types = allBusinessTypes();
+  const match = currentBusinessTypes.find(id => types[id] && types[id].cats.includes(cat));
+  return match || currentBusinessTypes[0];
+}
+let editingSku = null; // set when the Feed Stock form is pre-filled for editing an existing product
+
+async function addStock(){
+  const sku=$('newSku').value.trim(), name=$('newName').value.trim(), cat=$('newCat').value;
+  const qtyRaw = $('newQty').value.trim();
+  const costRaw = $('newCost').value.trim();
+  const price=parseFloat($('newPrice').value);
+  if(!sku||!name||isNaN(price)||price<0){ toast('Fill in SKU, name and a valid price'); return; }
+  const qtyProvided = qtyRaw !== '';
+  const qty = qtyProvided ? parseInt(qtyRaw, 10) : null;
+  if(qtyProvided && (isNaN(qty) || qty<=0)){ toast('Quantity must be a positive number, or blank to leave stock unchanged (or mark a brand-new item as a service)'); return; }
+  const products = await getAll('products');
+  let p = products.find(x=>x.sku===sku);
+  const isNew = !p;
+  const cost = costRaw==='' ? (p ? p.cost : 0) : parseFloat(costRaw);
+  if(p){
+    // Editing an existing product: blank quantity means "don't touch the stock count" —
+    // it must never silently convert a tracked item into an unlimited service item.
+    if(qtyProvided) p.stock = (p.stock===null||p.stock===undefined?0:p.stock) + qty;
+    p.price=price; p.name=name; p.cat=cat; p.cost=cost||0;
+  } else {
+    // Brand-new product: blank quantity is the intentional way to mark it a service/unlimited item.
+    p={sku,name,price,stock:qty,cat,cost:cost||0,btype:resolveTypeForCategory(cat)};
+  }
+  await put('products', p);
+  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+  // Log it as a purchase for the Reports "stock received" numbers — only when actual units came in
+  if(qtyProvided && qty>0){
+    const movement = {sku, name, qty, cost: cost||0, btype: resolveTypeForCategory(cat), ts:new Date().toISOString()};
+    await put('stock_movements', movement);
+    await queuePush('stock_movement', movement);
+  }
+  log(`Stock ${isNew?'added':'updated'}: ${name} (${sku})${qtyProvided?' +'+qty:''}. Queued for sync.`,'warn');
+  logAudit(isNew ? 'Added new product' : 'Updated product', `${name} (${sku})`);
+  $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
+  editingSku = null;
+  $('addStockBtn').textContent = 'Add to stock';
+  $('editingNotice').textContent = '';
+  renderStockTable(); renderProductGrid(); updatePendingBadge();
+  toast(isNew ? 'Product added' : 'Product updated');
+}
+
+function editProduct(sku){
+  editingSku = sku;
+  getAll('products').then(products=>{
+    const p = products.find(x=>x.sku===sku);
+    if(!p) return;
+    $('newSku').value = p.sku;
+    $('newName').value = p.name;
+    populateCatSelect();
+    $('newCat').value = p.cat;
+    $('newCost').value = p.cost || '';
+    $('newPrice').value = p.price;
+    $('newQty').value = ''; // blank = leave stock count untouched, per the fix above
+    $('addStockBtn').textContent = 'Save changes';
+    $('editingNotice').innerHTML = `Editing <b>${p.name}</b> — quantity left blank means stock stays as-is. <a href="#" id="cancelEditLink">Cancel</a>`;
+    $('editingNotice').querySelector('#cancelEditLink').addEventListener('click', (e)=>{
+      e.preventDefault();
+      editingSku = null;
+      $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
+      $('addStockBtn').textContent = 'Add to stock';
+      $('editingNotice').textContent = '';
+    });
+    if(typeof $('newSku').scrollIntoView === 'function') $('newSku').scrollIntoView({behavior:'smooth', block:'center'});
+    $('newPrice').focus();
+  });
+}
+
+async function renameProductSku(oldSku){
+  const products = await getAll('products');
+  const p = products.find(x=>x.sku===oldSku);
+  if(!p) return;
+  const newSku = prompt(`New SKU for "${p.name}" (currently ${oldSku}):`, oldSku);
+  if(newSku===null) return;
+  const trimmed = newSku.trim();
+  if(!trimmed){ toast('SKU cannot be empty'); return; }
+  if(trimmed===oldSku) return;
+  if(products.some(x=>x.sku===trimmed)){ toast('That SKU is already used by another product'); return; }
+  const updated = {...p, sku:trimmed};
+  await put('products', updated);
+  await del('products', oldSku);
+  logAudit('Changed product SKU', `${p.name}: ${oldSku} → ${trimmed}`);
+  toast('SKU updated — past sales/receipts keep the old SKU, which is normal');
+  renderStockTable(); renderProductGrid();
+}
+
+async function renderStockTable(){
+  populateCatSelect();
+  const products = (await getAll('products')).filter(p => currentBusinessTypes.includes(p.btype||'duka'));
+  products.sort((a,b)=>a.name.localeCompare(b.name));
+  const body = $('stockTable'); body.innerHTML='';
+  if(products.length===0){
+    body.innerHTML = `<tr><td colspan="8" style="color:var(--muted);">No products for this business type yet — add one above.</td></tr>`;
+    return;
+  }
+  products.forEach(p=>{
+    const isService = p.stock===null || p.stock===undefined;
+    const low = !isService && p.stock<=5;
+    const cost = p.cost || 0;
+    const margin = cost>0 ? (((p.price-cost)/p.price)*100).toFixed(0)+'%' : '—';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="name">${p.name}${low?'<span class="low-badge">LOW</span>':''}</td><td>${p.cat}</td><td>${p.sku}</td><td>${isService?'Unlimited':p.stock}</td><td>${cost>0?fmtKsh(cost):'—'}</td><td>${fmtKsh(p.price)}</td><td>${margin}</td>
+      <td style="white-space:nowrap; display:flex; gap:6px;">
+        <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="edit" data-sku="${p.sku}">Edit</button>
+        <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="rename" data-sku="${p.sku}">SKU</button>
+      </td>`;
+    body.appendChild(tr);
+  });
+  body.querySelectorAll('button[data-act]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if(b.dataset.act==='edit') editProduct(b.dataset.sku);
+      else if(b.dataset.act==='rename') renameProductSku(b.dataset.sku);
+    });
+  });
+}
+
+// ---------- Reports ----------
+const REPORT_PERIODS = [
+  {id:'today', label:'Today'},
+  {id:'week', label:'This Week'},
+  {id:'month', label:'This Month'},
+  {id:'year', label:'This Year'},
+];
+let reportPeriod = 'today';
+
+function withinPeriod(ts, period){
+  const d = new Date(ts), now = new Date();
+  if(period==='today') return d.toDateString()===now.toDateString();
+  if(period==='week'){ const diff = (now - d) / (1000*60*60*24); return diff>=0 && diff<7; }
+  if(period==='month') return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  if(period==='year') return d.getFullYear()===now.getFullYear();
+  return true;
+}
+
+function renderReportPeriodRow(){
+  const row = $('reportPeriodRow'); row.innerHTML='';
+  REPORT_PERIODS.forEach(p=>{
+    const chip = document.createElement('button');
+    chip.className = 'cat-chip' + (p.id===reportPeriod ? ' active' : '');
+    chip.textContent = p.label;
+    chip.addEventListener('click', ()=>{ reportPeriod=p.id; renderReportPeriodRow(); renderReports(); });
+    row.appendChild(chip);
+  });
+}
+
+async function renderReports(){
+  await ensureTodaySnapshot(); // covers the case where the day rolled over while the app stayed open
+  renderReportPeriodRow();
+  const periodLabel = REPORT_PERIODS.find(p=>p.id===reportPeriod).label;
+  $('statSalesLabel').textContent = 'Sales — ' + periodLabel.toLowerCase();
+  $('salesTableTitle').textContent = 'Sales — ' + periodLabel.toLowerCase();
+  $('purchasesTableTitle').textContent = 'Stock received — ' + periodLabel.toLowerCase();
+  $('stockCompareWrap').style.display = reportPeriod==='today' ? 'block' : 'none';
+
+  const allSales = await getAll('sales');
+  const allMovements = await getAll('stock_movements');
+  const products = (await getAll('products')).filter(p => currentBusinessTypes.includes(p.btype||'duka'));
+
+  const sales = allSales.filter(s => withinPeriod(s.ts, reportPeriod) && (!s.btypes || s.btypes.some(bt => currentBusinessTypes.includes(bt))));
+  const movements = allMovements.filter(m => withinPeriod(m.ts, reportPeriod) && (!m.btype || currentBusinessTypes.includes(m.btype)));
+
+  const revenue = sales.reduce((s,x)=>s+x.total,0);
+  const vatCollected = sales.reduce((s,x)=>s+(x.tax||0),0);
+  const itemCount = sales.reduce((s,x)=>s+x.lines.reduce((a,l)=>a+l.qty,0),0);
+  const cogs = sales.reduce((s,x)=>s + x.lines.reduce((a,l)=>a+(l.qty*(l.cost||0)),0), 0);
+  const purchasesCost = movements.reduce((s,m)=>s+(m.qty*(m.cost||0)),0);
+  // VAT collected isn't the shop's money — it's held for KRA, not profit. Profit is
+  // calculated off net revenue (VAT stripped out), never off what was simply collected at the till.
+  const profit = (revenue - vatCollected) - cogs;
+  const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=5).length;
+
+  $('statSalesCount').textContent = sales.length;
+  $('statRevenue').textContent = fmtKsh(revenue);
+  $('statRevenueLabel').textContent = (vatEnabled ? `Revenue incl. VAT — ` : `Revenue — `) + periodLabel.toLowerCase();
+  $('statItems').textContent = itemCount;
+  $('statPurchases').textContent = fmtKsh(purchasesCost);
+  $('statProfit').textContent = fmtKsh(profit);
+  $('statLow').textContent = lowStock;
+
+  // Payment method breakdown — split cash vs M-Pesa, but reconciled against the same total above
+  const cashSales = sales.filter(s=>s.method==='cash');
+  const mpesaSales = sales.filter(s=>s.method==='mpesa');
+  const cashTotal = cashSales.reduce((s,x)=>s+x.total,0);
+  const mpesaTotal = mpesaSales.reduce((s,x)=>s+x.total,0);
+  $('pmCashCount').textContent = cashSales.length;
+  $('pmCashTotal').textContent = fmtKsh(cashTotal);
+  $('pmMpesaCount').textContent = mpesaSales.length;
+  $('pmMpesaTotal').textContent = fmtKsh(mpesaTotal);
+  $('pmReconcile').textContent = `${fmtKsh(cashTotal)} + ${fmtKsh(mpesaTotal)} = ${fmtKsh(cashTotal+mpesaTotal)} total revenue`;
+  $('pmVatNote').textContent = vatEnabled ? `Includes ${fmtKsh(vatCollected)} VAT collected (held for KRA, not counted in Profit above).` : '';
+
+  // Per-business-type breakdown — only meaningful (and only shown) when this till is
+  // combining more than one business, so a losing line can't hide behind a winning one.
+  $('bizBreakdownWrap').style.display = currentBusinessTypes.length > 1 ? 'block' : 'none';
+  if(currentBusinessTypes.length > 1){
+    const types = allBusinessTypes();
+    const perType = {};
+    currentBusinessTypes.forEach(id => perType[id] = {revenue:0, vatShare:0, cogs:0, items:0, purchased:0});
+    sales.forEach(s=>{
+      (s.lines||[]).forEach(l=>{
+        const btype = l.btype || 'duka';
+        if(!perType[btype]) return; // a line from a business type no longer active on this till
+        const lineRevenue = l.qty * l.price;
+        perType[btype].revenue += lineRevenue;
+        perType[btype].cogs += l.qty * (l.cost||0);
+        perType[btype].items += l.qty;
+        // VAT was extracted at the whole-sale level, so allocate it back to each line
+        // in proportion to how much of that sale's total it represents.
+        if(s.tax>0 && s.total>0) perType[btype].vatShare += lineRevenue/s.total * s.tax;
+      });
+    });
+    movements.forEach(m=>{
+      const btype = m.btype || 'duka';
+      if(perType[btype]) perType[btype].purchased += m.qty * (m.cost||0);
+    });
+    const body = $('bizBreakdownTable'); body.innerHTML = '';
+    currentBusinessTypes.forEach(id=>{
+      const t = types[id]; if(!t) return;
+      const d = perType[id];
+      const typeProfit = (d.revenue - d.vatShare) - d.cogs;
+      const tr = document.createElement('tr');
+      const profitColor = typeProfit < 0 ? 'var(--clay)' : (typeProfit===0 ? 'var(--muted)' : 'var(--sage-dark)');
+      tr.innerHTML = `<td class="name">${t.emoji} ${t.label}</td><td>${fmtKsh(d.revenue)}</td><td style="color:${profitColor}; font-weight:700;">${fmtKsh(typeProfit)}</td><td>${d.items}</td><td>${fmtKsh(d.purchased)}</td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  // Stock comparison — today only, since opening stock is only snapshotted once per day
+  if(reportPeriod==='today'){
+    const opening = await getTodaySnapshot();
+    const soldTodayBySku = {};
+    sales.forEach(s => s.lines.forEach(l => { soldTodayBySku[l.sku] = (soldTodayBySku[l.sku]||0) + l.qty; }));
+    const receivedTodayBySku = {};
+    movements.forEach(m => { receivedTodayBySku[m.sku] = (receivedTodayBySku[m.sku]||0) + m.qty; });
+    const cmpBody = $('stockCompareTable'); cmpBody.innerHTML='';
+    const rows = products.filter(p => p.stock!==null && p.stock!==undefined); // service items have no stock to compare
+    if(rows.length===0){
+      cmpBody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);">No stock-tracked products for this business type.</td></tr>`;
+    } else {
+      rows.sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{
+        const openQty = opening[p.sku] !== undefined ? opening[p.sku] : p.stock;
+        const sold = soldTodayBySku[p.sku] || 0;
+        const received = receivedTodayBySku[p.sku] || 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="name">${p.name}</td><td>${openQty}</td><td>${sold||'—'}</td><td>${received?('+'+received):'—'}</td><td>${p.stock}</td>`;
+        cmpBody.appendChild(tr);
+      });
+    }
+  }
+
+  // Sales table
+  const salesBody = $('salesTable'); salesBody.innerHTML='';
+  const sortedSales = [...sales].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  if(sortedSales.length===0){
+    salesBody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);">No sales in this period.</td></tr>`;
+  } else {
+    sortedSales.slice(0,50).forEach(s=>{
+      const tr = document.createElement('tr');
+      const summary = s.lines.map(l=>`${l.qty}×${l.name}`).join(', ');
+      tr.innerHTML = `<td>${new Date(s.ts).toLocaleString('en-KE',{hour12:false})}</td><td class="name">${s.cashier||'—'}</td><td class="name" style="max-width:260px;">${summary}</td><td>${fmtKsh(s.total)}</td><td>${s.synced?'<span style="font-family:var(--sans);color:var(--sage-dark)">✓ synced</span>':'<span style="color:var(--gold-dark)">pending</span>'}</td>`;
+      salesBody.appendChild(tr);
+    });
+  }
+
+  // Purchases (stock received) table
+  const purchBody = $('purchasesTable'); purchBody.innerHTML='';
+  const sortedMovements = [...movements].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  if(sortedMovements.length===0){
+    purchBody.innerHTML = `<tr><td colspan="4" style="color:var(--muted);">No stock received in this period.</td></tr>`;
+  } else {
+    sortedMovements.slice(0,50).forEach(m=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${new Date(m.ts).toLocaleString('en-KE',{hour12:false})}</td><td class="name">${m.name}</td><td>+${m.qty}</td><td>${m.cost?fmtKsh(m.cost*m.qty):'—'}</td>`;
+      purchBody.appendChild(tr);
+    });
+  }
+}
+
+// ---------- Excel export — Reports and Audit Log ----------
+// Loaded on demand, only when someone actually clicks Export — the core offline selling
+// experience never depends on this or needs any internet connection for it.
+function loadSheetJS(){
+  return new Promise((resolve, reject)=>{
+    if(window.XLSX){ resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = ()=> resolve();
+    script.onerror = ()=> reject(new Error('Could not load the Excel export library — check the internet connection'));
+    document.head.appendChild(script);
+    setTimeout(()=> reject(new Error('Timed out loading the Excel export library')), 10000);
+  });
+}
+function safeFilenamePart(s){
+  return (s||'My-DukaGO-POS').trim().replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'My-DukaGO-POS';
+}
+$('exportReportsBtn').addEventListener('click', async ()=>{
+  const btn = $('exportReportsBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Preparing file…'; btn.disabled = true;
+  try{
+    await loadSheetJS();
+    const periodLabel = REPORT_PERIODS.find(p=>p.id===reportPeriod).label;
+    const allSales = await getAll('sales');
+    const allMovements = await getAll('stock_movements');
+    const sales = allSales.filter(s => withinPeriod(s.ts, reportPeriod) && (!s.btypes || s.btypes.some(bt => currentBusinessTypes.includes(bt))))
+      .sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    const movements = allMovements.filter(m => withinPeriod(m.ts, reportPeriod) && (!m.btype || currentBusinessTypes.includes(m.btype)))
+      .sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+
+    // Sheet 1: every sale, one row per sale, full line-item detail flattened into one cell
+    const salesRows = sales.map(s => ({
+      'Date/Time': new Date(s.ts).toLocaleString('en-KE',{hour12:false}),
+      'Cashier': s.cashier || '',
+      'Till': s.till || '',
+      'Items': s.lines.map(l=>`${l.qty}x ${l.name}`).join(', '),
+      'Subtotal': s.subtotal,
+      'VAT': s.tax || 0,
+      'Total': s.total,
+      'Payment method': s.method,
+      'M-Pesa code': s.mpesaCode || '',
+      'Synced': s.synced ? 'Yes' : 'No',
+    }));
+    const revenue = sales.reduce((a,x)=>a+x.total,0);
+    const vatCollected = sales.reduce((a,x)=>a+(x.tax||0),0);
+    const cogs = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+(l.qty*(l.cost||0)),0),0);
+    const purchasesCost = movements.reduce((a,m)=>a+(m.qty*(m.cost||0)),0);
+    const itemCount = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+l.qty,0),0);
+    const cashTotal = sales.filter(s=>s.method==='cash').reduce((a,x)=>a+x.total,0);
+    const mpesaTotal = sales.filter(s=>s.method==='mpesa').reduce((a,x)=>a+x.total,0);
+
+    // Sheet 2: the same summary numbers shown on screen, so the file matches what was seen
+    const summaryRows = [
+      {Metric:'Period', Value: periodLabel},
+      {Metric:'Business type(s)', Value: currentBusinessTypes.map(id=>(allBusinessTypes()[id]||{}).label||id).join(' + ')},
+      {Metric:'Sales count', Value: sales.length},
+      {Metric:'Revenue', Value: revenue},
+      {Metric:'VAT collected (not counted in Profit)', Value: vatCollected},
+      {Metric:'Cost of goods sold', Value: cogs},
+      {Metric:'Profit', Value: (revenue - vatCollected) - cogs},
+      {Metric:'Items sold', Value: itemCount},
+      {Metric:'Stock purchased (cost)', Value: purchasesCost},
+      {Metric:'', Value:''},
+      {Metric:'Cash sales total', Value: cashTotal},
+      {Metric:'M-Pesa sales total', Value: mpesaTotal},
+      {Metric:'', Value:''},
+      {Metric:'Exported', Value: new Date().toLocaleString('en-KE',{hour12:false})},
+      {Metric:'Shop', Value: businessProfile.storeName || 'My DukaGO POS'},
+    ];
+
+    // Sheet 3: stock received in the period
+    const purchaseRows = movements.map(m => ({
+      'Date/Time': new Date(m.ts).toLocaleString('en-KE',{hour12:false}),
+      'Product': m.name,
+      'Qty received': m.qty,
+      'Cost': m.cost ? m.cost*m.qty : '',
+    }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salesRows), 'Sales');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(purchaseRows), 'Stock received');
+    const filename = `${safeFilenamePart(businessProfile.storeName)}-Sales-${periodLabel.replace(/\s+/g,'')}-${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    logAudit('Exported sales report to Excel', `${periodLabel} — ${sales.length} sale(s)`);
+    toast('Excel file downloaded');
+  }catch(e){
+    toast('Export failed: '+e.message);
+  }finally{
+    btn.textContent = originalText; btn.disabled = false;
+  }
+});
+$('exportAuditBtn').addEventListener('click', async ()=>{
+  const btn = $('exportAuditBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Preparing file…'; btn.disabled = true;
+  try{
+    await loadSheetJS();
+    const logs = (await getAll('audit_log')).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+    const rows = logs.map(l => ({
+      'Date/Time': new Date(l.ts).toLocaleString('en-KE',{hour12:false}),
+      'Who': l.actor || '',
+      'Role': l.role || '',
+      'Action': l.action || '',
+      'Details': l.details || '',
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Audit Log');
+    const filename = `${safeFilenamePart(businessProfile.storeName)}-AuditLog-${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    logAudit('Exported audit log to Excel', `${logs.length} entries`);
+    toast('Excel file downloaded');
+  }catch(e){
+    toast('Export failed: '+e.message);
+  }finally{
+    btn.textContent = originalText; btn.disabled = false;
+  }
+});
+
+// ---------- Sync engine ----------
+// supaUrl/supaKey default to YOUR platform's own Supabase project (baked in above), so
+// individual shop owners never see or configure this — the per-user fields below exist only
+// as a manual override for testing, not the normal path once PLATFORM_SUPABASE_URL is set.
+let supaUrl = localStorage.getItem('supa_url') || PLATFORM_SUPABASE_URL || '';
+let supaKey = localStorage.getItem('supa_key') || PLATFORM_SUPABASE_KEY || '';
+$('supaUrl').value = supaUrl; $('supaKey').value = supaKey;
+$('saveSupaBtn').addEventListener('click', ()=>{
+  const url = $('supaUrl').value.trim(), key = $('supaKey').value.trim();
+  // Basic sanity check — a value that isn't a real https:// URL will just fail every sync
+  // attempt forever (repeated "Failed to fetch"), so refuse to save something that clearly
+  // isn't a valid Supabase URL rather than let that quietly start happening in the background.
+  if(url && !/^https:\/\/.+\.supabase\.co\/?$/.test(url)){
+    toast('That doesn\'t look like a real Supabase URL (should look like https://xxxxx.supabase.co) — not saved');
+    return;
+  }
+  supaUrl = url; supaKey = key;
+  localStorage.setItem('supa_url',supaUrl); localStorage.setItem('supa_key',supaKey);
+  if(supaUrl&&supaKey){ log('Supabase credentials saved. Live sync active next cycle.','ok'); toast('Backend connected'); }
+  else log('No credentials set — running in simulated sync mode.','warn');
+});
+function backendLive(){
+  return !!(supaUrl && supaKey && /^https:\/\/.+\.supabase\.co\/?$/.test(supaUrl));
+}
+function sbHeaders(extra){
+  return Object.assign({'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, extra||{});
+}
+async function pushToSupabase(item){
+  let table, body, prefer='return=minimal';
+  if(item.type==='sale'){
+    table='sales';
+    // Explicit field mapping, not a blind forward of the local object — the local sale
+    // record carries a couple of fields (outlet_id, camelCase mpesaCode) left over from
+    // before the real shop-sync schema existed, which don't match the sales table's actual
+    // columns and were causing every sale to be rejected outright with a 400.
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, cashier:p.cashier, till:p.till, lines:p.lines,
+      subtotal:p.subtotal, tax:p.tax, total:p.total, method:p.method,
+      tendered:p.tendered, change:p.change, mpesa_code:p.mpesaCode||null,
+      btypes:p.btypes, ts:p.ts, synced:true
+    };
+  }
+  else if(item.type==='stock_movement'){ table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
+  else if(item.type==='staff_upsert'){ table='staff'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else if(item.type==='product_upsert'){ table='products'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else if(item.type==='settings_upsert'){ table='shop_settings'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
+  const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
+    method:'POST', headers: sbHeaders({'Prefer':prefer}),
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    const errText = await res.text().catch(()=>'');
+    throw new Error(`Supabase rejected the row: ${res.status}${errText ? ' — '+errText.slice(0,150) : ''}`);
+  }
+}
+// Every local change that another device needs to see goes through here — stamps updated_at
+// so pull-sync's last-write-wins comparison has something to compare against.
+async function queuePush(type, payload){
+  const stamped = Object.assign({}, payload, {updated_at: new Date().toISOString()});
+  await put('sync_queue', {type, payload: stamped, ts: Date.now()});
+  updatePendingBadge();
+  // Try to push immediately rather than waiting for the periodic interval — matters most for
+  // staff: someone just added as a cashier may walk straight to her own phone within seconds,
+  // and she can only be found there once her record has actually reached the backend.
+  if(isOnline) runSyncLoop();
+}
+async function runSyncLoop(){
+  if(!isOnline || !shopId) return;
+  const queue = await getAll('sync_queue'); if(queue.length===0) return;
+  const live = backendLive();
+  log(`Sync started — ${queue.length} item(s) to push (${live?'live Supabase':'simulated'}).`);
+  for(const item of queue){
+    try{
+      if(live) await pushToSupabase(item); else await new Promise(r=>setTimeout(r,250));
+      if(item.type==='sale'){
+        const s = await new Promise(res=>{ const r=tx('sales').get(item.payload.id); r.onsuccess=()=>res(r.result); });
+        if(s){ s.synced=true; await put('sales', s); }
+      }
+      await del('sync_queue', item.id);
+      log(`✓ Synced ${item.type} (${item.type==='sale'?fmtKsh(item.payload.total):item.payload.name})`,'ok');
+    }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); break; }
+  }
+  updatePendingBadge(); renderReports();
+  if(live) await pullShopData();
+}
+
+// ---------- Shop identity: a PIN IS the identity now — no code to generate or share ----------
+function makeShopId(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'shop_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+}
+async function loadShopIdentity(){
+  const savedId = await getSetting('shop_id');
+  shopId = savedId ? savedId.value : null;
+}
+// Creates the shop record itself. Does NOT create any user — that only happens once the new
+// admin PIN is confirmed (see the setAdminPinScreen flow), so a half-finished setup never
+// leaves a real, usable "1234" account sitting in the database.
+async function registerNewShop(){
+  shopId = makeShopId();
+  await put('settings', {key:'shop_id', value:shopId});
+  if(backendLive()){
+    try{
+      await fetch(`${supaUrl}/rest/v1/shops`, {
+        method:'POST', headers: sbHeaders({'Prefer':'return=minimal'}),
+        body: JSON.stringify({id:shopId, name:'New shop'})
+      });
+    }catch(e){ log('Could not register shop with backend yet — will still work locally: '+e.message, 'warn'); }
+  }
+  logAudit('Shop set up');
+}
+// Updates the shops table's name column once a real business name is known, so it's
+// identifiable in the Supabase dashboard among many shops instead of staying "New shop".
+async function updateShopNameInBackend(name){
+  if(!backendLive() || !shopId) return;
+  try{
+    await fetch(`${supaUrl}/rest/v1/shops?id=eq.${shopId}`, {
+      method:'PATCH', headers: sbHeaders({'Prefer':'return=minimal'}),
+      body: JSON.stringify({name})
+    });
+  }catch(e){ /* cosmetic only — never block the actual profile save over this */ }
+}
+// Looks up a PIN across EVERY shop on the platform — this is what lets someone type their own
+// PIN on a brand-new device and be found automatically, with no code to type anywhere.
+async function lookupPinGlobally(pinValue){
+  if(!backendLive()) return null;
+  try{
+    const res = await fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()});
+    if(!res.ok) return null;
+    const rows = await res.json();
+    return (rows && rows.length) ? rows[0] : null;
+  }catch(e){ return null; }
+}
+// Pulls one specific shop's data down by shop_id — used once a global PIN lookup reveals
+// which shop a person belongs to.
+async function pullSpecificShop(targetShopId){
+  const prevShopId = shopId;
+  shopId = targetShopId;
+  await put('settings', {key:'shop_id', value:shopId});
+  await pullShopData(true);
+  logAudit('Auto-joined shop via PIN lookup', prevShopId ? `was ${prevShopId}` : 'first shop on this device');
+}
+// Checked before saving ANY new or changed PIN — local first (works offline), then the whole
+// platform if online. A PIN must be unique everywhere, not just within one shop, since a PIN
+// alone is what identifies a person now.
+async function isPinGloballyUnique(pinValue, excludeUserId){
+  const localUsers = await getAll('users');
+  const localClash = localUsers.find(u=>u.pin===pinValue && u.id!==excludeUserId && u.active!==false);
+  if(localClash) return {unique:false, ownerName:localClash.name, checkedRemote:false};
+  if(backendLive()){
+    try{
+      const res = await fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=id,name`, {headers: sbHeaders()});
+      if(res.ok){
+        const rows = await res.json();
+        const remoteClash = rows.find(r=>r.id!==excludeUserId);
+        if(remoteClash) return {unique:false, ownerName:remoteClash.name, checkedRemote:true};
+      }
+    }catch(e){ /* couldn't verify remotely — fall through as locally-unique-but-unconfirmed */ }
+  }
+  return {unique:true, checkedRemote: backendLive()};
+}
+
+// ---------- Pull sync — the other half that makes this genuinely bidirectional ----------
+// Last-write-wins by updated_at. Known, disclosed limitation: two devices changing the exact
+// same record at nearly the same moment can have one silently overwrite the other — reasonable
+// for a first real version, not yet the "reconciled" approach a very large deployment may want.
+async function pullShopData(fullPull){
+  if(!backendLive() || !shopId) return;
+  try{
+    // Staff — never overwrite a PIN with something older; skip re-pulling your own live session
+    const staffRes = await fetch(`${supaUrl}/rest/v1/staff?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(staffRes.ok){
+      const remoteStaff = await staffRes.json();
+      const localStaff = await getAll('users');
+      for(const rs of remoteStaff){
+        const ls = localStaff.find(u=>u.id===rs.id);
+        if(!ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
+          await put('users', {id:rs.id, name:rs.name, role:rs.role, pin:rs.pin, active:rs.active!==false, updated_at:rs.updated_at});
+        }
+      }
+    }
+    // Products / stock
+    const prodRes = await fetch(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(prodRes.ok){
+      const remoteProducts = await prodRes.json();
+      const localProducts = await getAll('products');
+      for(const rp of remoteProducts){
+        const lp = localProducts.find(p=>p.sku===rp.sku);
+        if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
+          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, updated_at:rp.updated_at});
+        }
+      }
+    }
+    // Shared settings (business profile, business type, VAT, receipt prefs)
+    const settingsRes = await fetch(`${supaUrl}/rest/v1/shop_settings?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(settingsRes.ok){
+      const remoteSettings = await settingsRes.json();
+      let pulledBusinessTypes = null;
+      for(const rs of remoteSettings){
+        const local = await getSetting(rs.key);
+        if(!local || !local.updated_at || new Date(rs.updated_at) > new Date(local.updated_at)){
+          await put('settings', {key:rs.key, value:rs.value, updated_at:rs.updated_at});
+          if(rs.key==='active_business_types') pulledBusinessTypes = rs.value;
+        }
+      }
+      // Re-apply anything that changed so this device actually reflects it on screen right
+      // away — saving to storage alone isn't enough, the live UI needs updating too. Business
+      // type specifically must NOT re-push here (pushToBackend:false) — it just came FROM the
+      // backend, so pushing it back is redundant, and doing so was the other half of this bug.
+      await loadBusinessProfile();
+      await loadSettingsPanelValues();
+      if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
+    }
+    // Sales from OTHER devices — so the admin can see a cashier's phone sales too
+    const sinceClause = (!fullPull && lastPullSync) ? `&ts=gt.${encodeURIComponent(lastPullSync)}` : '';
+    const salesRes = await fetch(`${supaUrl}/rest/v1/sales?shop_id=eq.${shopId}${sinceClause}&select=*`, {headers: sbHeaders()});
+    if(salesRes.ok){
+      const remoteSales = await salesRes.json();
+      for(const rs of remoteSales){
+        const existing = await new Promise(res=>{ const r=tx('sales').get(rs.id); r.onsuccess=()=>res(r.result); });
+        if(!existing) await put('sales', Object.assign({}, rs, {synced:true}));
+      }
+    }
+    lastPullSync = new Date().toISOString();
+    await put('settings', {key:'last_pull_sync', value:lastPullSync});
+    renderProductGrid(); renderCart();
+  }catch(e){
+    log('Pull sync failed this cycle: '+e.message, 'warn');
+  }
+}
+async function updatePendingBadge(){
+  const queue = await getAll('sync_queue');
+  $('pendingLabel').textContent = queue.length ? ` · ${queue.length} pending` : '';
+  const dot = $('netDot');
+  dot.className = 'net-dot ' + (!isOnline ? 'off' : (queue.length ? 'pend' : 'on'));
+}
+function setConnectivity(state, reason){
+  if(isOnline === state) return;
+  isOnline = state;
+  $('toggleNetBtn').textContent = isOnline ? 'Force offline (test)' : 'Force online (test)';
+  $('netLabel').textContent = isOnline ? 'Online' : 'Offline';
+  log(isOnline
+    ? `Connectivity restored (${reason}) — draining sync queue…`
+    : `Offline (${reason}) — sales/stock keep working and queue locally.`, isOnline?'ok':'warn');
+  updatePendingBadge();
+  if(isOnline) runSyncLoop();
+}
+// Real network detection — this is what actually drives online/offline in production,
+// the manual button below is only for testing the flow without unplugging your wifi.
+window.addEventListener('online', ()=>setConnectivity(true,'device back online'));
+window.addEventListener('offline', ()=>setConnectivity(false,'device lost connection'));
+$('toggleNetBtn').addEventListener('click', ()=>{
+  setConnectivity(!isOnline, 'manual test toggle');
+});
+setInterval(()=>{ if(isOnline) runSyncLoop(); }, 6000);
+// A device can report "online" (wifi connected) while the internet itself is down,
+// so also verify with a real, no-cache request before trusting navigator.onLine.
+async function verifyRealConnectivity(){
+  // Trust the browser's own online/offline signal directly. An earlier version tried to
+  // double-check by fetching the page's own URL, but that self-fetch gets blocked by the
+  // Content-Security-Policy in sandboxed preview environments (e.g. Claude's artifact
+  // preview), which made the till falsely report "offline" while genuinely connected.
+  // navigator.onLine plus the window 'online'/'offline' events are reliable enough on
+  // their own for a POS — the rare case of "wifi connected but internet actually down"
+  // isn't worth the false-negative risk this caused in real hosting contexts.
+  setConnectivity(navigator.onLine, navigator.onLine ? 'device reports online' : 'device reports offline');
+}
+setInterval(verifyRealConnectivity, 15000);
+
+// ---------- VAT & receipt settings ----------
+async function loadSettingsPanelValues(){
+  const vat = await getSetting('vat');
+  if(vat){ vatEnabled = vat.value.enabled; vatRate = vat.value.rate; }
+  $('vatToggleBtn').textContent = vatEnabled ? 'Turn off' : 'Turn on';
+  $('vatRateInput').value = vatRate;
+  const receipt = await getSetting('receipt');
+  if(receipt){ receiptAction = receipt.value.action; receiptPaperWidth = receipt.value.paper; }
+  $('receiptActionSelect').value = receiptAction;
+  $('receiptPaperSelect').value = receiptPaperWidth;
+
+  const gClient = await getSetting('gdrive_client_id');
+  gdriveClientId = gClient ? gClient.value : '';
+  $('gdriveClientId').value = gdriveClientId;
+  const gFile = await getSetting('gdrive_file_id');
+  gdriveFileId = gFile ? gFile.value : null;
+  $('gdriveConnectBtn').disabled = !gdriveClientId;
+  if(!gdriveAccessToken){
+    $('gdriveStatus').textContent = gdriveClientId ? 'Not connected yet — tap Connect.' : 'Save a Client ID first.';
+  }
+  renderCart(); // if VAT changed on another device and just got pulled in, reflect it on an
+                // active till screen immediately — don't wait for the next unrelated cart edit
+}
+async function saveVatSettings(showToast){
+  const rate = parseFloat($('vatRateInput').value);
+  if(isNaN(rate) || rate<0 || rate>100){ toast('Enter a valid VAT rate between 0 and 100'); return; }
+  vatRate = rate;
+  const value = {enabled:vatEnabled, rate:vatRate};
+  await put('settings', {key:'vat', value});
+  await queuePush('settings_upsert', {key:'vat', value});
+  logAudit('Updated VAT settings', `${vatEnabled?'On':'Off'} @ ${vatRate}%`);
+  renderCart(); // refresh the tax line on the till immediately
+  if(showToast) toast(vatEnabled ? `VAT on at ${vatRate}%` : 'VAT off');
+}
+$('vatToggleBtn').addEventListener('click', async ()=>{
+  vatEnabled = !vatEnabled;
+  $('vatToggleBtn').textContent = vatEnabled ? 'Turn off' : 'Turn on';
+  await saveVatSettings(true); // applies and saves immediately — no separate step to forget
+});
+$('saveVatBtn').addEventListener('click', ()=> saveVatSettings(true));
+$('saveReceiptBtn').addEventListener('click', async ()=>{
+  receiptAction = $('receiptActionSelect').value;
+  receiptPaperWidth = $('receiptPaperSelect').value;
+  await put('settings', {key:'receipt', value:{action:receiptAction, paper:receiptPaperWidth}});
+  logAudit('Updated receipt settings', `${receiptAction}, ${receiptPaperWidth}`);
+  toast('Receipt settings saved');
+});
+$('testPrintBtn').addEventListener('click', ()=>{
+  const sampleTotal = 100; // price shown to a customer would already include VAT if it's on
+  const testTax = vatEnabled ? Math.round(sampleTotal - (sampleTotal/(1+vatRate/100))) : 0;
+  printReceipt({
+    cashier: currentUser?currentUser.name:'Test', ts:new Date().toISOString(),
+    lines:[{name:'Sample Item', qty:1, price:sampleTotal}], subtotal:sampleTotal-testTax, tax:testTax,
+    total:sampleTotal, method:'cash', tendered:sampleTotal, change:0
+  });
+});
+
+// ---------- Personal Google Drive backup ----------
+// Requires: the page served over http/https (not opened as a raw file — Google's OAuth
+// rejects file:// as an origin), a real Google Cloud OAuth Client ID, and the signed-in
+// Gmail added as a "test user" on that OAuth consent screen until the app is verified.
+$('saveGdriveClientBtn').addEventListener('click', async ()=>{
+  const id = $('gdriveClientId').value.trim();
+  if(!id){ toast('Paste a Client ID first'); return; }
+  gdriveClientId = id;
+  await put('settings', {key:'gdrive_client_id', value:id});
+  $('gdriveConnectBtn').disabled = false;
+  $('gdriveStatus').textContent = 'Client ID saved — tap Connect.';
+  toast('Client ID saved');
+});
+
+function loadGoogleIdentityScript(){
+  return new Promise((resolve, reject)=>{
+    if(window.google && window.google.accounts && window.google.accounts.oauth2){ resolve(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.onload = ()=> resolve();
+    script.onerror = ()=> reject(new Error('Could not load Google\'s sign-in script — check the internet connection'));
+    document.head.appendChild(script);
+    setTimeout(()=> reject(new Error('Timed out loading Google\'s sign-in script')), 8000);
+  });
+}
+
+$('gdriveConnectBtn').addEventListener('click', async ()=>{
+  if(!gdriveClientId){ toast('Save a Client ID first'); return; }
+  if(location.protocol === 'file:'){
+    toast('Google sign-in needs this page served over http/https — serve it locally, don\'t open the raw file');
+    return;
+  }
+  $('gdriveStatus').textContent = 'Loading Google sign-in…';
+  try{
+    await loadGoogleIdentityScript();
+  }catch(e){
+    $('gdriveStatus').textContent = e.message;
+    toast(e.message);
+    return;
+  }
+  try{
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: gdriveClientId,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: (resp)=>{
+        if(resp.error){
+          $('gdriveStatus').textContent = 'Sign-in failed: '+resp.error;
+          toast('Google sign-in failed');
+          return;
+        }
+        gdriveAccessToken = resp.access_token;
+        $('gdriveStatus').textContent = 'Connected — access valid for about an hour, reconnect if it expires.';
+        $('gdriveAutoBtn').disabled = false;
+        $('gdriveBackupNowBtn').disabled = false;
+        logAudit('Connected Google Drive backup');
+        toast('Google Drive connected');
+      }
+    });
+    tokenClient.requestAccessToken();
+  }catch(e){
+    $('gdriveStatus').textContent = 'Could not start sign-in: '+e.message;
+    toast('Google sign-in failed to start');
+  }
+});
+
+async function buildGdriveBackupPayload(){
+  const users = await getAll('users');
   return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    exportedAt: new Date().toISOString(),
+    businessProfile,
+    businessTypes: currentBusinessTypes,
+    products: await getAll('products'),
+    sales: await getAll('sales'),
+    stockMovements: await getAll('stock_movements'),
+    auditLog: await getAll('audit_log'), // lets an admin review every cashier's activity from another device
+    staff: users.map(u => ({name:u.name, role:u.role, active:u.active!==false})), // PINs never leave the device
   };
 }
 
-async function getAccessToken(): Promise<{token?: string, error?: string}> {
-  const auth = btoa(`${CONSUMER_KEY}:${CONSUMER_SECRET}`);
-  const res = await fetch(`${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`, {
-    headers: { Authorization: `Basic ${auth}` },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    // Surface Safaricom's OWN error text instead of a generic message — this is what
-    // actually tells us whether it's a bad key, an inactive app, or something else entirely.
-    return { error: `Daraja OAuth rejected (${res.status}): ${JSON.stringify(data)}` };
+async function backupToGoogleDrive(){
+  if(!gdriveAccessToken){ toast('Connect Google Drive first'); return false; }
+  try{
+    const payload = await buildGdriveBackupPayload();
+    const content = JSON.stringify(payload, null, 2);
+    if(!gdriveFileId){
+      const boundary = 'mydukago_boundary_'+Date.now();
+      const metadata = {name:'my-duka-go-backup.json', mimeType:'application/json'};
+      const body =
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`+
+        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method:'POST',
+        headers:{ 'Authorization':'Bearer '+gdriveAccessToken, 'Content-Type':`multipart/related; boundary=${boundary}` },
+        body
+      });
+      if(!res.ok) throw new Error('Drive rejected the upload (HTTP '+res.status+')');
+      const data = await res.json();
+      gdriveFileId = data.id;
+      await put('settings', {key:'gdrive_file_id', value:gdriveFileId});
+    } else {
+      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`, {
+        method:'PATCH',
+        headers:{ 'Authorization':'Bearer '+gdriveAccessToken, 'Content-Type':'application/json' },
+        body: content
+      });
+      if(!res.ok) throw new Error('Drive rejected the update (HTTP '+res.status+')');
+    }
+    $('gdriveLastBackup').textContent = 'Last backup: '+new Date().toLocaleString('en-KE',{hour12:false});
+    logAudit('Backed up to Google Drive', `${payload.sales.length} sales, ${payload.products.length} products, ${payload.auditLog.length} audit entries`);
+    return true;
+  }catch(e){
+    $('gdriveStatus').textContent = 'Last attempt failed — '+e.message;
+    toast('Google Drive backup failed');
+    return false;
   }
-  return { token: data.access_token };
 }
-
-function darajaTimestamp(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-}
-
-// Accepts 07XXXXXXXX / 01XXXXXXXX / 2547XXXXXXXX / +2547XXXXXXXX, returns 2547XXXXXXXX
-// (the exact format Daraja requires) or null if it doesn't look like a real number.
-function normalizeToDarajaFormat(raw: string): string | null {
-  let d = raw.replace(/[^\d]/g, '');
-  if (d.startsWith('0') && d.length === 10) d = '254' + d.slice(1);
-  if (d.startsWith('254') && d.length === 12) return d;
-  return null;
-}
-
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders() });
-  try {
-    const body = await req.json();
-
-    // Safe diagnostic mode — never touches Daraja, never reveals the full secret, just
-    // confirms exactly what this running function currently sees for each value, so a
-    // hidden whitespace character or truncation shows up immediately instead of guessing.
-    if (body.debug === true) {
-      const mask = (s: string) => s ? `${s.slice(0,4)}...${s.slice(-4)} (length ${s.length})` : '(EMPTY)';
-      return new Response(JSON.stringify({
-        MPESA_ENV,
-        MPESA_CONSUMER_KEY: mask(CONSUMER_KEY),
-        MPESA_CONSUMER_SECRET: mask(CONSUMER_SECRET),
-        MPESA_SHORTCODE: SHORTCODE || '(EMPTY)',
-        MPESA_PASSKEY: mask(PASSKEY),
-        MPESA_CALLBACK_URL: CALLBACK_URL || '(EMPTY)',
-        BASE_URL,
-      }, null, 2), { headers: { ...corsHeaders(), 'Content-Type': 'application/json' } });
-    }
-
-    const { phone, amount, shopId, accountReference, transactionDesc } = body;
-    const daraja_phone = normalizeToDarajaFormat(phone || '');
-    if (!daraja_phone || !amount || !shopId) {
-      return new Response(JSON.stringify({ error: 'A valid phone, amount and shopId are required' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-      });
-    }
-
-    const { token, error: tokenError } = await getAccessToken();
-    if (!token) {
-      return new Response(JSON.stringify({ error: tokenError }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-      });
-    }
-    const timestamp = darajaTimestamp();
-    const password = btoa(`${SHORTCODE}${PASSKEY}${timestamp}`);
-
-    const stkRes = await fetch(`${BASE_URL}/mpesa/stkpush/v1/processrequest`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        BusinessShortCode: SHORTCODE,
-        Password: password,
-        Timestamp: timestamp,
-        TransactionType: 'CustomerPayBillOnline',
-        Amount: Math.round(amount),
-        PartyA: daraja_phone,
-        PartyB: SHORTCODE,
-        PhoneNumber: daraja_phone,
-        CallBackURL: CALLBACK_URL,
-        AccountReference: (accountReference || 'My DukaGO POS').slice(0, 12),
-        TransactionDesc: (transactionDesc || 'Payment').slice(0, 13),
-      }),
-    });
-    const stkData = await stkRes.json();
-
-    if (!stkRes.ok || stkData.ResponseCode !== '0') {
-      return new Response(JSON.stringify({ error: stkData.errorMessage || stkData.ResponseDescription || 'STK push failed' }), {
-        status: 400, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-      });
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    await supabase.from('mpesa_requests').insert({
-      checkout_request_id: stkData.CheckoutRequestID,
-      merchant_request_id: stkData.MerchantRequestID,
-      shop_id: shopId,
-      phone: daraja_phone,
-      amount,
-      status: 'pending',
-    });
-
-    return new Response(JSON.stringify({ checkoutRequestId: stkData.CheckoutRequestID }), {
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500, headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-    });
+$('gdriveBackupNowBtn').addEventListener('click', backupToGoogleDrive);
+$('gdriveAutoBtn').addEventListener('click', ()=>{
+  gdriveAutoOn = !gdriveAutoOn;
+  $('gdriveAutoBtn').textContent = gdriveAutoOn ? 'Turn off' : 'Turn on';
+  if(gdriveAutoOn){
+    gdriveAutoTimer = setInterval(backupToGoogleDrive, 5*60*1000);
+    toast('Auto-backup on — every 5 minutes while connected');
+  } else if(gdriveAutoTimer){
+    clearInterval(gdriveAutoTimer);
+    gdriveAutoTimer = null;
   }
 });
+
+// ---------- Sale complete + receipts ----------
+const SALE_THANKYOU = [
+  'Asante! Karibu tena.',
+  'Thank you — see you next time!',
+  'Thanks for shopping with us today.'
+];
+let pendingReceiptSale = null;
+function showSaleComplete(sale){
+  pendingReceiptSale = sale;
+  $('scPaid').textContent = fmtKsh(sale.total);
+  $('scReceivedLabel').textContent = sale.method==='cash' ? 'Received' : 'Paid via';
+  $('scReceived').textContent = sale.method==='cash' ? fmtKsh(sale.tendered) : ('M-Pesa'+(sale.mpesaCode?' · '+sale.mpesaCode:''));
+  $('scBalance').textContent = fmtKsh(sale.method==='cash' ? sale.change : 0);
+  $('scThanks').textContent = SALE_THANKYOU[Math.floor(Math.random()*SALE_THANKYOU.length)];
+  $('scReceiptActions').style.display = receiptAction==='skip' ? 'none' : 'flex';
+  $('saleCompleteModal').classList.add('show');
+  if(receiptAction==='print'){
+    setTimeout(()=>printReceipt(sale), 350); // let the modal render first
+  }
+}
+function closeSaleComplete(){
+  $('saleCompleteModal').classList.remove('show');
+  pendingReceiptSale = null;
+  scanInput.focus();
+}
+$('scPrintBtn').addEventListener('click', ()=>{ if(pendingReceiptSale) printReceipt(pendingReceiptSale); });
+$('scSkipBtn').addEventListener('click', closeSaleComplete);
+$('scDoneBtn').addEventListener('click', closeSaleComplete);
+
+function buildReceiptHTML(sale){
+  const types = allBusinessTypes();
+  const label = (currentBusinessTypes||[]).map(id=>types[id]?types[id].label:'').filter(Boolean).join(' + ') || 'My DukaGO POS';
+  const dt = new Date(sale.ts).toLocaleString('en-KE',{hour12:false});
+  const itemsHtml = sale.lines.map(l=>`<div class="rcpt-line"><span>${l.qty}× ${l.name}</span><span>${fmtKsh(l.qty*l.price)}</span></div>`).join('');
+  const storeName = businessProfile.storeName || 'My DukaGO POS';
+  const addrLine = [businessProfile.address, businessProfile.location].filter(Boolean).join(', ');
+  return `
+    <div class="rcpt-store">${storeName}</div>
+    <div class="rcpt-meta">${label}</div>
+    ${addrLine ? `<div class="rcpt-meta">${addrLine}</div>` : ''}
+    ${businessProfile.phone ? `<div class="rcpt-meta">${businessProfile.phone}</div>` : ''}
+    <div class="rcpt-meta">${dt}</div>
+    <div class="rcpt-meta">Cashier: ${sale.cashier}${sale.till?' · '+sale.till:''}</div>
+    <div class="rcpt-divider"></div>
+    ${itemsHtml}
+    <div class="rcpt-divider"></div>
+    <div class="rcpt-line"><span>Subtotal</span><span>${fmtKsh(sale.subtotal)}</span></div>
+    ${sale.tax>0?`<div class="rcpt-line"><span>VAT (included)</span><span>${fmtKsh(sale.tax)}</span></div>`:''}
+    <div class="rcpt-line rcpt-grand"><span>Total</span><span>${fmtKsh(sale.total)}</span></div>
+    <div class="rcpt-line"><span>${sale.method==='cash'?'Received':'Paid via'}</span><span>${sale.method==='cash'?fmtKsh(sale.tendered):('M-Pesa'+(sale.mpesaCode?' '+sale.mpesaCode:''))}</span></div>
+    ${sale.method==='cash'?`<div class="rcpt-line"><span>Change</span><span>${fmtKsh(sale.change)}</span></div>`:''}
+    <div class="rcpt-footer">Asante! Karibu tena.</div>
+  `;
+}
+function printReceipt(sale){
+  $('receiptPrintArea').innerHTML = buildReceiptHTML(sale);
+  $('receiptPrintArea').className = 'paper-'+receiptPaperWidth.replace('mm','');
+  document.body.classList.add('printing-receipt');
+  // 'afterprint' fires once the print/save-as-PDF dialog actually closes, which is the
+  // correct moment to revert — a fixed timeout risks reverting mid-dialog on a slow print
+  // driver and printing the ordinary UI instead of the receipt. The timeout below is only
+  // a safety net for the handful of browsers that don't fire afterprint reliably.
+  let cleaned = false;
+  const cleanup = ()=>{
+    if(cleaned) return;
+    cleaned = true;
+    document.body.classList.remove('printing-receipt');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 6000);
+}
+
+// ---------- Scanner input ----------
+const scanInput = $('scanInput');
+scanInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){
+    const code=scanInput.value.trim();
+    if(code) addToCart(code); // exact SKU/barcode match adds straight to cart
+    scanInput.value=''; searchTerm=''; renderProductGrid();
+  }
+});
+scanInput.addEventListener('input', ()=>{
+  searchTerm = scanInput.value;
+  renderProductGrid(); // live-filters the tile grid by name or SKU as you type
+});
+document.addEventListener('click', e=>{
+  if($('view-till').classList.contains('active') && !['INPUT','BUTTON'].includes(e.target.tagName)) scanInput.focus();
+});
+$('checkoutBtn').addEventListener('click', checkout);
+$('clearCartBtn').addEventListener('click', ()=>{
+  if(cart.length===0) return;
+  const count = cart.reduce((s,i)=>s+i.qty,0);
+  const total = cart.reduce((s,i)=>s+i.price*i.qty,0);
+  requestCartRemoval('clear_cart', {count, total}, ()=>{ cart=[]; renderCart(); });
+});
+$('addStockBtn').addEventListener('click', addStock);
+
+// ---------- Live cart mirror — survives an unexpected reload even without a deliberate lock/logout ----------
+function saveLiveCart(){
+  if(!currentUser || !currentUser.id) return;
+  put('settings', {key:'live_cart:'+currentUser.id, value:cart}).catch(()=>{});
+}
+async function loadLiveCart(uid){
+  const saved = await getSetting('live_cart:'+uid);
+  return (saved && saved.value) ? saved.value : [];
+}
+
+// ---------- Pause/resume a cart across a quick user switch ----------
+// So a supervisor can sign in to check something without inheriting (or wiping out) a
+// cashier's half-finished sale, and the cashier gets their exact cart back when they return.
+async function pauseCartForUser(uid){
+  if(!uid) return;
+  if(cart.length>0){
+    await put('settings', {key:'paused_cart:'+uid, value:cart});
+  } else {
+    // nothing to pause — clear any stale paused cart so an old one can't reappear later
+    try{ const existing = await getSetting('paused_cart:'+uid); if(existing) await del('settings', 'paused_cart:'+uid); }catch(e){}
+  }
+}
+async function resumeCartForUser(uid){
+  const saved = await getSetting('paused_cart:'+uid);
+  if(saved && saved.value && saved.value.length>0){
+    cart = saved.value;
+    await del('settings', 'paused_cart:'+uid);
+    return true;
+  }
+  cart = [];
+  return false;
+}
+
+$('lockScreenBtn').addEventListener('click', async ()=>{
+  const uid = currentUser ? currentUser.id : null;
+  const hadItems = cart.length>0;
+  await pauseCartForUser(uid);
+  logAudit('Signed out', 'via Lock button' + (hadItems ? ` — cart paused (${cart.length} item(s))` : ''));
+  currentUser=null;
+  try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+  showLoginScreen();
+});
+
+// ---------- Staff management ----------
+// ---------- Business type ----------
+const BIZ_COLOR_PALETTE = ['#4c7a52','#2f7a8c','#b33f2e','#e2a034','#8c7c5e','#6a4c93','#1f6f4e'];
+function slugify(s){ return s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'type'; }
+
+async function loadCustomBusinessTypes(){
+  const setting = await getSetting('custom_business_types');
+  CUSTOM_BUSINESS_TYPES = {};
+  (setting ? setting.value : []).forEach(t => CUSTOM_BUSINESS_TYPES[t.id] = t);
+}
+async function saveCustomBusinessTypes(){
+  await put('settings', {key:'custom_business_types', value: Object.values(CUSTOM_BUSINESS_TYPES)});
+}
+
+let combineMode = false;
+let combineSelection = [];
+
+// ---------- Business profile — the actual shop's own details ----------
+function applyStoreNameToUI(){
+  $('storeNameDisplay').textContent = businessProfile.storeName || 'My DukaGO POS';
+}
+async function loadBusinessProfile(){
+  const saved = await getSetting('business_profile');
+  if(saved) businessProfile = saved.value;
+  const savedTill = await getSetting('till_label');
+  if(savedTill) tillLabel = savedTill.value;
+  applyStoreNameToUI();
+}
+function populateProfileForm(){
+  $('profStoreName').value = businessProfile.storeName || '';
+  $('profOwnerName').value = businessProfile.ownerName || '';
+  $('profPhone').value = businessProfile.phone || '';
+  $('profLocation').value = businessProfile.location || '';
+  $('profAddress').value = businessProfile.address || '';
+  $('profileStatus').textContent = businessProfile.storeName
+    ? ''
+    : 'Not filled in yet — receipts and the till header show "My DukaGO POS" until this is saved.';
+  $('tillLabelInput').value = tillLabel;
+}
+$('saveTillLabelBtn').addEventListener('click', async ()=>{
+  const label = $('tillLabelInput').value.trim();
+  if(!label){ toast('Enter a till label'); return; }
+  tillLabel = label;
+  await put('settings', {key:'till_label', value:tillLabel});
+  // Deliberately NOT pushed to the shared backend — this is what tells two tills at the
+  // same shop apart, so it has to stay local to this one device, never overwritten by another.
+  $('storeSubtitle').textContent = `${tillLabel} · ${$('storeSubtitle').textContent.split(' · ').slice(1).join(' · ')}`;
+  logAudit('Updated till label', tillLabel);
+  toast('Till label saved');
+});
+$('saveProfileBtn').addEventListener('click', async ()=>{
+  const storeName = $('profStoreName').value.trim();
+  const phone = $('profPhone').value.trim();
+  if(!storeName){ toast('Enter the business name'); return; }
+  if(phone && !normalizeKenyanPhone(phone)){ toast('Phone number doesn\'t look like a valid Kenyan number'); return; }
+  businessProfile = {
+    storeName,
+    ownerName: $('profOwnerName').value.trim(),
+    phone,
+    location: $('profLocation').value.trim(),
+    address: $('profAddress').value.trim(),
+  };
+  await put('settings', {key:'business_profile', value:businessProfile});
+  await queuePush('settings_upsert', {key:'business_profile', value:businessProfile});
+  await updateShopNameInBackend(storeName); // so it's identifiable in the shops table, not stuck as "New shop"
+  applyStoreNameToUI();
+  logAudit('Updated business profile', `${storeName}${businessProfile.location?' — '+businessProfile.location:''}`);
+  $('profileStatus').textContent = 'Saved.';
+  toast('Business profile saved'+(shopId ? ' — every till at this shop will pick it up' : ''));
+});
+
+async function renderBizGrid(){
+  const setting = await getSetting('active_business_types');
+  currentBusinessTypes = setting ? setting.value : ['duka'];
+  if(combineMode && combineSelection.length===0) combineSelection = [...currentBusinessTypes];
+  const types = allBusinessTypes();
+  const grid = $('bizGrid'); grid.innerHTML='';
+  Object.keys(types).forEach(id=>{
+    const t = types[id];
+    const isActive = currentBusinessTypes.includes(id);
+    const isChecked = combineMode && combineSelection.includes(id);
+    const card = document.createElement('button');
+    card.type='button';
+    card.className = 'biz-card' + (isActive && !combineMode ? ' selected' : '') + (isChecked ? ' checked' : '');
+    const badge = combineMode
+      ? `<span class="biz-check">${isChecked?'✓':''}</span>`
+      : (isActive ? '<span class="biz-current">Active</span>' : '');
+    card.innerHTML = `${badge}
+      <span class="biz-emoji">${t.emoji}</span>
+      <span class="biz-name">${t.label}</span>
+      <span class="biz-desc">${t.desc}</span>`;
+    card.addEventListener('click', async ()=>{
+      if(combineMode){
+        if(combineSelection.includes(id)) combineSelection = combineSelection.filter(x=>x!==id);
+        else combineSelection.push(id);
+        renderBizGrid();
+        return;
+      }
+      if(isActive && currentBusinessTypes.length===1){ toast('Already using '+t.label); return; }
+      await applyBusinessTypes([id]);
+      renderBizGrid();
+    });
+    grid.appendChild(card);
+  });
+  const addCard = document.createElement('button');
+  addCard.type='button';
+  addCard.className = 'biz-card';
+  addCard.style.cssText = 'display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; border-style:dashed;';
+  addCard.innerHTML = `<span class="biz-emoji">➕</span><span class="biz-name">Add business type</span><span class="biz-desc">Define categories for a type not listed here</span>`;
+  addCard.addEventListener('click', ()=>{
+    $('bizNameInput').value=''; $('bizEmojiInput').value=''; $('bizCatsInput').value='';
+    $('addBizModal').classList.add('show');
+    $('bizNameInput').focus();
+  });
+  grid.appendChild(addCard);
+  $('applyCombineBtn').style.display = combineMode ? 'block' : 'none';
+  $('applyCombineBtn').textContent = `Apply combination (${combineSelection.length} selected)`;
+}
+$('combineModeBtn').addEventListener('click', ()=>{
+  combineMode = !combineMode;
+  combineSelection = combineMode ? [...currentBusinessTypes] : [];
+  $('combineModeBtn').textContent = combineMode ? 'Turn off' : 'Turn on';
+  renderBizGrid();
+});
+$('applyCombineBtn').addEventListener('click', async ()=>{
+  if(combineSelection.length===0){ toast('Select at least one business type'); return; }
+  if(combineSelection.length===1){ toast('Pick 2 or more to combine — or turn combine mode off to just switch to one'); return; }
+  await applyBusinessTypes(combineSelection);
+  combineMode = false;
+  $('combineModeBtn').textContent = 'Turn on';
+  renderBizGrid();
+});
+$('bizCancelBtn').addEventListener('click', ()=>$('addBizModal').classList.remove('show'));
+$('bizConfirmBtn').addEventListener('click', async ()=>{
+  const name = $('bizNameInput').value.trim();
+  const emoji = $('bizEmojiInput').value.trim() || '🏪';
+  const catsRaw = $('bizCatsInput').value.trim();
+  if(!name){ toast('Enter a business type name'); return; }
+  if(!catsRaw){ toast('Enter at least one category'); return; }
+  const cats = catsRaw.split(',').map(c=>c.trim()).filter(Boolean);
+  let id = slugify(name);
+  const existingTypes = allBusinessTypes();
+  if(existingTypes[id]) id = id + '-' + Date.now().toString().slice(-4);
+  const colors = {};
+  cats.forEach((c,i)=> colors[c] = BIZ_COLOR_PALETTE[i % BIZ_COLOR_PALETTE.length]);
+  const newType = {
+    label:name, emoji, desc:'Custom business type', subtitle:name, unitLabel:'stock',
+    cats, colors, starter:[]
+  };
+  CUSTOM_BUSINESS_TYPES[id] = newType;
+  await saveCustomBusinessTypes();
+  logAudit('Created business type', name);
+  $('addBizModal').classList.remove('show');
+  await applyBusinessTypes([id]);
+  renderBizGrid();
+  toast(name+' created — add its products from Stock');
+});
+
+async function renderAttendanceTable(){
+  const logs = await getAll('audit_log');
+  const sessionEvents = logs
+    .filter(l => l.action==='Signed in' || l.action==='Signed out')
+    .sort((a,b)=> new Date(a.ts) - new Date(b.ts));
+
+  // Pair each sign-in with the next sign-out for that same person, in order.
+  const sessions = [];
+  const openByActor = {};
+  sessionEvents.forEach(ev=>{
+    if(ev.action==='Signed in'){
+      openByActor[ev.actor] = ev;
+    } else {
+      const start = openByActor[ev.actor];
+      if(start){
+        sessions.push({actor:ev.actor, role:ev.role, signIn:start.ts, signOut:ev.ts});
+        delete openByActor[ev.actor];
+      } else {
+        // A sign-out with no matching sign-in on record (e.g. from before this feature existed)
+        sessions.push({actor:ev.actor, role:ev.role, signIn:null, signOut:ev.ts});
+      }
+    }
+  });
+  // Anyone still signed in right now (no sign-out yet)
+  Object.values(openByActor).forEach(start=>{
+    sessions.push({actor:start.actor, role:start.role, signIn:start.ts, signOut:null});
+  });
+  sessions.sort((a,b)=> new Date(b.signIn||b.signOut) - new Date(a.signIn||a.signOut));
+
+  const body = $('attendanceTable'); body.innerHTML='';
+  if(sessions.length===0){
+    body.innerHTML = `<tr><td colspan="5" style="color:var(--muted);">No sign-ins recorded yet.</td></tr>`;
+    return;
+  }
+  sessions.slice(0,150).forEach(s=>{
+    let durText = '—';
+    if(s.signIn && s.signOut){
+      const mins = Math.round((new Date(s.signOut) - new Date(s.signIn)) / 60000);
+      durText = mins < 60 ? `${mins} min` : `${Math.floor(mins/60)}h ${mins%60}m`;
+    } else if(s.signIn && !s.signOut){
+      durText = '<span style="color:var(--sage-dark); font-weight:700;">● Still signed in</span>';
+    }
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="name">${s.actor}</td>
+      <td style="text-transform:capitalize;">${s.role}</td>
+      <td>${s.signIn ? new Date(s.signIn).toLocaleString('en-KE',{hour12:false}) : '—'}</td>
+      <td>${s.signOut ? new Date(s.signOut).toLocaleString('en-KE',{hour12:false}) : '—'}</td>
+      <td>${durText}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function renderStaffTable(){
+  const users = await getAll('users');
+  const body = $('staffTable'); body.innerHTML='';
+  users.forEach(u=>{
+    const revoked = u.active===false;
+    const isSelf = u.id===currentUser?.id;
+    const tr = document.createElement('tr');
+    if(revoked) tr.style.opacity='.5';
+    const roleCell = isSelf
+      ? `<span style="text-transform:capitalize;">${u.role}</span>`
+      : `<select class="role-select" data-id="${u.id}" style="font-family:var(--sans); font-size:11.5px; padding:4px 6px; border-radius:6px; border:1px solid var(--line); background:var(--panel); color:var(--ink); text-transform:capitalize;">
+          <option value="cashier" ${u.role==='cashier'?'selected':''}>Cashier</option>
+          <option value="supervisor" ${u.role==='supervisor'?'selected':''}>Supervisor</option>
+          <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+        </select>`;
+    tr.innerHTML = `<td class="name">${u.name}${isSelf?' <span style="color:var(--muted);font-weight:400;">(you)</span>':''}</td>
+      <td>${roleCell}</td>
+      <td>${u.pin}</td>
+      <td>${revoked ? '<span style="color:var(--clay);font-weight:700;">Revoked</span>' : '<span style="color:var(--sage-dark);font-weight:700;">Active</span>'}</td>
+      <td style="display:flex; gap:6px;">
+        <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="pin" data-id="${u.id}">Change PIN</button>
+        <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="${revoked?'reactivate':'revoke'}" data-id="${u.id}">${revoked?'Reactivate':'Revoke'}</button>
+        <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;color:var(--clay);" data-act="remove" data-id="${u.id}">Remove</button>
+      </td>`;
+    body.appendChild(tr);
+  });
+  body.querySelectorAll('.role-select').forEach(sel=>{
+    sel.addEventListener('change', async ()=>{
+      const id = sel.dataset.id;
+      const users2 = await getAll('users');
+      const u = users2.find(x=>x.id===id);
+      const oldRole = u.role;
+      // Promoting to Admin needs a 6-digit PIN first — don't silently leave an admin
+      // account protected by a short cashier-length PIN.
+      if(sel.value==='admin' && !/^\d{6}$/.test(u.pin)){
+        toast(`Set a 6-digit PIN for ${u.name} first (Change PIN), then promote to Admin`);
+        sel.value = oldRole;
+        return;
+      }
+      u.role = sel.value;
+      await put('users', u);
+      await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:u.active!==false});
+      toast(`${u.name} is now ${sel.value}`);
+      logAudit('Changed staff role', `${u.name}: ${oldRole} → ${sel.value}`);
+      renderStaffTable();
+    });
+  });
+  body.querySelectorAll('button[data-act]').forEach(b=>{
+    b.addEventListener('click', async ()=>{
+      const id = b.dataset.id, act = b.dataset.act;
+      const users2 = await getAll('users');
+      const u = users2.find(x=>x.id===id);
+      if(act==='remove'){
+        if(id===currentUser?.id){ toast("Can't remove the account you're signed in as"); return; }
+        await del('users', id);
+        toast('Staff member removed');
+        logAudit('Removed staff account', `${u.name} (${u.role})`);
+        // Note: removal doesn't currently propagate to other devices — revoke is the
+        // sync-safe way to disable someone; a hard remove is a known local-only gap for now.
+      } else if(act==='revoke'){
+        if(id===currentUser?.id){ toast("Can't revoke the account you're signed in as"); return; }
+        u.active = false; await put('users', u);
+        await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:false});
+        toast(u.name+"'s access revoked — their PIN no longer signs in");
+        logAudit('Revoked staff access', `${u.name} (${u.role})`);
+      } else if(act==='reactivate'){
+        u.active = true; await put('users', u);
+        await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:true});
+        toast(u.name+"'s access restored");
+        logAudit('Reactivated staff access', `${u.name} (${u.role})`);
+      } else if(act==='pin'){
+        const requiredLen = u.role==='admin' ? 6 : 4;
+        const newPin = prompt(`New ${requiredLen}-digit PIN for ${u.name}:`);
+        if(newPin===null) return;
+        if(!new RegExp(`^\\d{${requiredLen}}$`).test(newPin)){ toast(`PIN must be exactly ${requiredLen} digits for ${u.role==='admin'?'an admin':'this role'}`); return; }
+        const uniqueCheck = await isPinGloballyUnique(newPin, u.id);
+        if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
+        u.pin = newPin; await put('users', u);
+        await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:u.active!==false});
+        toast(u.name+"'s PIN updated");
+        logAudit('Changed staff PIN', `${u.name} (${u.role})`);
+        if(id===currentUser?.id) currentUser.pin = newPin;
+      }
+      renderStaffTable();
+    });
+  });
+}
+$('addStaffBtn').addEventListener('click', async ()=>{
+  const name = $('newStaffName').value.trim();
+  const role = $('newStaffRole').value;
+  const pin = $('newStaffPin').value.trim();
+  const requiredLen = role==='admin' ? 6 : 4;
+  if(!name){ toast('Enter a name'); return; }
+  if(!new RegExp(`^\\d{${requiredLen}}$`).test(pin)){ toast(`Enter a ${requiredLen}-digit PIN${role==='admin'?' (admin accounts need 6 digits)':''}`); return; }
+  const uniqueCheck = await isPinGloballyUnique(pin, null);
+  if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
+  const newUser = {id:'u_'+Date.now(), name, role, pin, active:true};
+  await put('users', newUser);
+  await queuePush('staff_upsert', newUser);
+  $('newStaffName').value=''; $('newStaffPin').value='';
+  renderStaffTable();
+  toast(name+' added as '+role+' — they can sign in with this PIN on their own phone, anywhere');
+  logAudit('Added staff account', `${name} (${role})`);
+});
+
+// ---------- Shared PIN modal (login / admin override / supervisor approval) ----------
+function openPinModal({title, sub, mode, onVerified}){
+  pinModalMode = mode; pendingApprovalAction = onVerified;
+  $('pinModalTitle').textContent = title;
+  $('pinModalSub').textContent = sub;
+  $('pinInput').value='';
+  $('pinModal').classList.add('show');
+  $('pinInput').focus();
+}
+$('pinCancelBtn').addEventListener('click', ()=>$('pinModal').classList.remove('show'));
+$('pinConfirmBtn').addEventListener('click', verifyPinModal);
+$('pinInput').addEventListener('keydown', e=>{ if(e.key==='Enter') verifyPinModal(); });
+
+async function verifyPinModal(){
+  const entered = $('pinInput').value;
+  const users = await getAll('users');
+  let match;
+  if(pinModalMode==='admin_override') match = users.find(u=>u.role==='admin' && u.pin===entered && u.active!==false);
+  else if(pinModalMode==='approval') match = users.find(u=>(u.role==='supervisor'||u.role==='admin') && u.pin===entered && u.active!==false);
+  if(match){
+    $('pinModal').classList.remove('show');
+    toast((pinModalMode==='approval'?'Approved by ':'Unlocked by ')+match.name);
+    pendingApprovalAction && pendingApprovalAction(match.name);
+  } else {
+    toast('Incorrect PIN');
+    $('pinInput').value=''; $('pinInput').focus();
+  }
+}
+// Fingerprint approval isn't wired up yet — WebAuthn needs each staff member's biometric
+// credential enrolled and verified against a real backend first, which is a project of its
+// own. PIN-only approval for now (see chat notes for what real fingerprint support needs).
+
+// ---------- Removing something from the sale: reason required, then approval if it's a cashier ----------
+let pendingReasonAction = null;
+let pendingReasonContext = null;
+
+function openReasonModal(contextLabel, onConfirmed){
+  pendingReasonAction = onConfirmed;
+  pendingReasonContext = contextLabel;
+  $('reasonContext').textContent = contextLabel;
+  $('reasonInput').value = '';
+  $('reasonError').textContent = '';
+  $('reasonModal').classList.add('show');
+  $('reasonInput').focus();
+}
+$('reasonCancelBtn').addEventListener('click', ()=>{
+  $('reasonModal').classList.remove('show');
+  pendingReasonAction = null;
+});
+$('reasonConfirmBtn').addEventListener('click', ()=>{
+  const reason = $('reasonInput').value.trim();
+  if(reason.length<3){ $('reasonError').textContent = 'Enter a short reason (at least 3 characters)'; return; }
+  $('reasonModal').classList.remove('show');
+  const action = pendingReasonAction;
+  pendingReasonAction = null;
+  action && action(reason);
+});
+$('reasonInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('reasonConfirmBtn').click(); });
+
+function logRemovalAudit(kind, itemInfo, reason, requestedBy, approvedBy){
+  const what = kind==='clear_cart'
+    ? `Cleared cart — ${itemInfo.count} item(s), ${fmtKsh(itemInfo.total)}`
+    : `Removed ${itemInfo.qty}× ${itemInfo.name} (${fmtKsh(itemInfo.qty*itemInfo.price)})`;
+  const who = approvedBy ? `requested by ${requestedBy}, approved by ${approvedBy}` : `by ${requestedBy}`;
+  logAudit(kind==='clear_cart' ? 'Cart cleared' : 'Cart item removed', `${what} — reason: "${reason}" — ${who}`);
+}
+
+// itemInfo is {name, qty, price} for a single line, or {count, total} for clearing the whole cart.
+function requestCartRemoval(kind, itemInfo, doIt){
+  const contextLabel = kind==='clear_cart'
+    ? `Clearing the whole cart — ${itemInfo.count} item(s), ${fmtKsh(itemInfo.total)}`
+    : `Removing ${itemInfo.qty}× ${itemInfo.name} (${fmtKsh(itemInfo.qty*itemInfo.price)})`;
+  openReasonModal(contextLabel, (reason)=>{
+    const requester = currentUser ? currentUser.name : 'Unknown';
+    if(currentUser && ROLE_RANK[currentUser.role] >= ROLE_RANK.supervisor){
+      // Supervisor/admin already has the rights — no separate approval step, but it's still logged in full.
+      doIt();
+      logRemovalAudit(kind, itemInfo, reason, requester, null);
+      return;
+    }
+    openPinModal({
+      title:'Supervisor approval needed',
+      sub: kind==='clear_cart' ? 'Clearing the whole cart needs a supervisor or admin PIN.' : 'Removing an item needs a supervisor or admin PIN.',
+      mode:'approval',
+      onVerified: (approverName)=>{ doIt(); logRemovalAudit(kind, itemInfo, reason, requester, approverName); }
+    });
+  });
+}
+
+// ---------- Admin back office gate ----------
+const ADMIN_ONLY_VIEWS = ['staff','audit']; // account management & the audit trail — real Admin session only, no override
+function switchBackofficeView(viewName){
+  if(ADMIN_ONLY_VIEWS.includes(viewName) && !(currentUser && currentUser.role==='admin')){
+    toast('Only an Admin account can open this — sign in as Admin, not a manager override');
+    viewName = 'business';
+  }
+  document.querySelectorAll('.backoffice-nav button[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===viewName));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  $('view-'+viewName).classList.add('active');
+  if(viewName==='business'){ renderBizGrid(); populateProfileForm(); }
+  if(viewName==='stock') renderStockTable();
+  if(viewName==='reports') renderReports();
+  if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
+  if(viewName==='audit') renderAuditTable();
+  if(viewName==='sync') loadSettingsPanelValues();
+}
+document.querySelectorAll('.backoffice-nav button[data-view]').forEach(b=>{
+  b.addEventListener('click', ()=>switchBackofficeView(b.dataset.view));
+});
+function openBackoffice(){
+  $('backofficeNav').classList.add('show');
+  // Admin-only tabs (Staff, Audit Log) are only ever shown to a real Admin session —
+  // a supervisor/cashier who used a manager-override PIN never sees them at all.
+  const isRealAdmin = currentUser && currentUser.role==='admin';
+  document.querySelectorAll('.admin-only-tab').forEach(b => b.style.display = isRealAdmin ? '' : 'none');
+  switchBackofficeView('business');
+}
+$('adminGearBtn').addEventListener('click', ()=>{
+  if(currentUser && currentUser.role==='admin'){ logAudit('Opened admin back office'); openBackoffice(); return; }
+  openPinModal({
+    title:'Manager override',
+    sub:'Enter an admin PIN for temporary access to Business, Stock, Reports and Sync setup. Staff management and the Audit Log stay Admin-only.',
+    mode:'admin_override',
+    onVerified: ()=>{ logAudit('Manager override used', `by ${currentUser?currentUser.name:'unknown'} (${currentUser?currentUser.role:'-'})`); openBackoffice(); }
+  });
+});
+async function renderAuditTable(){
+  const logs = await getAll('audit_log');
+  logs.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+  const body = $('auditTable'); body.innerHTML='';
+  if(logs.length===0){ body.innerHTML = `<tr><td colspan="5" style="color:var(--muted);">Nothing logged yet.</td></tr>`; return; }
+  logs.slice(0,300).forEach(l=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${new Date(l.ts).toLocaleString('en-KE',{hour12:false})}</td><td class="name">${l.actor}</td><td style="text-transform:capitalize;">${l.role}</td><td>${l.action}</td><td>${l.details||''}</td>`;
+    body.appendChild(tr);
+  });
+}
+$('lockBackofficeBtn').addEventListener('click', async ()=>{
+  const queueBefore = await getAll('sync_queue');
+  if(isOnline && queueBefore.length>0){
+    toast('Saving and syncing…');
+    await runSyncLoop();
+  }
+  const queueAfter = await getAll('sync_queue');
+  $('backofficeNav').classList.remove('show');
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  $('view-till').classList.add('active');
+  if(queueAfter.length===0){
+    toast('All changes saved and synced ✓');
+  } else {
+    toast(`Saved on this device — ${queueAfter.length} change(s) will sync once you're back online`);
+  }
+  scanInput.focus();
+});
+
+// ---------- Login screen — silent PIN entry, no name picker ----------
+// Cashiers/supervisors use 4-digit PINs; admin accounts use 6 digits (harder for a cashier to
+// casually observe or guess). A match is attempted at 4 digits first, then at 6, checking this
+// device's own local staff first, then — if nothing local matches and it isn't the "1234"
+// bootstrap trigger — the whole platform. That's what lets a PIN alone find its shop on a
+// brand-new device, with nothing to type but the PIN itself.
+let pinBuffer = '';
+const PIN_LENGTHS = [4, 6];
+const MAX_PIN_LENGTH = 6;
+function updatePinDots(){
+  const dots = document.querySelectorAll('#pinDots .pin-dot');
+  dots.forEach((d,i)=> d.classList.toggle('filled', i < pinBuffer.length));
+}
+function shakePinDots(){
+  document.querySelectorAll('#pinDots .pin-dot').forEach(d=>{
+    d.classList.add('shake');
+    setTimeout(()=>d.classList.remove('shake'), 350);
+  });
+}
+async function tryPinCheckpoint(){
+  if(!PIN_LENGTHS.includes(pinBuffer.length)) return;
+
+  // The default bootstrap trigger — only means anything on a device that's never been set up.
+  if(pinBuffer.length===4 && pinBuffer==='1234' && !shopId){
+    const enteredPin = pinBuffer;
+    pinBuffer=''; updatePinDots();
+    beginSetAdminPinFlow();
+    return;
+  }
+
+  // This device's own local staff first — works instantly, works offline.
+  const users = await getAll('users');
+  const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
+  if(localMatch){ attemptLogin(); return; }
+
+  // Not found locally. If online, check the whole platform — this is what lets someone
+  // type their own real PIN on a fresh device and be found automatically, no code needed.
+  if(isOnline && backendLive()){
+    const remoteMatch = await lookupPinGlobally(pinBuffer);
+    if(remoteMatch){
+      await pullSpecificShop(remoteMatch.shop_id);
+      attemptLogin(); // local data now has this person in it — try again
+      return;
+    }
+  }
+
+  if(pinBuffer.length < MAX_PIN_LENGTH) return; // might still be a 6-digit PIN in progress
+  // Nothing matched at either length, anywhere.
+  toast('Incorrect PIN');
+  shakePinDots();
+  pinBuffer=''; setTimeout(updatePinDots, 200);
+}
+$('loginKeypad').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-k]'); if(!btn) return;
+  const k = btn.dataset.k;
+  if(k==='clear'){ pinBuffer=''; updatePinDots(); return; }
+  if(k==='back'){ pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
+  if(pinBuffer.length>=MAX_PIN_LENGTH) return;
+  pinBuffer += k;
+  updatePinDots();
+  setTimeout(tryPinCheckpoint, 120);
+});
+// A physical/USB numeric keypad or keyboard works too
+document.addEventListener('keydown', e=>{
+  if($('loginScreen').classList.contains('hide')) return;
+  if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){ pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120); }
+  if(e.key==='Backspace'){ pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
+});
+
+// ---------- Set Admin PIN screen — what "1234" on a fresh device leads into ----------
+let setPinStage = 'enter';
+let setPinFirstEntry = '';
+let setPinBuffer = '';
+function updateSetPinDots(){
+  const dots = document.querySelectorAll('#setPinDots .pin-dot');
+  dots.forEach((d,i)=> d.classList.toggle('filled', i < setPinBuffer.length));
+}
+function shakeSetPinDots(){
+  document.querySelectorAll('#setPinDots .pin-dot').forEach(d=>{
+    d.classList.add('shake'); setTimeout(()=>d.classList.remove('shake'), 350);
+  });
+}
+function resetSetPinFlow(message){
+  setPinStage='enter'; setPinFirstEntry=''; setPinBuffer='';
+  $('setPinStepLabel').textContent = message || 'Choose a 6-digit PIN — this becomes your permanent Admin login for this shop.';
+  updateSetPinDots();
+}
+function beginSetAdminPinFlow(){
+  $('loginScreen').classList.add('hide');
+  stopSceneRotation();
+  $('setPinError').textContent = '';
+  resetSetPinFlow();
+  $('setAdminPinScreen').classList.remove('hide');
+}
+async function handleSetPinDigit(k){
+  if(k==='clear'){ setPinBuffer=''; updateSetPinDots(); return; }
+  if(k==='back'){ setPinBuffer = setPinBuffer.slice(0,-1); updateSetPinDots(); return; }
+  if(setPinBuffer.length>=6) return;
+  setPinBuffer += k;
+  updateSetPinDots();
+  if(setPinBuffer.length < 6) return;
+
+  if(setPinStage==='enter'){
+    setPinFirstEntry = setPinBuffer;
+    setPinBuffer = '';
+    setPinStage = 'confirm';
+    $('setPinError').textContent = '';
+    $('setPinStepLabel').textContent = 'Re-enter it to confirm.';
+    updateSetPinDots();
+    return;
+  }
+
+  // confirm stage
+  if(setPinBuffer !== setPinFirstEntry){
+    $('setPinError').textContent = "Those didn't match — let's try again.";
+    shakeSetPinDots();
+    setTimeout(()=>resetSetPinFlow(), 700);
+    return;
+  }
+  $('setPinError').textContent = 'Checking this PIN is available…';
+  if(!shopId) await registerNewShop(); // creates the shop record itself, first time only
+  const uniqueCheck = await isPinGloballyUnique(setPinFirstEntry, 'u_admin');
+  if(!uniqueCheck.unique){
+    $('setPinError').textContent = `That PIN is already in use — choose a different one.`;
+    shakeSetPinDots();
+    setTimeout(()=>resetSetPinFlow(), 1000);
+    return;
+  }
+  $('setPinError').textContent = '';
+  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:setPinFirstEntry, active:true};
+  await put('users', adminUser);
+  await queuePush('staff_upsert', adminUser);
+  setPinBuffer=''; setPinFirstEntry='';
+  await completeSignIn(adminUser, {isNewSetup:true, skipCartResume:true});
+}
+$('setPinKeypad').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-k]'); if(!btn) return;
+  handleSetPinDigit(btn.dataset.k);
+});
+document.addEventListener('keydown', e=>{
+  if($('setAdminPinScreen').classList.contains('hide')) return;
+  if(/^[0-9]$/.test(e.key)) handleSetPinDigit(e.key);
+  if(e.key==='Backspace') handleSetPinDigit('back');
+});
+
+// ---------- Login screen scene rotation ----------
+// Shows photos for whichever business types are actually active on this till,
+// so a fuel-only outlet doesn't cycle through a carwash photo it doesn't run.
+// The tagline itself stays fixed — it's the brand line, not a per-photo caption.
+let sceneTimer = null;
+function startSceneRotation(){
+  stopSceneRotation();
+  const relevantIds = currentBusinessTypes.filter(id => document.getElementById('scene-'+id));
+  const ids = relevantIds.length ? relevantIds : ['duka','fuel','water','carwash'];
+  let i = 0;
+  const show = (idx)=>{
+    document.querySelectorAll('.scene-layer').forEach(el=>el.classList.remove('showing'));
+    const el = document.getElementById('scene-'+ids[idx]);
+    if(el) el.classList.add('showing');
+  };
+  show(0);
+  if(ids.length>1){
+    sceneTimer = setInterval(()=>{ i=(i+1)%ids.length; show(i); }, 6000);
+  }
+}
+function stopSceneRotation(){ if(sceneTimer){ clearInterval(sceneTimer); sceneTimer=null; } }
+
+function showLoginScreen(){
+  $('loginScreen').classList.remove('hide');
+  pinBuffer=''; updatePinDots();
+  startSceneRotation();
+}
+async function attemptLogin(){
+  const users = await getAll('users');
+  const u = users.find(x => x.pin===pinBuffer && x.active!==false);
+  if(!u){
+    // Shouldn't normally be reached — tryPinCheckpoint() already confirms a match exists
+    // before ever calling this — but kept as a safety net.
+    toast('Incorrect PIN');
+    shakePinDots();
+    pinBuffer=''; setTimeout(updatePinDots, 200);
+    return;
+  }
+  pinBuffer='';
+  stopSceneRotation();
+  await completeSignIn(u);
+}
+// Shared by both the normal login path and the "just finished setting up a new Admin PIN"
+// path, so the two can never quietly drift apart and cause a bug in only one of them.
+async function completeSignIn(u, opts={}){
+  currentUser = u;
+  $('loginScreen').classList.add('hide');
+  $('setAdminPinScreen').classList.add('hide');
+  $('cashierChip').textContent = `${u.name} · ${u.role}`;
+  $('backofficeNav').classList.remove('show');
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  $('view-till').classList.add('active');
+  const resumedCart = opts.skipCartResume ? false : await resumeCartForUser(u.id);
+  renderCart();
+  try{ sessionStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
+  if(opts.isNewSetup){
+    toast('Shop set up! Signed in as Admin.');
+    setTimeout(()=>toast('Add cashiers and supervisors under Admin → Staff — just give them their PIN, they can sign in on their own phone, anywhere.'), 2600);
+  } else {
+    toast(resumedCart ? `Welcome back, ${u.name} — your cart is just as you left it` : 'Signed in as '+u.name);
+  }
+  logAudit('Signed in', resumedCart ? `resumed a paused cart (${cart.length} item(s))` : (opts.isNewSetup ? 'new shop set up' : ''));
+  if(u.role==='admin' && !businessProfile.storeName){
+    setTimeout(()=>toast("Set up your business profile under Admin → Business"), opts.isNewSetup ? 3600 : 2200);
+  }
+  scanInput.focus();
+}
+async function tryRestoreSession(){
+  // If the browser silently reloaded this tab (very common on Android when backgrounded,
+  // to save memory) this brings the same person straight back to where they were signed
+  // in, instead of forcing them through the PIN screen again.
+  let uid;
+  try{ uid = sessionStorage.getItem('my_duka_session_uid'); }catch(e){ return false; }
+  if(!uid) return false;
+  const users = await getAll('users');
+  const u = users.find(x => x.id===uid && x.active!==false);
+  if(!u) return false;
+  currentUser = u;
+  $('cashierChip').textContent = `${u.name} · ${u.role}`;
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  $('view-till').classList.add('active');
+  cart = await loadLiveCart(u.id); // recover an in-progress sale even after an unplanned reload
+  renderCart();
+  scanInput.focus();
+  return true;
+}
+$('logoutBtn').addEventListener('click', async ()=>{
+  const uid = currentUser ? currentUser.id : null;
+  const hadItems = cart.length>0;
+  await pauseCartForUser(uid); // never silently lose a mid-sale cart, however someone signs out
+  logAudit('Signed out', hadItems ? `cart paused (${cart.length} item(s))` : '');
+  currentUser=null;
+  try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+  showLoginScreen();
+});
+
+// ---------- Theme (light / dark) ----------
+function applyTheme(theme){
+  if(theme==='dark') document.documentElement.setAttribute('data-theme','dark');
+  else document.documentElement.removeAttribute('data-theme');
+  try{ localStorage.setItem('my_duka_theme', theme); }catch(e){}
+  $('themeToggleBtn').textContent = theme==='dark' ? '☀️' : '🌙';
+}
+$('themeToggleBtn').addEventListener('click', ()=>{
+  const isDark = document.documentElement.getAttribute('data-theme')==='dark';
+  applyTheme(isDark ? 'light' : 'dark');
+});
+
+// ---------- Boot ----------
+// No branching here anymore — the same sequence runs every time, whether this device has
+// been set up before or not. The PIN entry logic itself figures out what to do; boot's only
+// job is getting the local database and UI into a ready state.
+(async function init(){
+  $('themeToggleBtn').textContent = document.documentElement.getAttribute('data-theme')==='dark' ? '☀️' : '🌙';
+  db = await openDB();
+  await loadShopIdentity();
+  await seedIfEmpty();
+  await ensureTodaySnapshot();
+  await loadCustomBusinessTypes();
+  await loadSettingsPanelValues(); // VAT + receipt prefs, needed before the first sale can be rung up correctly
+  await loadBusinessProfile();
+  let savedTypes = await getSetting('active_business_types');
+  if(!savedTypes){
+    const legacy = await getSetting('business_type'); // migrate from the old single-type setting
+    savedTypes = legacy ? {value:[legacy.value]} : null;
+  }
+  await applyBusinessTypes(savedTypes ? savedTypes.value : ['duka'], {announce:false, pushToBackend:false});
+  isOnline = navigator.onLine; // start from the browser's real network state, not a blind guess
+  await updatePendingBadge();
+  $('toggleNetBtn').textContent = isOnline ? 'Force offline (test)' : 'Force online (test)';
+  $('netLabel').textContent = isOnline ? 'Online' : 'Offline';
+  log('Local database ready — this device keeps working whether or not the internet is up.','ok');
+  verifyRealConnectivity();
+  const restored = await tryRestoreSession();
+  if(!restored) showLoginScreen();
+
+  // Register the service worker so this page itself (not just its data) loads
+  // with zero network — required for a genuinely offline-capable app.
+  if('serviceWorker' in navigator){
+    try{ await navigator.serviceWorker.register('sw.js'); log('Offline app-shell caching enabled.','ok'); }
+    catch(e){ log('Service worker not registered — page reload still needs network this time (see note in Sync & Setup).','warn'); }
+  }
+})();
+</script>
+<div id="receiptPrintArea"></div>
+</body>
+</html>
