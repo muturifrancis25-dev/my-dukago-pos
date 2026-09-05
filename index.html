@@ -496,6 +496,13 @@
       <div class="biz-grid" id="bizGrid"></div>
       <button class="btn-pay" id="applyCombineBtn" style="display:none; margin-top:14px; width:100%;">Apply combination</button>
     </div>
+    <div class="panel">
+      <h3>This device — technical details</h3>
+      <p class="hint">Useful when something looks wrong and you need to see exactly what this specific device currently thinks is true, instead of guessing.</p>
+      <div style="background:var(--bg); border-radius:10px; padding:12px 14px; font-family:var(--mono); font-size:11.5px; line-height:1.8;" id="deviceDiagnostics">—</div>
+      <button class="primary-btn" id="forceResyncBtn" style="margin-top:12px;">Force re-sync from server now</button>
+      <p id="forceResyncStatus" class="hint" style="margin:8px 0 0;"></p>
+    </div>
   </section>
 
   <!-- ============ STOCK (admin) ============ -->
@@ -2234,7 +2241,7 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
 // Last-write-wins by updated_at. Known, disclosed limitation: two devices changing the exact
 // same record at nearly the same moment can have one silently overwrite the other — reasonable
 // for a first real version, not yet the "reconciled" approach a very large deployment may want.
-async function pullShopData(fullPull){
+async function pullShopData(fullPull, force){
   if(!backendLive() || !shopId) return;
   try{
     // Staff — never overwrite a PIN with something older; skip re-pulling your own live session
@@ -2244,7 +2251,7 @@ async function pullShopData(fullPull){
       const localStaff = await getAll('users');
       for(const rs of remoteStaff){
         const ls = localStaff.find(u=>u.id===rs.id);
-        if(!ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
+        if(force || !ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
           await put('users', {id:rs.id, name:rs.name, role:rs.role, pin:rs.pin, active:rs.active!==false, updated_at:rs.updated_at});
         }
       }
@@ -2256,7 +2263,7 @@ async function pullShopData(fullPull){
       const localProducts = await getAll('products');
       for(const rp of remoteProducts){
         const lp = localProducts.find(p=>p.sku===rp.sku);
-        if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
+        if(force || !lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
           await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, updated_at:rp.updated_at});
         }
       }
@@ -2268,7 +2275,7 @@ async function pullShopData(fullPull){
       let pulledBusinessTypes = null;
       for(const rs of remoteSettings){
         const local = await getSetting(rs.key);
-        if(!local || !local.updated_at || new Date(rs.updated_at) > new Date(local.updated_at)){
+        if(force || !local || !local.updated_at || new Date(rs.updated_at) > new Date(local.updated_at)){
           await put('settings', {key:rs.key, value:rs.value, updated_at:rs.updated_at});
           if(rs.key==='active_business_types') pulledBusinessTypes = rs.value;
         }
@@ -2736,6 +2743,36 @@ $('saveProfileBtn').addEventListener('click', async ()=>{
   toast('Business profile saved'+(shopId ? ' — every till at this shop will pick it up' : ''));
 });
 
+async function updateDeviceDiagnostics(){
+  const localBizSetting = await getSetting('active_business_types');
+  const localVatSetting = await getSetting('vat');
+  const lines = [
+    `Shop ID: ${shopId || '(none — not set up yet)'}`,
+    `Business type(s) live now: ${JSON.stringify(currentBusinessTypes)}`,
+    `Business type(s) saved locally: ${localBizSetting ? JSON.stringify(localBizSetting.value) : '(none saved)'}${localBizSetting && localBizSetting.updated_at ? ' — updated '+new Date(localBizSetting.updated_at).toLocaleString('en-KE',{hour12:false}) : ''}`,
+    `VAT live now: ${vatEnabled ? 'ON at '+vatRate+'%' : 'OFF'}`,
+    `VAT saved locally: ${localVatSetting ? JSON.stringify(localVatSetting.value) : '(none saved)'}${localVatSetting && localVatSetting.updated_at ? ' — updated '+new Date(localVatSetting.updated_at).toLocaleString('en-KE',{hour12:false}) : ''}`,
+    `Till label (this device only): ${tillLabel}`,
+    `Backend connected: ${backendLive() ? 'Yes' : 'No'}`,
+    `Online right now: ${isOnline ? 'Yes' : 'No'}`,
+  ];
+  $('deviceDiagnostics').innerHTML = lines.join('<br>');
+}
+$('forceResyncBtn').addEventListener('click', async ()=>{
+  if(!shopId){ $('forceResyncStatus').textContent = 'This device isn\'t part of a shop yet.'; return; }
+  if(!backendLive()){ $('forceResyncStatus').textContent = 'No backend connection right now — check internet.'; return; }
+  $('forceResyncStatus').textContent = 'Pulling the latest data from the server…';
+  try{
+    await pullShopData(true, true); // force=true — genuinely overwrite regardless of timestamps
+    await updateDeviceDiagnostics();
+    renderProductGrid();
+    $('forceResyncStatus').textContent = 'Done — this device now matches the server exactly.';
+    toast('Re-synced from server');
+  }catch(e){
+    $('forceResyncStatus').textContent = 'Failed: '+e.message;
+  }
+});
+
 async function renderBizGrid(){
   const setting = await getSetting('active_business_types');
   currentBusinessTypes = setting ? setting.value : ['duka'];
@@ -3079,7 +3116,7 @@ function switchBackofficeView(viewName){
   document.querySelectorAll('.backoffice-nav button[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===viewName));
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-'+viewName).classList.add('active');
-  if(viewName==='business'){ renderBizGrid(); populateProfileForm(); }
+  if(viewName==='business'){ renderBizGrid(); populateProfileForm(); updateDeviceDiagnostics(); }
   if(viewName==='stock') renderStockTable();
   if(viewName==='reports') renderReports();
   if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
