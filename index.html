@@ -827,18 +827,60 @@
   </div>
 </div>
 
-<!-- M-Pesa payment — simple manual record for now (customer pays independently to your Till,
-     shows the cashier their confirmation SMS). The real STK-push prompt gets wired in later
-     once the Daraja backend exists; this keeps that door open without blocking daily use. -->
+<!-- M-Pesa payment — two paths, cashier's choice: enter a code manually (works right now,
+     always), or send a real STK push prompt (wired to the actual Daraja sandbox backend —
+     clearly labeled as test mode until real production credentials are in place). -->
 <div class="modal-overlay" id="mpesaModal">
-  <div class="modal-box" style="width:min(88vw,300px);">
+  <div class="modal-box" style="width:min(88vw,320px);">
     <h3>M-Pesa payment</h3>
     <p id="mpesaDue">Amount due: KSh 0</p>
-    <input id="mpesaCodeInput" type="text" placeholder="M-Pesa code (optional)" style="width:100%; text-align:center; letter-spacing:1px; font-size:14px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px; text-transform:uppercase;">
-    <p style="font-size:11px; color:var(--muted); margin:0 0 14px;">If the customer's confirmation SMS is handy, jot the code down for your own record — or just confirm they've paid.</p>
-    <div class="modal-actions">
-      <button class="modal-cancel" id="mpesaCancelBtn">Cancel</button>
-      <button class="modal-confirm" id="mpesaSendBtn">Confirm payment received</button>
+
+    <div id="mpesaChoiceStep">
+      <button class="modal-confirm" id="mpesaStkChoiceBtn" style="width:100%; padding:13px; margin:12px 0 6px;">📱 Send payment prompt</button>
+      <p style="font-size:10px; color:var(--muted); text-align:center; margin:0 0 10px;">🧪 Sandbox test mode — simulated by Safaricom, not yet live</p>
+      <button class="modal-cancel" id="mpesaC2bChoiceBtn" style="width:100%; padding:13px; margin-bottom:6px;">🔎 Customer already paid directly</button>
+      <p style="font-size:10px; color:var(--muted); text-align:center; margin:0 0 14px;">For a customer who paid your till on their own, without a prompt</p>
+      <button class="modal-cancel" id="mpesaManualChoiceBtn" style="width:100%; padding:13px;">✍️ Enter code manually</button>
+      <button class="modal-cancel" id="mpesaCancelBtn" style="width:100%; margin-top:10px; padding:11px;">Cancel</button>
+    </div>
+
+    <div id="mpesaC2bStep" style="display:none;">
+      <p style="font-size:11.5px; color:var(--muted); margin:0 0 10px;">Payments received directly to the till in the last 20 minutes — tap the one this customer just showed you.</p>
+      <div id="mpesaC2bList" style="max-height:220px; overflow-y:auto; margin-bottom:10px;"></div>
+      <button class="modal-cancel" id="mpesaC2bBackBtn" style="width:100%;">Back</button>
+    </div>
+
+    <div id="mpesaManualStep" style="display:none;">
+      <input id="mpesaCodeInput" type="text" placeholder="M-Pesa code (optional)" style="width:100%; text-align:center; letter-spacing:1px; font-size:14px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px; text-transform:uppercase;">
+      <p style="font-size:11px; color:var(--muted); margin:0 0 14px;">If the customer's confirmation SMS is handy, jot the code down for your own record — or just confirm they've paid.</p>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="mpesaManualBackBtn">Back</button>
+        <button class="modal-confirm" id="mpesaSendBtn">Confirm payment received</button>
+      </div>
+    </div>
+
+    <div id="mpesaStkPhoneStep" style="display:none;">
+      <input id="mpesaStkPhoneInput" type="tel" placeholder="07XX XXX XXX" inputmode="numeric" style="width:100%; text-align:center; letter-spacing:1px; font-size:16px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px;">
+      <p id="mpesaStkError" style="color:var(--clay); font-size:11.5px; min-height:16px; margin:0 0 8px;"></p>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="mpesaStkBackBtn">Back</button>
+        <button class="modal-confirm" id="mpesaStkSendBtn">Send prompt</button>
+      </div>
+    </div>
+
+    <div id="mpesaStkWaitingStep" style="display:none; text-align:center; padding:6px 0;">
+      <div class="mpesa-spinner" style="margin:10px auto;"></div>
+      <p id="mpesaStkStatusText" style="font-size:13px; font-weight:600; margin:8px 0 4px;">Sending prompt…</p>
+      <p style="font-size:10px; color:var(--muted); margin:0 0 14px;">🧪 Sandbox test mode — Safaricom's simulator, not a real customer phone</p>
+      <button class="modal-cancel" id="mpesaStkAbortBtn" style="width:100%;">Cancel</button>
+    </div>
+
+    <div id="mpesaStkResultStep" style="display:none; text-align:center; padding:6px 0;">
+      <p id="mpesaStkResultText" style="font-size:13.5px; font-weight:600; margin:10px 0 14px;"></p>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="mpesaStkRetryBtn">Try again</button>
+        <button class="modal-confirm" id="mpesaStkGiveUpBtn">Cancel sale</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1361,18 +1403,34 @@ function isSafaricomNumber(d){
   return false;
 }
 let mpesaPending = null;
+let mpesaStkCancelled = false;
+let mpesaStkCheckoutId = null;
+
+function showMpesaStep(stepId){
+  ['mpesaChoiceStep','mpesaManualStep','mpesaStkPhoneStep','mpesaStkWaitingStep','mpesaStkResultStep','mpesaC2bStep'].forEach(id=>{
+    $(id).style.display = (id===stepId) ? 'block' : 'none';
+  });
+}
 function openMpesaModal(subtotal, tax, total){
   mpesaPending = {subtotal, tax, total};
+  mpesaStkCancelled = false;
   $('mpesaDue').textContent = 'Amount due: ' + fmtKsh(total);
   $('mpesaCodeInput').value = '';
+  $('mpesaStkPhoneInput').value = '';
+  $('mpesaStkError').textContent = '';
+  showMpesaStep('mpesaChoiceStep');
   $('mpesaModal').classList.add('show');
-  $('mpesaCodeInput').focus();
 }
 function closeMpesaModal(){
   $('mpesaModal').classList.remove('show');
   mpesaPending = null;
+  mpesaStkCancelled = true; // stops any in-flight polling from finalizing after close
 }
 $('mpesaCancelBtn').addEventListener('click', closeMpesaModal);
+
+// ---------- Path 1: manual code entry — unchanged from before, always available ----------
+$('mpesaManualChoiceBtn').addEventListener('click', ()=>{ showMpesaStep('mpesaManualStep'); $('mpesaCodeInput').focus(); });
+$('mpesaManualBackBtn').addEventListener('click', ()=> showMpesaStep('mpesaChoiceStep'));
 $('mpesaSendBtn').addEventListener('click', async ()=>{
   if(!mpesaPending) return;
   const code = $('mpesaCodeInput').value.trim().toUpperCase();
@@ -1382,6 +1440,146 @@ $('mpesaSendBtn').addEventListener('click', async ()=>{
   $('mpesaModal').classList.remove('show');
   await finalizeSale('mpesa', subtotal, tax, total, total, code || null);
 });
+
+// ---------- Path 2: real STK push — talks to the actual Daraja sandbox backend ----------
+function mpesaFunctionHeaders(){
+  return {'Content-Type':'application/json', 'Authorization':'Bearer '+PLATFORM_SUPABASE_KEY, 'apikey':PLATFORM_SUPABASE_KEY};
+}
+async function triggerStkPush(phone, amount){
+  const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/mpesa-initiate`, {
+    method:'POST', headers: mpesaFunctionHeaders(),
+    body: JSON.stringify({
+      phone, amount, shopId,
+      accountReference: (businessProfile.storeName || 'My DukaGO POS'),
+      transactionDesc: 'POS sale',
+    }),
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok || data.error) throw new Error(data.error || 'Could not reach the payment backend');
+  return data.checkoutRequestId;
+}
+async function pollStkStatus(checkoutRequestId){
+  const started = Date.now();
+  const timeoutMs = 90000, intervalMs = 3500;
+  while(Date.now() - started < timeoutMs){
+    if(mpesaStkCancelled) return {status:'cancelled'};
+    await new Promise(r=>setTimeout(r, intervalMs));
+    if(mpesaStkCancelled) return {status:'cancelled'};
+    try{
+      const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_requests?checkout_request_id=eq.${encodeURIComponent(checkoutRequestId)}&select=status,mpesa_receipt,result_desc`, {
+        headers: mpesaFunctionHeaders(),
+      });
+      if(res.ok){
+        const rows = await res.json();
+        if(rows.length && rows[0].status !== 'pending') return rows[0];
+      }
+    }catch(e){ /* keep polling — a single failed check shouldn't abandon the wait */ }
+  }
+  return {status:'timeout'};
+}
+$('mpesaStkChoiceBtn').addEventListener('click', ()=>{ showMpesaStep('mpesaStkPhoneStep'); $('mpesaStkPhoneInput').focus(); });
+$('mpesaStkBackBtn').addEventListener('click', ()=> showMpesaStep('mpesaChoiceStep'));
+$('mpesaStkRetryBtn').addEventListener('click', ()=> showMpesaStep('mpesaStkPhoneStep'));
+$('mpesaStkGiveUpBtn').addEventListener('click', closeMpesaModal);
+$('mpesaStkAbortBtn').addEventListener('click', closeMpesaModal);
+$('mpesaStkSendBtn').addEventListener('click', async ()=>{
+  if(!mpesaPending) return;
+  const raw = $('mpesaStkPhoneInput').value.trim();
+  const normalized = normalizeKenyanPhone(raw);
+  if(!normalized){ $('mpesaStkError').textContent = 'Enter a valid Kenyan phone number'; return; }
+  if(!isSafaricomNumber(normalized)){ $('mpesaStkError').textContent = "That number isn't on Safaricom"; return; }
+  $('mpesaStkError').textContent = '';
+  const {subtotal, tax, total} = mpesaPending;
+  mpesaStkCancelled = false;
+  showMpesaStep('mpesaStkWaitingStep');
+  $('mpesaStkStatusText').textContent = 'Sending prompt…';
+  try{
+    const checkoutId = await triggerStkPush(normalized, total);
+    mpesaStkCheckoutId = checkoutId;
+    logAudit('M-Pesa STK push sent (sandbox)', `${fmtKsh(total)} to ${normalized}`);
+    if(mpesaStkCancelled) return;
+    $('mpesaStkStatusText').textContent = 'Waiting for the customer to enter their PIN…';
+    const result = await pollStkStatus(checkoutId);
+    if(mpesaStkCancelled || result.status==='cancelled') return;
+    if(result.status==='success'){
+      $('mpesaStkStatusText').textContent = '✓ Payment confirmed';
+      const receiptCode = result.mpesa_receipt || checkoutId;
+      logAudit('M-Pesa STK push confirmed (sandbox)', `${fmtKsh(total)} — ${receiptCode}`);
+      setTimeout(async ()=>{
+        if(mpesaStkCancelled) return;
+        mpesaPending = null;
+        $('mpesaModal').classList.remove('show');
+        await finalizeSale('mpesa', subtotal, tax, total, total, receiptCode);
+      }, 500);
+    } else if(result.status==='timeout'){
+      showMpesaStep('mpesaStkResultStep');
+      $('mpesaStkResultText').textContent = "No response yet — the customer may not have seen the prompt. You can try again or cancel.";
+    } else {
+      showMpesaStep('mpesaStkResultStep');
+      $('mpesaStkResultText').textContent = 'Payment not completed' + (result.result_desc ? ': '+result.result_desc : ' — the customer may have cancelled or declined.');
+      logAudit('M-Pesa STK push failed (sandbox)', result.result_desc || 'no reason given');
+    }
+  }catch(e){
+    if(mpesaStkCancelled) return;
+    showMpesaStep('mpesaStkResultStep');
+    $('mpesaStkResultText').textContent = 'Could not send the prompt: ' + e.message;
+  }
+});
+
+// ---------- Path 3: match a payment the customer already made directly ----------
+// A real, common scenario in Kenya: the customer pays your till on their own, without any
+// prompt from this app. mpesa-c2b-confirmation (the backend) catches these automatically the
+// instant they happen — this just shows the cashier a short list to pick the right one from.
+// Honest limitation right now: in sandbox, every shop shares one till, so this list isn't
+// filtered per-shop yet — that resolves naturally once each real shop has its own production
+// till, where a payment can only ever land on that shop's own number in the first place.
+$('mpesaC2bChoiceBtn').addEventListener('click', async ()=>{
+  showMpesaStep('mpesaC2bStep');
+  await loadC2bMatchList();
+});
+$('mpesaC2bBackBtn').addEventListener('click', ()=> showMpesaStep('mpesaChoiceStep'));
+async function loadC2bMatchList(){
+  const list = $('mpesaC2bList');
+  list.innerHTML = '<p style="text-align:center; color:var(--muted); font-size:12px; padding:14px 0;">Checking for recent payments…</p>';
+  try{
+    const since = new Date(Date.now() - 20*60*1000).toISOString();
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?matched=eq.false&created_at=gt.${encodeURIComponent(since)}&order=created_at.desc&limit=15`, {
+      headers: mpesaFunctionHeaders(),
+    });
+    if(!res.ok) throw new Error('Could not reach the payment backend');
+    const rows = await res.json();
+    if(!rows.length){
+      list.innerHTML = '<p style="text-align:center; color:var(--muted); font-size:12px; padding:14px 0;">No unmatched payments in the last 20 minutes. If they just paid, wait a few seconds and check again.</p>';
+      return;
+    }
+    list.innerHTML = '';
+    rows.forEach(r=>{
+      const mins = Math.max(0, Math.round((Date.now() - new Date(r.created_at).getTime())/60000));
+      const row = document.createElement('button');
+      row.className = 'modal-cancel';
+      row.style.cssText = 'width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:11px 13px;';
+      row.innerHTML = `<span><b style="font-family:var(--mono);">${fmtKsh(r.trans_amount)}</b><br><span style="font-size:11px; color:var(--muted);">${r.msisdn||'Unknown number'} · ${mins<1?'just now':mins+' min ago'}</span></span><span style="font-size:11px; color:var(--sage-dark);">Use this →</span>`;
+      row.addEventListener('click', ()=> confirmC2bMatch(r));
+      list.appendChild(row);
+    });
+  }catch(e){
+    list.innerHTML = `<p style="text-align:center; color:var(--clay); font-size:12px; padding:14px 0;">Could not load recent payments: ${e.message}</p>`;
+  }
+}
+async function confirmC2bMatch(payment){
+  if(!mpesaPending) return;
+  const {subtotal, tax, total} = mpesaPending;
+  try{
+    await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?trans_id=eq.${encodeURIComponent(payment.trans_id)}`, {
+      method:'PATCH', headers: mpesaFunctionHeaders(),
+      body: JSON.stringify({matched:true}),
+    });
+  }catch(e){ /* even if this lock-out write fails, still complete the sale — don't block a real payment over it */ }
+  logAudit('M-Pesa direct payment matched', `${fmtKsh(payment.trans_amount)} — ${payment.trans_id}`);
+  mpesaPending = null;
+  $('mpesaModal').classList.remove('show');
+  await finalizeSale('mpesa', subtotal, tax, total, total, payment.trans_id);
+}
 
 function openTenderModal(subtotal, tax, grandTotal){
   $('tenderDue').textContent = 'Amount due: ' + fmtKsh(grandTotal);
