@@ -2198,6 +2198,15 @@ async function pullSpecificShop(targetShopId){
   const prevShopId = shopId;
   shopId = targetShopId;
   await put('settings', {key:'shop_id', value:shopId});
+  // This device is adopting a shop identity it's never had before (or switching to a
+  // different one) — any locally-saved business type/VAT/profile/receipt settings belong
+  // to whatever this device was doing previously and are meaningless now. Clear them before
+  // pulling, so the real shop's data always wins cleanly instead of possibly losing a stale
+  // "which was updated more recently" comparison against leftovers that don't even belong
+  // to this shop.
+  for(const key of ['active_business_types','vat','business_profile','receipt']){
+    try{ await del('settings', key); }catch(e){ /* fine if it never existed locally */ }
+  }
   await pullShopData(true);
   logAudit('Auto-joined shop via PIN lookup', prevShopId ? `was ${prevShopId}` : 'first shop on this device');
 }
