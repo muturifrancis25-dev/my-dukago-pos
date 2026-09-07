@@ -17,7 +17,7 @@
 <style>
   :root{
     --ink:#2a2118;
-    --bg:#efe6d3;
+    --bg:#f3ebda;
     --panel:#fffcf5;
     --line:#ddccA1;
     --teal:#163b31;
@@ -31,6 +31,7 @@
     --sage-dark:#35573a;
     --clay:#b33f2e;
     --muted:#8c7c5e;
+    --bg-glow:#faf4e6; /* soft lift at the top of the background — replaces flat, slightly muddy color */
     --accent-text:var(--teal-dark); /* foreground emphasis on a panel — flips in dark mode, chrome (--teal-dark itself) never does */
     --mono:ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
@@ -59,12 +60,13 @@
     --clay:#e2695a;
     --marigold-pale:#3a2e18;
     --accent-text:#f0c869;
+    --bg-glow:#1d1710;
   }
   html{ color-scheme: light; }
   html[data-theme="dark"]{ color-scheme: dark; }
   body{ transition: background-color .2s, color .2s; }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+  html,body{margin:0;height:100%;background:radial-gradient(ellipse 1400px 900px at 50% -8%, var(--bg-glow), var(--bg) 60%) fixed;color:var(--ink);font-family:var(--sans);}
   html,body{overflow-x:hidden; max-width:100vw;} /* hard safety net: no element can ever drag the whole page sideways again */
   body{display:flex;flex-direction:column;min-height:100vh;}
 
@@ -779,6 +781,7 @@
     <div class="login-mark">MD</div>
     <h2>My DukaGO POS</h2>
     <p>Enter your PIN to start this till.</p>
+    <p style="text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
@@ -937,6 +940,10 @@
    across the whole platform. 1234 itself is never a stored, working credential.
    ========================================================================= */
 const OUTLET_ID = 'outlet_001';
+// Bumped by hand every time this file is updated — the one honest way to tell, at a glance,
+// whether a device is actually running the latest build or a stale cached/leftover copy.
+// If what you see on screen doesn't match this, that's the whole problem right there.
+const BUILD_VERSION = '2026-09-07-vat-diagnostics-1';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -947,7 +954,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'Groceries, drinks, household goods, airtime.',
     subtitle:'General Retail', unitLabel:'stock',
     cats:['Groceries','Drinks','Household','Airtime','Other'],
-    colors:{Groceries:'#4c7a52', Drinks:'#2f7a8c', Household:'#b33f2e', Airtime:'#e2a034', Other:'#8c7c5e'},
+    colors:{Groceries:'#4c7a52', Drinks:'#2f7a8c', Household:'#b33f2e', Airtime:'#e2a034', Other:'#5c6670'},
     starter:[
       {sku:'5000112637922', name:'Blueband 500g', price:210, stock:24, cat:'Groceries'},
       {sku:'6161100810018', name:'Mumias Sugar 2kg', price:280, stock:15, cat:'Groceries'},
@@ -968,7 +975,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'Petrol, diesel, kerosene, lubricants, forecourt shop.',
     subtitle:'Fuel Station', unitLabel:'per litre / unit',
     cats:['Fuel','Lubricants','Shop','Other'],
-    colors:{Fuel:'#b33f2e', Lubricants:'#8c7c5e', Shop:'#4c7a52', Other:'#e2a034'},
+    colors:{Fuel:'#b33f2e', Lubricants:'#5c6670', Shop:'#4c7a52', Other:'#e2a034'},
     starter:[
       {sku:'FUEL-SUPER-1L', name:'Super Petrol (1L)', price:194, stock:null, cat:'Fuel'},
       {sku:'FUEL-DIESEL-1L', name:'Diesel (1L)', price:180, stock:null, cat:'Fuel'},
@@ -984,7 +991,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'LPG cylinder refills, exchanges, accessories — separate from petrol/diesel forecourts.',
     subtitle:'Gas Station', unitLabel:'per cylinder / unit',
     cats:['Gas Cylinders','Accessories','Other'],
-    colors:{'Gas Cylinders':'#2f7a8c', Accessories:'#8c7c5e', Other:'#e2a034'},
+    colors:{'Gas Cylinders':'#2f7a8c', Accessories:'#5c6670', Other:'#e2a034'},
     starter:[
       {sku:'LPG-6KG', name:'LPG Refill 6kg', price:1250, stock:10, cat:'Gas Cylinders'},
       {sku:'LPG-13KG', name:'LPG Refill 13kg', price:2600, stock:6, cat:'Gas Cylinders'},
@@ -999,7 +1006,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'Bulk drinking water refills, dispensers, delivery.',
     subtitle:'Water Refill Centre', unitLabel:'per container',
     cats:['Refills','Dispensers','Delivery','Other'],
-    colors:{Refills:'#2f7a8c', Dispensers:'#4c7a52', Delivery:'#e2a034', Other:'#8c7c5e'},
+    colors:{Refills:'#2f7a8c', Dispensers:'#4c7a52', Delivery:'#e2a034', Other:'#5c6670'},
     starter:[
       {sku:'WATER-5L', name:'5L Refill', price:30, stock:null, cat:'Refills'},
       {sku:'WATER-10L', name:'10L Refill', price:50, stock:null, cat:'Refills'},
@@ -1014,7 +1021,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'Wash packages, detailing, add-ons — priced as services.',
     subtitle:'Carwash', unitLabel:'per service',
     cats:['Wash Packages','Detailing','Add-ons','Other'],
-    colors:{'Wash Packages':'#2f7a8c', Detailing:'#b33f2e', 'Add-ons':'#e2a034', Other:'#8c7c5e'},
+    colors:{'Wash Packages':'#2f7a8c', Detailing:'#b33f2e', 'Add-ons':'#e2a034', Other:'#5c6670'},
     starter:[
       {sku:'WASH-SALOON', name:'Saloon Car Wash', price:300, stock:null, cat:'Wash Packages'},
       {sku:'WASH-SUV', name:'SUV / 4x4 Wash', price:450, stock:null, cat:'Wash Packages'},
@@ -1030,7 +1037,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'Pain relief, first aid, personal care, prescription-only.',
     subtitle:'Chemist', unitLabel:'stock',
     cats:['Prescription Only','Pain & Fever','Cold & Flu','First Aid','Personal Care','Baby & Mother','Other'],
-    colors:{'Prescription Only':'#b33f2e', 'Pain & Fever':'#e2a034', 'Cold & Flu':'#2f7a8c', 'First Aid':'#4c7a52', 'Personal Care':'#6a4c93', 'Baby & Mother':'#e2a034', Other:'#8c7c5e'},
+    colors:{'Prescription Only':'#b33f2e', 'Pain & Fever':'#e2a034', 'Cold & Flu':'#2f7a8c', 'First Aid':'#4c7a52', 'Personal Care':'#6a4c93', 'Baby & Mother':'#e2a034', Other:'#5c6670'},
     starter:[
       {sku:'CHEM-PARA-500', name:'Paracetamol 500mg (16s)', price:50, stock:60, cat:'Pain & Fever'},
       {sku:'CHEM-IBUPROFEN-200', name:'Ibuprofen 200mg (10s)', price:80, stock:40, cat:'Pain & Fever'},
@@ -1056,7 +1063,7 @@ const BUILTIN_BUSINESS_TYPES = {
     desc:'Full grocery range — produce, bakery, butchery, household, beverages, and more than one till.',
     subtitle:'Supermarket', unitLabel:'stock',
     cats:['Fresh Produce','Bakery','Butchery','Groceries','Beverages','Household','Personal Care','Frozen Foods','Electronics','Other'],
-    colors:{'Fresh Produce':'#4c7a52', Bakery:'#e2a034', Butchery:'#b33f2e', Groceries:'#8c7c5e', Beverages:'#2f7a8c', Household:'#6a4c93', 'Personal Care':'#e2a034', 'Frozen Foods':'#2f7a8c', Electronics:'#4c7a52', Other:'#8c7c5e'},
+    colors:{'Fresh Produce':'#4c7a52', Bakery:'#e2a034', Butchery:'#b33f2e', Groceries:'#5c6670', Beverages:'#2f7a8c', Household:'#6a4c93', 'Personal Care':'#e2a034', 'Frozen Foods':'#2f7a8c', Electronics:'#4c7a52', Other:'#5c6670'},
     starter:[
       {sku:'SM-TOMATOES-KG', name:'Tomatoes (per kg)', price:120, stock:40, cat:'Fresh Produce'},
       {sku:'SM-ONIONS-KG', name:'Onions (per kg)', price:100, stock:40, cat:'Fresh Produce'},
@@ -2674,7 +2681,7 @@ $('lockScreenBtn').addEventListener('click', async ()=>{
 
 // ---------- Staff management ----------
 // ---------- Business type ----------
-const BIZ_COLOR_PALETTE = ['#4c7a52','#2f7a8c','#b33f2e','#e2a034','#8c7c5e','#6a4c93','#1f6f4e'];
+const BIZ_COLOR_PALETTE = ['#4c7a52','#2f7a8c','#b33f2e','#e2a034','#5c6670','#6a4c93','#1f6f4e'];
 function slugify(s){ return s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'type'; }
 
 async function loadCustomBusinessTypes(){
@@ -2747,6 +2754,7 @@ async function updateDeviceDiagnostics(){
   const localBizSetting = await getSetting('active_business_types');
   const localVatSetting = await getSetting('vat');
   const lines = [
+    `<b>Build: ${BUILD_VERSION}</b>`,
     `Shop ID: ${shopId || '(none — not set up yet)'}`,
     `Business type(s) live now: ${JSON.stringify(currentBusinessTypes)}`,
     `Business type(s) saved locally: ${localBizSetting ? JSON.stringify(localBizSetting.value) : '(none saved)'}${localBizSetting && localBizSetting.updated_at ? ' — updated '+new Date(localBizSetting.updated_at).toLocaleString('en-KE',{hour12:false}) : ''}`,
@@ -3431,6 +3439,7 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 // job is getting the local database and UI into a ready state.
 (async function init(){
   $('themeToggleBtn').textContent = document.documentElement.getAttribute('data-theme')==='dark' ? '☀️' : '🌙';
+  $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
   db = await openDB();
   await loadShopIdentity();
   await seedIfEmpty();
