@@ -241,6 +241,7 @@
   .modal-actions{display:flex; gap:8px;}
   .modal-actions button{flex:1; padding:11px; border-radius:8px; border:none; font-weight:700; font-size:13px; cursor:pointer;}
   .modal-cancel{background:var(--bg); color:var(--muted);}
+  .active-method{background:var(--teal-dark) !important; color:#fff !important;}
   .modal-confirm{background:var(--navy-dark); color:#fff;}
 
   .toast{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--teal-dark); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; font-weight:600; z-index:150; opacity:0; pointer-events:none; transition:opacity .25s, bottom .25s;}
@@ -403,6 +404,8 @@
   <div class="backoffice-tabs">
     <button class="active" data-view="business">Business</button>
     <button data-view="stock">Stock</button>
+    <button data-view="payables">Payables</button>
+    <button data-view="debts">Customer Credit</button>
     <button data-view="reports">Reports</button>
     <button data-view="staff" class="admin-only-tab">Staff</button>
     <button data-view="audit" class="admin-only-tab">Audit Log</button>
@@ -415,6 +418,10 @@
 
   <!-- ============ TILL (default / cashier) VIEW ============ -->
   <section class="view active" id="view-till">
+    <div id="stockTakeBanner" style="display:none; background:var(--marigold-pale); border-bottom:2px solid var(--marigold); padding:10px 18px; font-size:12.5px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <span id="stockTakeBannerText" style="font-weight:600;"></span>
+      <button class="primary-btn" id="stockTakeBannerBtn" style="padding:6px 14px; font-size:11.5px; display:none;">Start stock take</button>
+    </div>
     <div class="till-grid">
 
       <!-- Receipt panel -->
@@ -438,6 +445,10 @@
         <div class="paymethod-row" id="payMethodRow">
           <button class="active" data-method="cash">Cash</button>
           <button data-method="mpesa">M-Pesa</button>
+        </div>
+        <div class="action-row" style="margin-bottom:8px;">
+          <button class="modal-cancel" id="quickPayableBtn" style="flex:1; padding:9px; font-size:12px;">📋 Log invoice</button>
+          <button class="modal-cancel" id="quickDebtBtn" style="flex:1; padding:9px; font-size:12px;">💳 Customer credit</button>
         </div>
         <div class="action-row">
           <button class="btn-lock" id="lockScreenBtn">🔒 Lock</button>
@@ -509,9 +520,17 @@
 
   <!-- ============ STOCK (admin) ============ -->
   <section class="view" id="view-stock">
+    <div class="panel" id="stockTakePanel"></div>
     <div class="panel">
       <h3>Feed stock</h3>
       <p class="hint">Log new stock received. Only shown and sold for the currently active business type — switch business type first if you're adding SKUs for a different one. Cost price is what it feeds Reports' profit numbers — worth filling in even if you skip it at first.</p>
+      <div class="form-row" style="grid-template-columns:1fr 1fr; margin-bottom:4px;">
+        <select id="costModeSelect">
+          <option value="piece">Cost below is: per piece</option>
+          <option value="pack">Cost below is: per pack / carton</option>
+        </select>
+        <input id="packUnitsInput" type="number" placeholder="Pieces per pack (e.g. 24)" min="1" style="display:none;">
+      </div>
       <div class="form-row">
         <input id="newSku" placeholder="SKU / barcode">
         <input id="newName" placeholder="Product name">
@@ -523,9 +542,10 @@
           <option value="Other">Other</option>
         </select>
         <input id="newQty" type="number" placeholder="Qty received (blank = no change / service if new)" min="1">
-        <input id="newCost" type="number" placeholder="Cost price / unit (KSh, optional)" min="0">
+        <input id="newCost" type="number" placeholder="Cost price (KSh, optional)" min="0">
         <input id="newPrice" type="number" placeholder="Sell price (KSh)" min="0">
       </div>
+      <p id="perPieceCostPreview" class="hint" style="margin:-4px 0 10px; display:none;"></p>
       <button class="primary-btn" id="addStockBtn">Add to stock</button>
       <p id="editingNotice" class="hint" style="margin:10px 0 0;"></p>
     </div>
@@ -533,6 +553,65 @@
       <h3>Inventory</h3>
       <div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th><th>SKU</th><th>Stock on hand</th><th>Cost</th><th>Price</th><th>Margin</th><th></th></tr></thead>
       <tbody id="stockTable"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ============ PAYABLES — what the shop owes its suppliers ============ -->
+  <section class="view" id="view-payables">
+    <div class="panel">
+      <h3>Add a supplier invoice</h3>
+      <p class="hint">Snap a photo of the invoice or upload one — due date defaults to 30 days from the invoice date, the usual supplier credit term, but you can change it.</p>
+      <div class="form-row">
+        <div><label>Supplier name</label><input id="payableSupplier" placeholder="e.g. Bidco Distributors"></div>
+        <div><label>Amount (KSh)</label><input id="payableAmount" type="number" placeholder="0"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Invoice date</label><input id="payableInvoiceDate" type="date"></div>
+        <div><label>Due date</label><input id="payableDueDate" type="date"></div>
+      </div>
+      <label>Notes (optional)</label>
+      <input id="payableNotes" placeholder="e.g. Invoice #4521, weekly stock delivery" style="margin-bottom:10px;">
+      <label>Photo of invoice (optional)</label>
+      <input id="payablePhotoInput" type="file" accept="image/*" capture="environment" style="margin-bottom:10px; width:100%;">
+      <div id="payablePhotoPreview" style="display:none; margin-bottom:10px;"><img id="payablePhotoImg" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--line);"></div>
+      <button class="primary-btn" id="addPayableBtn" style="width:100%;">Save invoice</button>
+    </div>
+    <div class="panel">
+      <h3>Outstanding — you owe suppliers</h3>
+      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total outstanding</div><div class="sval" id="payablesOutstandingTotal">KSh 0</div></div>
+      <div id="payablesUnpaidList"></div>
+    </div>
+    <div class="panel">
+      <h3>Paid — history</h3>
+      <div id="payablesPaidList"></div>
+    </div>
+  </section>
+
+  <!-- ============ CUSTOMER CREDIT — what customers owe the shop ============ -->
+  <section class="view" id="view-debts">
+    <div class="panel">
+      <h3>Record a customer credit</h3>
+      <p class="hint">For a regular customer taking goods now and paying later — jot it down here so nothing gets forgotten.</p>
+      <div class="form-row">
+        <div><label>Customer name</label><input id="debtCustomerName" placeholder="e.g. Mama Achieng"></div>
+        <div><label>Phone (optional)</label><input id="debtCustomerPhone" placeholder="07XX XXX XXX"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Amount (KSh)</label><input id="debtAmount" type="number" placeholder="0"></div>
+        <div><label>Date given</label><input id="debtDate" type="date"></div>
+      </div>
+      <label>What was it for (optional)</label>
+      <input id="debtNotes" placeholder="e.g. 2kg sugar, 1L cooking oil" style="margin-bottom:10px;">
+      <button class="primary-btn" id="addDebtBtn" style="width:100%;">Save credit</button>
+    </div>
+    <div class="panel">
+      <h3>Owing — customers who haven't paid yet</h3>
+      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total owed to you</div><div class="sval" id="debtsOutstandingTotal">KSh 0</div></div>
+      <div id="debtsUnpaidList"></div>
+    </div>
+    <div class="panel">
+      <h3>Paid — history</h3>
+      <div id="debtsPaidList"></div>
     </div>
   </section>
 
@@ -627,7 +706,7 @@
 
     <div class="panel">
       <h3 id="salesTableTitle">Sales — today</h3>
-      <div class="table-scroll"><table><thead><tr><th>Time</th><th>Cashier</th><th>Items</th><th>Total</th><th>Synced</th></tr></thead>
+      <div class="table-scroll"><table><thead><tr><th>Time</th><th>Cashier</th><th>Items</th><th>Total</th><th>Synced</th><th></th></tr></thead>
       <tbody id="salesTable"></tbody></table></div>
     </div>
 
@@ -837,6 +916,46 @@
   </div>
 </div>
 
+<!-- Quick-action modals reachable directly from the till by ANY role — no backoffice access
+     needed, since logging an invoice or a customer credit is normal operational work, not
+     something that should require an admin/supervisor PIN just to open the screen. -->
+<div class="modal-overlay" id="quickPayableModal">
+  <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
+    <h3>Log a supplier invoice</h3>
+    <label>Supplier name</label>
+    <input id="qpSupplier" placeholder="e.g. Bidco Distributors" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Amount (KSh)</label>
+    <input id="qpAmount" type="number" placeholder="0" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Notes (optional)</label>
+    <input id="qpNotes" placeholder="e.g. Invoice #4521" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Photo of invoice (optional)</label>
+    <input id="qpPhotoInput" type="file" accept="image/*" capture="environment" style="width:100%; margin:4px 0 10px;">
+    <div id="qpPhotoPreview" style="display:none; margin-bottom:10px;"><img id="qpPhotoImg" style="max-width:100%; max-height:160px; border-radius:8px; border:1px solid var(--line);"></div>
+    <p style="font-size:10.5px; color:var(--muted); margin:0 0 12px;">Due date is set automatically to 30 days from today — an admin can adjust it later under Payables.</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="qpCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="qpSaveBtn">Save invoice</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="quickDebtModal">
+  <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
+    <h3>Record customer credit</h3>
+    <label>Customer name</label>
+    <input id="qdCustomer" placeholder="e.g. Mama Achieng" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Phone (optional)</label>
+    <input id="qdPhone" placeholder="07XX XXX XXX" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Amount (KSh)</label>
+    <input id="qdAmount" type="number" placeholder="0" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>What was it for (optional)</label>
+    <input id="qdNotes" placeholder="e.g. 2kg sugar, 1L cooking oil" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 12px;">
+    <div class="modal-actions">
+      <button class="modal-cancel" id="qdCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="qdSaveBtn">Save credit</button>
+    </div>
+  </div>
+</div>
+
 <!-- M-Pesa payment — two paths, cashier's choice: enter a code manually (works right now,
      always), or send a real STK push prompt (wired to the actual Daraja sandbox backend —
      clearly labeled as test mode until real production credentials are in place). -->
@@ -896,6 +1015,28 @@
 </div>
 
 <!-- Sale complete — shown right after payment is confirmed -->
+<!-- Refund — admin/supervisor only, reachable from a sale row in Reports -->
+<div class="modal-overlay" id="refundModal">
+  <div class="modal-box" style="width:min(88vw,320px);">
+    <h3>Refund this sale</h3>
+    <p id="refundSaleInfo" style="font-size:12px; color:var(--muted); margin:0 0 12px;">—</p>
+    <input id="refundAmountInput" type="number" placeholder="Refund amount (KSh)" min="0" style="width:100%; text-align:center; font-size:16px; padding:12px; border-radius:9px; border:1.5px solid var(--line); margin-bottom:10px;">
+    <div class="form-row" style="grid-template-columns:1fr 1fr; margin-bottom:10px;">
+      <button class="modal-cancel refund-method-btn" data-method="cash" style="padding:11px;">💵 Cash back</button>
+      <button class="modal-cancel refund-method-btn" data-method="mpesa" style="padding:11px;">📱 M-Pesa back</button>
+    </div>
+    <p style="font-size:10px; color:var(--muted); margin:-4px 0 10px;">M-Pesa here just records that a refund was sent — it doesn't trigger an automatic reversal. You'd still need to actually send it via M-Pesa yourself.</p>
+    <input id="refundReasonInput" type="text" placeholder="Reason (e.g. customer changed mind, overpaid)" style="width:100%; padding:11px; border-radius:9px; border:1.5px solid var(--line); margin-bottom:10px;">
+    <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:14px;">
+      <input type="checkbox" id="refundRestockInput"> Return the items sold to stock
+    </label>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="refundCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="refundConfirmBtn">Process refund</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="saleCompleteModal">
   <div class="modal-box" style="width:min(88vw,320px);">
     <h3>✓ Sale complete</h3>
@@ -1086,10 +1227,81 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'SM-PHONE-CHARGER', name:'Phone Charger (generic)', price:450, stock:15, cat:'Electronics'},
       {sku:'SM-BATTERIES-AA', name:'AA Batteries (4-pack)', price:180, stock:20, cat:'Electronics'},
     ]
+  },
+  agrovet: {
+    label:'Agrovet', emoji:'🌾',
+    desc:'Farm inputs and animal health — seeds, fertilizer, pesticides, feed, and veterinary supplies.',
+    subtitle:'Agrovet', unitLabel:'stock',
+    cats:['Fertilizers','Pesticides & Chemicals','Seeds','Animal Feed','Veterinary','Tools & Equipment','Other'],
+    colors:{Fertilizers:'#4c7a52', 'Pesticides & Chemicals':'#b33f2e', Seeds:'#e2a034', 'Animal Feed':'#8c6a4a', Veterinary:'#2f7a8c', 'Tools & Equipment':'#6a4c93', Other:'#5c6670'},
+    starter:[
+      {sku:'AG-DAP-50KG', name:'DAP Fertilizer 50kg', price:5200, stock:15, cat:'Fertilizers'},
+      {sku:'AG-CAN-50KG', name:'CAN Fertilizer 50kg', price:3400, stock:15, cat:'Fertilizers'},
+      {sku:'AG-NPK-50KG', name:'NPK Fertilizer 50kg', price:4800, stock:10, cat:'Fertilizers'},
+      {sku:'AG-FOLIAR-1L', name:'Foliar Feed 1L', price:650, stock:20, cat:'Fertilizers'},
+      {sku:'AG-PESTICIDE-1L', name:'General Pesticide 1L', price:850, stock:20, cat:'Pesticides & Chemicals'},
+      {sku:'AG-HERBICIDE-1L', name:'Herbicide (Roundup-type) 1L', price:900, stock:18, cat:'Pesticides & Chemicals'},
+      {sku:'AG-FUNGICIDE-1L', name:'Fungicide 1L', price:750, stock:15, cat:'Pesticides & Chemicals'},
+      {sku:'AG-MAIZE-SEED-2KG', name:'Hybrid Maize Seed 2kg', price:900, stock:25, cat:'Seeds'},
+      {sku:'AG-BEAN-SEED-2KG', name:'Bean Seed 2kg', price:450, stock:20, cat:'Seeds'},
+      {sku:'AG-VEG-SEED-PACK', name:'Vegetable Seed Packet', price:120, stock:40, cat:'Seeds'},
+      {sku:'AG-DAIRY-MEAL-70KG', name:'Dairy Meal 70kg', price:3200, stock:12, cat:'Animal Feed'},
+      {sku:'AG-CHICK-MASH-50KG', name:'Chick Mash 50kg', price:2800, stock:12, cat:'Animal Feed'},
+      {sku:'AG-LAYERS-MASH-70KG', name:'Layers Mash 70kg', price:3100, stock:10, cat:'Animal Feed'},
+      {sku:'AG-DEWORMER', name:'Dewormer (cattle/goats)', price:350, stock:25, cat:'Veterinary'},
+      {sku:'AG-ACARICIDE-1L', name:'Acaricide (tick control) 1L', price:700, stock:15, cat:'Veterinary'},
+      {sku:'AG-VET-ANTIBIOTIC', name:'Veterinary Antibiotic Injection', price:450, stock:15, cat:'Veterinary'},
+      {sku:'AG-SPRAYER-16L', name:'Knapsack Sprayer 16L', price:2200, stock:8, cat:'Tools & Equipment'},
+      {sku:'AG-GUMBOOTS', name:'Farm Gumboots (pair)', price:800, stock:12, cat:'Tools & Equipment'},
+      {sku:'AG-GLOVES', name:'Protective Gloves (pair)', price:250, stock:20, cat:'Tools & Equipment'},
+    ]
+  },
+  spareparts: {
+    label:'Spare Part Shop', emoji:'🔧',
+    desc:'Vehicle spare parts — engine, body, electrical, filters, tyres, and accessories.',
+    subtitle:'Spare Parts', unitLabel:'stock',
+    cats:['Engine Parts','Body Parts','Electrical','Filters & Fluids','Tyres & Wheels','Accessories','Other'],
+    colors:{'Engine Parts':'#b33f2e', 'Body Parts':'#8c6a4a', Electrical:'#e2a034', 'Filters & Fluids':'#2f7a8c', 'Tyres & Wheels':'#4c7a52', Accessories:'#6a4c93', Other:'#5c6670'},
+    starter:[
+      {sku:'SP-BRAKEPAD-FRONT', name:'Brake Pads (front set)', price:2800, stock:12, cat:'Engine Parts'},
+      {sku:'SP-BRAKEPAD-REAR', name:'Brake Pads (rear set)', price:2400, stock:12, cat:'Engine Parts'},
+      {sku:'SP-CLUTCHPLATE', name:'Clutch Plate', price:4500, stock:6, cat:'Engine Parts'},
+      {sku:'SP-SPARKPLUG', name:'Spark Plug (each)', price:350, stock:40, cat:'Engine Parts'},
+      {sku:'SP-FANBELT', name:'Fan Belt', price:900, stock:15, cat:'Engine Parts'},
+      {sku:'SP-HEADLIGHT', name:'Headlight Assembly', price:3200, stock:8, cat:'Body Parts'},
+      {sku:'SP-SIDEMIRROR', name:'Side Mirror', price:1500, stock:10, cat:'Body Parts'},
+      {sku:'SP-BUMPER-FRONT', name:'Front Bumper', price:6500, stock:4, cat:'Body Parts'},
+      {sku:'SP-WIPERBLADE', name:'Wiper Blade (each)', price:450, stock:30, cat:'Body Parts'},
+      {sku:'SP-CARBATTERY', name:'Car Battery (standard)', price:8500, stock:8, cat:'Electrical'},
+      {sku:'SP-ALTERNATOR', name:'Alternator', price:7200, stock:5, cat:'Electrical'},
+      {sku:'SP-INDICATORBULB', name:'Indicator Bulb (each)', price:150, stock:50, cat:'Electrical'},
+      {sku:'SP-OILFILTER', name:'Oil Filter', price:650, stock:25, cat:'Filters & Fluids'},
+      {sku:'SP-AIRFILTER', name:'Air Filter', price:850, stock:22, cat:'Filters & Fluids'},
+      {sku:'SP-ENGINEOIL-4L', name:'Engine Oil 4L', price:2800, stock:18, cat:'Filters & Fluids'},
+      {sku:'SP-BRAKEFLUID', name:'Brake Fluid 500ml', price:450, stock:20, cat:'Filters & Fluids'},
+      {sku:'SP-TYRE-STANDARD', name:'Tyre (standard size)', price:6500, stock:16, cat:'Tyres & Wheels'},
+      {sku:'SP-WHEELALIGN', name:'Wheel Balancing Weight (set)', price:300, stock:20, cat:'Tyres & Wheels'},
+      {sku:'SP-CARMAT', name:'Car Floor Mat Set', price:2200, stock:10, cat:'Accessories'},
+      {sku:'SP-SEATCOVER', name:'Seat Cover Set', price:3500, stock:8, cat:'Accessories'},
+      {sku:'SP-AIRFRESHENER', name:'Car Air Freshener', price:200, stock:35, cat:'Accessories'},
+    ]
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
 function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
+// Larger, higher-stock-risk businesses get a recurring stock take reminder every 3 days —
+// small dukas/fuel/carwash/gas/water don't carry enough SKUs for this to be worth enforcing.
+const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet'];
+const STOCK_TAKE_INTERVAL_DAYS = 3;
+function stockTakeRequiredForThisShop(){
+  return currentBusinessTypes.some(id => STOCK_TAKE_REQUIRED_TYPES.includes(id));
+}
+async function daysSinceLastStockTake(){
+  const saved = await getSetting('last_stock_take_at');
+  if(!saved || !saved.value) return null; // never done
+  const ms = Date.now() - new Date(saved.value).getTime();
+  return Math.floor(ms / (1000*60*60*24));
+}
 const ROLE_RANK = {cashier:1, supervisor:2, admin:3};
 
 let db, cart = [], isOnline = false, activeCat = 'All', searchTerm = '';
@@ -1119,7 +1331,7 @@ const $ = id => document.getElementById(id);
 // ---------- IndexedDB ----------
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('soko_pos_db_v1', 5);
+    const req = indexedDB.open('soko_pos_db_v1', 7);
     req.onupgradeneeded = e=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains('products')) d.createObjectStore('products',{keyPath:'sku'});
@@ -1130,6 +1342,10 @@ function openDB(){
       if(!d.objectStoreNames.contains('audit_log')) d.createObjectStore('audit_log',{keyPath:'id',autoIncrement:true});
       if(!d.objectStoreNames.contains('stock_movements')) d.createObjectStore('stock_movements',{keyPath:'id',autoIncrement:true});
       if(!d.objectStoreNames.contains('daily_snapshots')) d.createObjectStore('daily_snapshots',{keyPath:'date'});
+      if(!d.objectStoreNames.contains('stock_takes')) d.createObjectStore('stock_takes',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('refunds')) d.createObjectStore('refunds',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('payables')) d.createObjectStore('payables',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('customer_debts')) d.createObjectStore('customer_debts',{keyPath:'id'});
     };
     req.onsuccess = e=>resolve(e.target.result);
     req.onerror = e=>reject(e);
@@ -1678,9 +1894,20 @@ let editingSku = null; // set when the Feed Stock form is pre-filled for editing
 async function addStock(){
   const sku=$('newSku').value.trim(), name=$('newName').value.trim(), cat=$('newCat').value;
   const qtyRaw = $('newQty').value.trim();
-  const costRaw = $('newCost').value.trim();
+  let costRaw = $('newCost').value.trim();
   const price=parseFloat($('newPrice').value);
   if(!sku||!name||isNaN(price)||price<0){ toast('Fill in SKU, name and a valid price'); return; }
+  // Purchase cost can be entered per piece (the default) or per pack/carton — if it's a pack,
+  // convert it to a true per-piece cost right here, before it touches anything else. Every
+  // other part of the app (profit calc, receipts, exports) only ever deals in per-piece cost,
+  // so nothing downstream needs to know or care which way the admin typed it in.
+  if($('costModeSelect').value==='pack' && costRaw!==''){
+    const packUnits = parseInt($('packUnitsInput').value.trim(), 10);
+    if(!packUnits || packUnits<=0){ toast('Enter how many pieces are in one pack'); return; }
+    const packCost = parseFloat(costRaw);
+    if(isNaN(packCost) || packCost<0){ toast('Enter a valid pack cost'); return; }
+    costRaw = String(packCost / packUnits);
+  }
   const qtyProvided = qtyRaw !== '';
   const qty = qtyProvided ? parseInt(qtyRaw, 10) : null;
   if(qtyProvided && (isNaN(qty) || qty<=0)){ toast('Quantity must be a positive number, or blank to leave stock unchanged (or mark a brand-new item as a service)'); return; }
@@ -1708,6 +1935,7 @@ async function addStock(){
   log(`Stock ${isNew?'added':'updated'}: ${name} (${sku})${qtyProvided?' +'+qty:''}. Queued for sync.`,'warn');
   logAudit(isNew ? 'Added new product' : 'Updated product', `${name} (${sku})`);
   $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
+  $('costModeSelect').value='piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
   editingSku = null;
   $('addStockBtn').textContent = 'Add to stock';
   $('editingNotice').textContent = '';
@@ -1727,6 +1955,7 @@ function editProduct(sku){
     $('newCost').value = p.cost || '';
     $('newPrice').value = p.price;
     $('newQty').value = ''; // blank = leave stock count untouched, per the fix above
+    $('costModeSelect').value = 'piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
     $('addStockBtn').textContent = 'Save changes';
     $('editingNotice').innerHTML = `Editing <b>${p.name}</b> — quantity left blank means stock stays as-is. <a href="#" id="cancelEditLink">Cancel</a>`;
     $('editingNotice').querySelector('#cancelEditLink').addEventListener('click', (e)=>{
@@ -1789,7 +2018,283 @@ async function renderStockTable(){
   });
 }
 
-// ---------- Reports ----------
+// ---------- Payables — what the shop owes its suppliers ----------
+// Any signed-in role can add one (a cashier scanning an invoice as it arrives is exactly the
+// point), but only genuine admin-level access can mark one paid — that's real money leaving
+// the business, not a routine operational task.
+function todayIso(){ return new Date().toISOString().slice(0,10); }
+function addDaysIso(iso, days){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
+function prefillPayableDates(){
+  if(!$('payableInvoiceDate').value) $('payableInvoiceDate').value = todayIso();
+  if(!$('payableDueDate').value) $('payableDueDate').value = addDaysIso(todayIso(), 30);
+}
+$('payableInvoiceDate').addEventListener('change', ()=>{
+  // keep the due date pinned to +30 days unless the person has deliberately typed their own
+  if($('payableInvoiceDate').value) $('payableDueDate').value = addDaysIso($('payableInvoiceDate').value, 30);
+});
+let payablePhotoData = null;
+$('payablePhotoInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  payablePhotoData = await compressImageToDataUrl(file, 1000, 0.72);
+  $('payablePhotoImg').src = payablePhotoData;
+  $('payablePhotoPreview').style.display = 'block';
+});
+// Resizes and compresses a photo client-side before it's ever stored — a full-resolution
+// phone photo can be several MB, which is wasteful to sync and store for what's really just
+// a reference image. This keeps invoices to roughly 100-300KB, still perfectly legible.
+function compressImageToDataUrl(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w>maxDim || h>maxDim){
+          if(w>h){ h = Math.round(h*maxDim/w); w = maxDim; } else { w = Math.round(w*maxDim/h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo}){
+  const payable = {
+    id: 'pay_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    supplierName, amount, invoiceDate, dueDate, notes,
+    photo: photo||null, status:'unpaid',
+    addedBy: currentUser ? currentUser.name : 'Unknown',
+    paidDate: null, paidBy: null,
+  };
+  await put('payables', payable);
+  await queuePush('payable_upsert', payable);
+  logAudit('Supplier invoice added', `${supplierName} — ${fmtKsh(amount)}, due ${dueDate}`);
+  return payable;
+}
+$('addPayableBtn').addEventListener('click', async ()=>{
+  const supplierName = $('payableSupplier').value.trim();
+  const amount = parseFloat($('payableAmount').value);
+  const invoiceDate = $('payableInvoiceDate').value || todayIso();
+  const dueDate = $('payableDueDate').value || addDaysIso(invoiceDate, 30);
+  const notes = $('payableNotes').value.trim();
+  if(!supplierName){ toast('Enter the supplier\'s name'); return; }
+  if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+  await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:payablePhotoData});
+  toast('Invoice saved');
+  $('payableSupplier').value=''; $('payableAmount').value=''; $('payableNotes').value='';
+  $('payableInvoiceDate').value=''; $('payableDueDate').value='';
+  $('payablePhotoInput').value=''; $('payablePhotoPreview').style.display='none'; payablePhotoData=null;
+  prefillPayableDates();
+  renderPayablesLists();
+});
+async function renderPayablesLists(){
+  const all = await getAll('payables');
+  const unpaid = all.filter(p=>p.status!=='paid').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const paid = all.filter(p=>p.status==='paid').sort((a,b)=>new Date(b.paidDate||0)-new Date(a.paidDate||0));
+  const totalOutstanding = unpaid.reduce((s,p)=>s+p.amount,0);
+  $('payablesOutstandingTotal').textContent = fmtKsh(totalOutstanding);
+
+  const canMarkPaid = currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor');
+  const unpaidBox = $('payablesUnpaidList'); unpaidBox.innerHTML='';
+  if(unpaid.length===0){
+    unpaidBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing outstanding — every invoice is paid up.</p>`;
+  }
+  unpaid.forEach(p=>{
+    const daysLeft = Math.ceil((new Date(p.dueDate) - new Date(todayIso())) / 86400000);
+    const overdue = daysLeft < 0;
+    const dueSoon = daysLeft >= 0 && daysLeft <= 5;
+    const dueColor = overdue ? 'var(--clay)' : (dueSoon ? 'var(--marigold-dark)' : 'var(--muted)');
+    const dueText = overdue ? `Overdue by ${Math.abs(daysLeft)} day(s)` : (daysLeft===0 ? 'Due today' : `Due in ${daysLeft} day(s)`);
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;';
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:start; gap:10px;">
+        <div>
+          <b>${p.supplierName}</b><br>
+          <span style="font-size:12px; color:var(--muted);">${p.notes || 'No notes'}</span><br>
+          <span style="font-size:11.5px; color:${dueColor}; font-weight:600;">${dueText} (${p.dueDate})</span>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:800; font-family:var(--mono);">${fmtKsh(p.amount)}</div>
+          ${p.photo ? `<button class="modal-cancel" data-view-photo="${p.id}" style="font-size:10.5px; padding:4px 8px; margin-top:4px;">View photo</button>` : ''}
+        </div>
+      </div>
+      ${canMarkPaid ? `<button class="primary-btn" data-mark-paid="${p.id}" style="width:100%; margin-top:10px; padding:8px;">Mark as paid</button>` : ''}
+    `;
+    unpaidBox.appendChild(row);
+  });
+  unpaidBox.querySelectorAll('button[data-mark-paid]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.markPaid;
+      const p = unpaid.find(x=>x.id===id);
+      if(!p) return;
+      if(!confirm(`Mark ${fmtKsh(p.amount)} to ${p.supplierName} as paid?`)) return;
+      p.status = 'paid'; p.paidDate = todayIso(); p.paidBy = currentUser.name;
+      await put('payables', p);
+      await queuePush('payable_upsert', p);
+      logAudit('Supplier invoice marked paid', `${p.supplierName} — ${fmtKsh(p.amount)}`);
+      toast('Marked as paid');
+      renderPayablesLists();
+    });
+  });
+  unpaidBox.querySelectorAll('button[data-view-photo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const p = unpaid.find(x=>x.id===btn.dataset.viewPhoto);
+      if(p && p.photo) window.open(p.photo, '_blank');
+    });
+  });
+
+  const paidBox = $('payablesPaidList'); paidBox.innerHTML='';
+  if(paid.length===0){
+    paidBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">No paid invoices yet.</p>`;
+  }
+  paid.slice(0,30).forEach(p=>{
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px;';
+    row.innerHTML = `<span>${p.supplierName} <span style="color:var(--muted);">paid ${p.paidDate} by ${p.paidBy||'—'}</span></span><b style="font-family:var(--mono);">${fmtKsh(p.amount)}</b>`;
+    paidBox.appendChild(row);
+  });
+}
+
+// ---------- Customer credit — what customers owe the shop ----------
+// Any signed-in role can add or settle one — a cashier extending credit to a regular, and
+// later collecting on it, is completely normal day-to-day till work, not a special
+// financial action the way marking a supplier invoice paid is.
+function prefillDebtDate(){
+  if(!$('debtDate').value) $('debtDate').value = todayIso();
+}
+async function saveDebt({customerName, customerPhone, amount, dateGiven, notes}){
+  const debt = {
+    id: 'debt_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    customerName, customerPhone, amount, dateGiven, notes, status:'owing',
+    addedBy: currentUser ? currentUser.name : 'Unknown', paidDate: null,
+  };
+  await put('customer_debts', debt);
+  await queuePush('debt_upsert', debt);
+  logAudit('Customer credit recorded', `${customerName} — ${fmtKsh(amount)}`);
+  return debt;
+}
+$('addDebtBtn').addEventListener('click', async ()=>{
+  const customerName = $('debtCustomerName').value.trim();
+  const customerPhone = $('debtCustomerPhone').value.trim();
+  const amount = parseFloat($('debtAmount').value);
+  const dateGiven = $('debtDate').value || todayIso();
+  const notes = $('debtNotes').value.trim();
+  if(!customerName){ toast('Enter the customer\'s name'); return; }
+  if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+  await saveDebt({customerName, customerPhone, amount, dateGiven, notes});
+  toast('Credit recorded');
+  $('debtCustomerName').value=''; $('debtCustomerPhone').value=''; $('debtAmount').value=''; $('debtNotes').value=''; $('debtDate').value='';
+  prefillDebtDate();
+  renderDebtsLists();
+});
+async function renderDebtsLists(){
+  const all = await getAll('customer_debts');
+  const owing = all.filter(d=>d.status!=='paid').sort((a,b)=>new Date(a.dateGiven)-new Date(b.dateGiven));
+  const paid = all.filter(d=>d.status==='paid').sort((a,b)=>new Date(b.paidDate||0)-new Date(a.paidDate||0));
+  const totalOwed = owing.reduce((s,d)=>s+d.amount,0);
+  $('debtsOutstandingTotal').textContent = fmtKsh(totalOwed);
+
+  const owingBox = $('debtsUnpaidList'); owingBox.innerHTML='';
+  if(owing.length===0){
+    owingBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nobody owes you anything right now.</p>`;
+  }
+  owing.forEach(d=>{
+    const daysOwing = Math.floor((new Date(todayIso()) - new Date(d.dateGiven)) / 86400000);
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;';
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:start; gap:10px;">
+        <div>
+          <b>${d.customerName}</b> ${d.customerPhone ? `<span style="font-size:11px; color:var(--muted);">· ${d.customerPhone}</span>` : ''}<br>
+          <span style="font-size:12px; color:var(--muted);">${d.notes || 'No notes'}</span><br>
+          <span style="font-size:11.5px; color:var(--muted);">Given ${d.dateGiven} (${daysOwing} day(s) ago)</span>
+        </div>
+        <div style="font-weight:800; font-family:var(--mono);">${fmtKsh(d.amount)}</div>
+      </div>
+      <button class="primary-btn" data-settle="${d.id}" style="width:100%; margin-top:10px; padding:8px;">Mark as paid</button>
+    `;
+    owingBox.appendChild(row);
+  });
+  owingBox.querySelectorAll('button[data-settle]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.settle;
+      const d = owing.find(x=>x.id===id);
+      if(!d) return;
+      if(!confirm(`Mark ${d.customerName}'s ${fmtKsh(d.amount)} as paid?`)) return;
+      d.status = 'paid'; d.paidDate = todayIso();
+      await put('customer_debts', d);
+      await queuePush('debt_upsert', d);
+      logAudit('Customer credit settled', `${d.customerName} — ${fmtKsh(d.amount)}`);
+      toast('Marked as paid');
+      renderDebtsLists();
+    });
+  });
+
+  const paidBox = $('debtsPaidList'); paidBox.innerHTML='';
+  if(paid.length===0){
+    paidBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">No settled credit yet.</p>`;
+  }
+  paid.slice(0,30).forEach(d=>{
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px;';
+    row.innerHTML = `<span>${d.customerName} <span style="color:var(--muted);">paid ${d.paidDate}</span></span><b style="font-family:var(--mono);">${fmtKsh(d.amount)}</b>`;
+    paidBox.appendChild(row);
+  });
+}
+
+// ---------- Quick-action modals — reachable straight from the till by any role ----------
+let qpPhotoData = null;
+$('quickPayableBtn').addEventListener('click', ()=>{
+  $('qpSupplier').value=''; $('qpAmount').value=''; $('qpNotes').value='';
+  $('qpPhotoInput').value=''; $('qpPhotoPreview').style.display='none'; qpPhotoData=null;
+  $('quickPayableModal').classList.add('show');
+});
+$('qpCancelBtn').addEventListener('click', ()=> $('quickPayableModal').classList.remove('show'));
+$('qpPhotoInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  qpPhotoData = await compressImageToDataUrl(file, 1000, 0.72);
+  $('qpPhotoImg').src = qpPhotoData;
+  $('qpPhotoPreview').style.display = 'block';
+});
+$('qpSaveBtn').addEventListener('click', async ()=>{
+  const supplierName = $('qpSupplier').value.trim();
+  const amount = parseFloat($('qpAmount').value);
+  const notes = $('qpNotes').value.trim();
+  if(!supplierName){ toast('Enter the supplier\'s name'); return; }
+  if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+  const invoiceDate = todayIso();
+  await savePayable({supplierName, amount, invoiceDate, dueDate: addDaysIso(invoiceDate,30), notes, photo:qpPhotoData});
+  toast('Invoice saved — an admin can see it under Payables');
+  $('quickPayableModal').classList.remove('show');
+});
+
+$('quickDebtBtn').addEventListener('click', ()=>{
+  $('qdCustomer').value=''; $('qdPhone').value=''; $('qdAmount').value=''; $('qdNotes').value='';
+  $('quickDebtModal').classList.add('show');
+});
+$('qdCancelBtn').addEventListener('click', ()=> $('quickDebtModal').classList.remove('show'));
+$('qdSaveBtn').addEventListener('click', async ()=>{
+  const customerName = $('qdCustomer').value.trim();
+  const customerPhone = $('qdPhone').value.trim();
+  const amount = parseFloat($('qdAmount').value);
+  const notes = $('qdNotes').value.trim();
+  if(!customerName){ toast('Enter the customer\'s name'); return; }
+  if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+  await saveDebt({customerName, customerPhone, amount, dateGiven: todayIso(), notes});
+  toast('Credit recorded');
+  $('quickDebtModal').classList.remove('show');
+});
+
+
 const REPORT_PERIODS = [
   {id:'today', label:'Today'},
   {id:'week', label:'This Week'},
@@ -1829,24 +2334,29 @@ async function renderReports(){
 
   const allSales = await getAll('sales');
   const allMovements = await getAll('stock_movements');
+  const allRefunds = await getAll('refunds');
   const products = (await getAll('products')).filter(p => currentBusinessTypes.includes(p.btype||'duka'));
 
   const sales = allSales.filter(s => withinPeriod(s.ts, reportPeriod) && (!s.btypes || s.btypes.some(bt => currentBusinessTypes.includes(bt))));
   const movements = allMovements.filter(m => withinPeriod(m.ts, reportPeriod) && (!m.btype || currentBusinessTypes.includes(m.btype)));
+  const refunds = allRefunds.filter(r => withinPeriod(r.ts, reportPeriod));
 
-  const revenue = sales.reduce((s,x)=>s+x.total,0);
+  const grossRevenue = sales.reduce((s,x)=>s+x.total,0);
+  const refundTotal = refunds.reduce((s,x)=>s+x.amount,0);
+  const revenue = grossRevenue - refundTotal; // net — what the shop actually kept, not just what was rung up
   const vatCollected = sales.reduce((s,x)=>s+(x.tax||0),0);
   const itemCount = sales.reduce((s,x)=>s+x.lines.reduce((a,l)=>a+l.qty,0),0);
   const cogs = sales.reduce((s,x)=>s + x.lines.reduce((a,l)=>a+(l.qty*(l.cost||0)),0), 0);
   const purchasesCost = movements.reduce((s,m)=>s+(m.qty*(m.cost||0)),0);
   // VAT collected isn't the shop's money — it's held for KRA, not profit. Profit is
-  // calculated off net revenue (VAT stripped out), never off what was simply collected at the till.
+  // calculated off net revenue (VAT stripped out, refunds already netted out), never off
+  // what was simply collected at the till before any of that.
   const profit = (revenue - vatCollected) - cogs;
   const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=5).length;
 
   $('statSalesCount').textContent = sales.length;
   $('statRevenue').textContent = fmtKsh(revenue);
-  $('statRevenueLabel').textContent = (vatEnabled ? `Revenue incl. VAT — ` : `Revenue — `) + periodLabel.toLowerCase();
+  $('statRevenueLabel').textContent = (vatEnabled ? `Revenue incl. VAT — ` : `Revenue — `) + periodLabel.toLowerCase() + (refundTotal>0 ? ` (after ${fmtKsh(refundTotal)} refunded)` : '');
   $('statItems').textContent = itemCount;
   $('statPurchases').textContent = fmtKsh(purchasesCost);
   $('statProfit').textContent = fmtKsh(profit);
@@ -1926,15 +2436,24 @@ async function renderReports(){
   // Sales table
   const salesBody = $('salesTable'); salesBody.innerHTML='';
   const sortedSales = [...sales].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  const canRefund = currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor');
   if(sortedSales.length===0){
-    salesBody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);">No sales in this period.</td></tr>`;
+    salesBody.innerHTML = `<tr><td colspan="6" style="color:var(--muted);">No sales in this period.</td></tr>`;
   } else {
+    const allRefundsForLookup = await getAll('refunds');
     sortedSales.slice(0,50).forEach(s=>{
       const tr = document.createElement('tr');
       const summary = s.lines.map(l=>`${l.qty}×${l.name}`).join(', ');
-      tr.innerHTML = `<td>${new Date(s.ts).toLocaleString('en-KE',{hour12:false})}</td><td class="name">${s.cashier||'—'}</td><td class="name" style="max-width:260px;">${summary}</td><td>${fmtKsh(s.total)}</td><td>${s.synced?'<span style="font-family:var(--sans);color:var(--sage-dark)">✓ synced</span>':'<span style="color:var(--gold-dark)">pending</span>'}</td>`;
+      const refundedForThisSale = allRefundsForLookup.filter(r=>r.saleId===s.id).reduce((a,r)=>a+r.amount,0);
+      const refundTag = refundedForThisSale>0 ? `<div style="color:var(--clay); font-size:10.5px; margin-top:2px;">↩ ${fmtKsh(refundedForThisSale)} refunded</div>` : '';
+      tr.innerHTML = `<td>${new Date(s.ts).toLocaleString('en-KE',{hour12:false})}</td><td class="name">${s.cashier||'—'}</td><td class="name" style="max-width:220px;">${summary}${refundTag}</td><td>${fmtKsh(s.total)}</td><td>${s.synced?'<span style="font-family:var(--sans);color:var(--sage-dark)">✓ synced</span>':'<span style="color:var(--gold-dark)">pending</span>'}</td><td>${canRefund?`<button class="modal-cancel" style="padding:5px 10px; font-size:10.5px;" data-refund-sale-id="${s.id}">Refund</button>`:''}</td>`;
       salesBody.appendChild(tr);
     });
+    if(canRefund){
+      salesBody.querySelectorAll('button[data-refund-sale-id]').forEach(btn=>{
+        btn.addEventListener('click', ()=> openRefundModal(btn.dataset.refundSaleId));
+      });
+    }
   }
 
   // Purchases (stock received) table
@@ -1977,10 +2496,12 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
     const periodLabel = REPORT_PERIODS.find(p=>p.id===reportPeriod).label;
     const allSales = await getAll('sales');
     const allMovements = await getAll('stock_movements');
+    const allRefunds = await getAll('refunds');
     const sales = allSales.filter(s => withinPeriod(s.ts, reportPeriod) && (!s.btypes || s.btypes.some(bt => currentBusinessTypes.includes(bt))))
       .sort((a,b)=>new Date(a.ts)-new Date(b.ts));
     const movements = allMovements.filter(m => withinPeriod(m.ts, reportPeriod) && (!m.btype || currentBusinessTypes.includes(m.btype)))
       .sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    const refunds = allRefunds.filter(r => withinPeriod(r.ts, reportPeriod)).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
 
     // Sheet 1: every sale, one row per sale, full line-item detail flattened into one cell
     const salesRows = sales.map(s => ({
@@ -1995,7 +2516,9 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
       'M-Pesa code': s.mpesaCode || '',
       'Synced': s.synced ? 'Yes' : 'No',
     }));
-    const revenue = sales.reduce((a,x)=>a+x.total,0);
+    const grossRevenue = sales.reduce((a,x)=>a+x.total,0);
+    const refundTotal = refunds.reduce((a,x)=>a+x.amount,0);
+    const revenue = grossRevenue - refundTotal;
     const vatCollected = sales.reduce((a,x)=>a+(x.tax||0),0);
     const cogs = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+(l.qty*(l.cost||0)),0),0);
     const purchasesCost = movements.reduce((a,m)=>a+(m.qty*(m.cost||0)),0);
@@ -2008,7 +2531,9 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
       {Metric:'Period', Value: periodLabel},
       {Metric:'Business type(s)', Value: currentBusinessTypes.map(id=>(allBusinessTypes()[id]||{}).label||id).join(' + ')},
       {Metric:'Sales count', Value: sales.length},
-      {Metric:'Revenue', Value: revenue},
+      {Metric:'Gross revenue (before refunds)', Value: grossRevenue},
+      {Metric:'Refunds issued', Value: refundTotal},
+      {Metric:'Net revenue (after refunds)', Value: revenue},
       {Metric:'VAT collected (not counted in Profit)', Value: vatCollected},
       {Metric:'Cost of goods sold', Value: cogs},
       {Metric:'Profit', Value: (revenue - vatCollected) - cogs},
@@ -2030,10 +2555,62 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
       'Cost': m.cost ? m.cost*m.qty : '',
     }));
 
+    // Sheet 4: refunds, if any
+    const refundRows = refunds.map(r => ({
+      'Date/Time': new Date(r.ts).toLocaleString('en-KE',{hour12:false}),
+      'Original sale': r.saleId,
+      'Amount': r.amount,
+      'Method': r.method,
+      'Reason': r.reason || '',
+      'Items returned to stock': r.restocked ? 'Yes' : 'No',
+      'Processed by': r.by || '',
+    }));
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    // One sheet per business type — this is the "extract an individual report" piece, only
+    // shown when more than one type is combined on this till (otherwise Summary already IS
+    // the individual report, no need to duplicate it).
+    if(currentBusinessTypes.length > 1){
+      const types = allBusinessTypes();
+      currentBusinessTypes.forEach(id=>{
+        const t = types[id]; if(!t) return;
+        const typeSalesRows = [];
+        let typeRevenue=0, typeCogs=0, typeItems=0, typeVatShare=0;
+        sales.forEach(s=>{
+          const linesForType = (s.lines||[]).filter(l=>(l.btype||'duka')===id);
+          if(linesForType.length===0) return;
+          const lineRevenue = linesForType.reduce((a,l)=>a+l.qty*l.price,0);
+          typeRevenue += lineRevenue;
+          typeCogs += linesForType.reduce((a,l)=>a+l.qty*(l.cost||0),0);
+          typeItems += linesForType.reduce((a,l)=>a+l.qty,0);
+          if(s.tax>0 && s.total>0) typeVatShare += lineRevenue/s.total * s.tax;
+          typeSalesRows.push({
+            'Date/Time': new Date(s.ts).toLocaleString('en-KE',{hour12:false}),
+            'Cashier': s.cashier || '',
+            'Items (this type only)': linesForType.map(l=>`${l.qty}x ${l.name}`).join(', '),
+            'Amount (this type only)': lineRevenue,
+            'Payment method': s.method,
+          });
+        });
+        const typePurchased = movements.filter(m=>(m.btype||'duka')===id).reduce((a,m)=>a+m.qty*(m.cost||0),0);
+        const typeSheet = [
+          {Metric:'Business type', Value: t.label},
+          {Metric:'Revenue', Value: typeRevenue},
+          {Metric:'Profit', Value: (typeRevenue - typeVatShare) - typeCogs},
+          {Metric:'Items sold', Value: typeItems},
+          {Metric:'Stock purchased (cost)', Value: typePurchased},
+          {Metric:'', Value:''},
+          ...typeSalesRows.map(r=>({Metric: r['Date/Time'], Value: `${r.Cashier} — ${r['Items (this type only)']} — ${fmtKsh(r['Amount (this type only)'])} (${r['Payment method']})`}))
+        ];
+        // Sheet names max 31 chars, no special characters — keep it short and safe
+        const safeName = t.label.replace(/[\\\/\?\*\[\]:]/g,'').slice(0,31) || id;
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(typeSheet), safeName);
+      });
+    }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salesRows), 'Sales');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(purchaseRows), 'Stock received');
+    if(refundRows.length>0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(refundRows), 'Refunds');
     const filename = `${safeFilenamePart(businessProfile.storeName)}-Sales-${periodLabel.replace(/\s+/g,'')}-${new Date().toISOString().slice(0,10)}.xlsx`;
     XLSX.writeFile(wb, filename);
     logAudit('Exported sales report to Excel', `${periodLabel} — ${sales.length} sale(s)`);
@@ -2118,6 +2695,31 @@ async function pushToSupabase(item){
   else if(item.type==='staff_upsert'){ table='staff'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
   else if(item.type==='product_upsert'){ table='products'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
   else if(item.type==='settings_upsert'){ table='shop_settings'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else if(item.type==='refund_record'){
+    table='refunds';
+    const p = item.payload;
+    body = {id:p.id, shop_id:shopId, sale_id:p.saleId, amount:p.amount, method:p.method, reason:p.reason, restocked:p.restocked, ts:p.ts, by:p.by};
+  }
+  else if(item.type==='payable_upsert'){
+    table='payables'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, supplier_name:p.supplierName, amount:p.amount,
+      invoice_date:p.invoiceDate, due_date:p.dueDate, photo:p.photo, notes:p.notes,
+      status:p.status, added_by:p.addedBy, paid_date:p.paidDate, paid_by:p.paidBy,
+      updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
+  else if(item.type==='debt_upsert'){
+    table='customer_debts'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, customer_name:p.customerName, customer_phone:p.customerPhone,
+      amount:p.amount, date_given:p.dateGiven, notes:p.notes, status:p.status,
+      paid_date:p.paidDate, added_by:p.addedBy,
+      updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
   else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
   const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
     method:'POST', headers: sbHeaders({'Prefer':prefer}),
@@ -2303,6 +2905,40 @@ async function pullShopData(fullPull, force){
       for(const rs of remoteSales){
         const existing = await new Promise(res=>{ const r=tx('sales').get(rs.id); r.onsuccess=()=>res(r.result); });
         if(!existing) await put('sales', Object.assign({}, rs, {synced:true}));
+      }
+    }
+    // Refunds from OTHER devices too — same reasoning as sales above
+    const refundsRes = await fetch(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}${sinceClause}&select=*`, {headers: sbHeaders()});
+    if(refundsRes.ok){
+      const remoteRefunds = await refundsRes.json();
+      for(const rr of remoteRefunds){
+        const existing = await new Promise(res=>{ const r=tx('refunds').get(rr.id); r.onsuccess=()=>res(r.result); });
+        if(!existing) await put('refunds', {id:rr.id, saleId:rr.sale_id, amount:rr.amount, method:rr.method, reason:rr.reason, restocked:rr.restocked, ts:rr.ts, by:rr.by});
+      }
+    }
+    // Payables (what the shop owes suppliers) — these get EDITED (marked paid), so merge by
+    // updated_at rather than "skip if it already exists" the way sales/refunds do.
+    const payRes = await fetch(`${supaUrl}/rest/v1/payables?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(payRes.ok){
+      const remotePayables = await payRes.json();
+      const localPayables = await getAll('payables');
+      for(const rp of remotePayables){
+        const lp = localPayables.find(p=>p.id===rp.id);
+        if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
+          await put('payables', {id:rp.id, supplierName:rp.supplier_name, amount:rp.amount, invoiceDate:rp.invoice_date, dueDate:rp.due_date, photo:rp.photo, notes:rp.notes, status:rp.status, addedBy:rp.added_by, paidDate:rp.paid_date, paidBy:rp.paid_by, updated_at:rp.updated_at});
+        }
+      }
+    }
+    // Customer debts (what customers owe the shop) — same merge-by-updated_at reasoning
+    const debtRes = await fetch(`${supaUrl}/rest/v1/customer_debts?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(debtRes.ok){
+      const remoteDebts = await debtRes.json();
+      const localDebts = await getAll('customer_debts');
+      for(const rd of remoteDebts){
+        const ld = localDebts.find(d=>d.id===rd.id);
+        if(!ld || !ld.updated_at || new Date(rd.updated_at) > new Date(ld.updated_at)){
+          await put('customer_debts', {id:rd.id, customerName:rd.customer_name, customerPhone:rd.customer_phone, amount:rd.amount, dateGiven:rd.date_given, notes:rd.notes, status:rd.status, paidDate:rd.paid_date, addedBy:rd.added_by, updated_at:rd.updated_at});
+        }
       }
     }
     lastPullSync = new Date().toISOString();
@@ -2635,6 +3271,21 @@ $('clearCartBtn').addEventListener('click', ()=>{
   requestCartRemoval('clear_cart', {count, total}, ()=>{ cart=[]; renderCart(); });
 });
 $('addStockBtn').addEventListener('click', addStock);
+function updatePerPieceCostPreview(){
+  const isPack = $('costModeSelect').value==='pack';
+  $('packUnitsInput').style.display = isPack ? 'block' : 'none';
+  const packUnits = parseInt($('packUnitsInput').value.trim(), 10);
+  const packCost = parseFloat($('newCost').value.trim());
+  if(isPack && packUnits>0 && !isNaN(packCost) && packCost>=0){
+    $('perPieceCostPreview').textContent = `= ${fmtKsh(packCost/packUnits)} per piece`;
+    $('perPieceCostPreview').style.display = 'block';
+  } else {
+    $('perPieceCostPreview').style.display = 'none';
+  }
+}
+$('costModeSelect').addEventListener('change', updatePerPieceCostPreview);
+$('packUnitsInput').addEventListener('input', updatePerPieceCostPreview);
+$('newCost').addEventListener('input', updatePerPieceCostPreview);
 
 // ---------- Live cart mirror — survives an unexpected reload even without a deliberate lock/logout ----------
 function saveLiveCart(){
@@ -3125,7 +3776,9 @@ function switchBackofficeView(viewName){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-'+viewName).classList.add('active');
   if(viewName==='business'){ renderBizGrid(); populateProfileForm(); updateDeviceDiagnostics(); }
-  if(viewName==='stock') renderStockTable();
+  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); }
+  if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
+  if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
   if(viewName==='reports') renderReports();
   if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
   if(viewName==='audit') renderAuditTable();
@@ -3390,8 +4043,219 @@ async function completeSignIn(u, opts={}){
   if(u.role==='admin' && !businessProfile.storeName){
     setTimeout(()=>toast("Set up your business profile under Admin → Business"), opts.isNewSetup ? 3600 : 2200);
   }
+  await updateStockTakeBanner();
   scanInput.focus();
 }
+async function updateStockTakeBanner(){
+  const banner = $('stockTakeBanner');
+  if(!stockTakeRequiredForThisShop() || !currentUser){ banner.style.display = 'none'; return; }
+  const days = await daysSinceLastStockTake();
+  const isDue = days===null || days >= STOCK_TAKE_INTERVAL_DAYS;
+  if(!isDue){ banner.style.display = 'none'; return; }
+  banner.style.display = 'flex';
+  const whenText = days===null ? 'has never been done on this shop' : `was last done ${days} day(s) ago`;
+  $('stockTakeBannerText').textContent = `⚠️ Stock take overdue — ${whenText}. Required every ${STOCK_TAKE_INTERVAL_DAYS} days for this type of business.`;
+  const canAct = currentUser.role==='admin' || currentUser.role==='supervisor';
+  $('stockTakeBannerBtn').style.display = canAct ? 'inline-block' : 'none';
+}
+$('stockTakeBannerBtn').addEventListener('click', ()=>{
+  if(!(currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor'))) return;
+  $('adminGearBtn').click();
+  setTimeout(()=>{
+    const stockTab = [...document.querySelectorAll('.backoffice-nav button[data-view]')].find(b=>b.dataset.view==='stock');
+    if(stockTab) stockTab.click();
+    setTimeout(()=>{ const el = $('stockTakePanel'); if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth'}); }, 150);
+  }, 100);
+});
+
+// ---------- Stock take: required every 3 days for Supermarket / Chemist / Agrovet ----------
+async function renderStockTakePanel(){
+  const panel = $('stockTakePanel');
+  if(!stockTakeRequiredForThisShop()){
+    panel.innerHTML = '<h3>Stock take</h3><p class="hint">Not required for this business type — this is only enforced for Supermarket, Chemist, and Agrovet, where enough SKUs move through that periodic counting genuinely matters.</p>';
+    return;
+  }
+  // Panel content only gets rebuilt from scratch once (first time it's actually needed) —
+  // rebuilding it every render would wipe out an in-progress count.
+  if(!$('startStockTakeBtn')){
+    panel.innerHTML = `
+      <h3>Stock take</h3>
+      <p class="hint" id="stockTakeStatusLine">—</p>
+      <button class="primary-btn" id="startStockTakeBtn">Start a stock take now</button>
+      <div id="stockTakeCountArea" style="display:none; margin-top:14px;">
+        <p class="hint">Count what's physically on the shelf and enter it below — leave a row blank to skip it. Only rows you fill in get recorded.</p>
+        <div class="table-scroll"><table><thead><tr><th>Product</th><th>System says</th><th>Counted</th><th>Difference</th></tr></thead>
+        <tbody id="stockTakeCountTable"></tbody></table></div>
+        <div class="modal-actions" style="margin-top:12px;">
+          <button class="modal-cancel" id="cancelStockTakeBtn">Cancel</button>
+          <button class="modal-confirm" id="submitStockTakeBtn">Submit stock take</button>
+        </div>
+      </div>
+      <div id="stockTakeHistoryArea" style="margin-top:16px;"></div>`;
+    $('startStockTakeBtn').addEventListener('click', beginStockTakeCount);
+    $('cancelStockTakeBtn').addEventListener('click', ()=>{
+      $('stockTakeCountArea').style.display = 'none';
+      $('stockTakeCountTable').innerHTML = '';
+    });
+    $('submitStockTakeBtn').addEventListener('click', submitStockTake);
+  }
+  const days = await daysSinceLastStockTake();
+  $('stockTakeStatusLine').textContent = days===null
+    ? `Never done on this shop yet. Required every ${STOCK_TAKE_INTERVAL_DAYS} days for this business type.`
+    : (days >= STOCK_TAKE_INTERVAL_DAYS
+        ? `⚠️ Overdue — last done ${days} day(s) ago (every ${STOCK_TAKE_INTERVAL_DAYS} days required).`
+        : `Up to date — last done ${days} day(s) ago. Next one due in ${STOCK_TAKE_INTERVAL_DAYS-days} day(s).`);
+  await renderStockTakeHistory();
+}
+async function beginStockTakeCount(){
+  const products = (await getAll('products')).filter(p => currentBusinessTypes.includes(p.btype||'duka'));
+  products.sort((a,b)=>a.name.localeCompare(b.name));
+  const body = $('stockTakeCountTable'); body.innerHTML = '';
+  products.forEach(p=>{
+    const isService = p.stock===null || p.stock===undefined;
+    const tr = document.createElement('tr');
+    tr.dataset.sku = p.sku;
+    tr.innerHTML = `<td class="name">${p.name}</td><td>${isService?'Unlimited (service)':p.stock}</td>
+      <td><input type="number" class="stCountInput" style="width:80px; padding:6px; border-radius:6px; border:1px solid var(--line);" ${isService?'disabled placeholder="n/a"':''}></td>
+      <td class="stDiff" style="font-weight:700;">—</td>`;
+    body.appendChild(tr);
+    if(!isService){
+      const input = tr.querySelector('.stCountInput');
+      input.addEventListener('input', ()=>{
+        const diffCell = tr.querySelector('.stDiff');
+        const counted = parseInt(input.value, 10);
+        if(input.value.trim()==='' || isNaN(counted)){ diffCell.textContent = '—'; diffCell.style.color=''; return; }
+        const diff = counted - p.stock;
+        diffCell.textContent = (diff>0?'+':'')+diff;
+        diffCell.style.color = diff===0 ? 'var(--sage-dark)' : 'var(--clay)';
+      });
+    }
+  });
+  $('stockTakeCountArea').style.display = 'block';
+}
+async function submitStockTake(){
+  const rows = [...$('stockTakeCountTable').querySelectorAll('tr')];
+  const products = await getAll('products');
+  const items = [];
+  rows.forEach(tr=>{
+    const input = tr.querySelector('.stCountInput');
+    if(!input || input.value.trim()==='') return;
+    const counted = parseInt(input.value, 10);
+    if(isNaN(counted)) return;
+    const sku = tr.dataset.sku;
+    const p = products.find(x=>x.sku===sku);
+    if(!p) return;
+    items.push({sku, name:p.name, systemQty:p.stock, countedQty:counted, discrepancy:counted-p.stock});
+  });
+  if(items.length===0){ toast('No counts entered — nothing to submit'); return; }
+  const ts = new Date().toISOString();
+  const record = {id:'st_'+Date.now(), ts, performed_by: currentUser?currentUser.name:'Unknown', items};
+  await put('stock_takes', record);
+  await put('settings', {key:'last_stock_take_at', value:ts});
+  await queuePush('settings_upsert', {key:'last_stock_take_at', value:ts});
+  const discrepant = items.filter(i=>i.discrepancy!==0);
+  logAudit('Stock take completed', `${items.length} item(s) counted, ${discrepant.length} discrepanc${discrepant.length===1?'y':'ies'} found`);
+  discrepant.forEach(i=>{
+    logAudit('Stock discrepancy noted', `${i.name}: system said ${i.systemQty}, counted ${i.countedQty} (${i.discrepancy>0?'+':''}${i.discrepancy})`);
+  });
+  $('stockTakeCountArea').style.display = 'none';
+  $('stockTakeCountTable').innerHTML = '';
+  toast(discrepant.length>0 ? `Stock take submitted — ${discrepant.length} discrepancy(ies) flagged for review` : 'Stock take submitted — everything matched!');
+  await renderStockTakePanel();
+}
+async function renderStockTakeHistory(){
+  const records = (await getAll('stock_takes')).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,10);
+  const area = $('stockTakeHistoryArea');
+  if(records.length===0){ area.innerHTML = ''; return; }
+  let html = '<h3 style="font-size:14px; margin-top:6px;">Recent stock takes</h3>';
+  records.forEach(r=>{
+    const discrepant = r.items.filter(i=>i.discrepancy!==0);
+    html += `<div style="border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; font-size:12.5px;">
+      <b>${new Date(r.ts).toLocaleString('en-KE',{hour12:false})}</b> — by ${r.performed_by} — ${r.items.length} counted
+      ${discrepant.length>0 ? `<div style="color:var(--clay); margin-top:6px;">⚠️ ${discrepant.length} discrepancy(ies):</div>` : '<div style="color:var(--sage-dark); margin-top:4px;">✓ No discrepancies</div>'}
+      ${discrepant.map(i=>`<div style="margin:4px 0 4px 10px; display:flex; justify-content:space-between; align-items:center;">
+        <span>${i.name}: system ${i.systemQty} → counted ${i.countedQty} (${i.discrepancy>0?'+':''}${i.discrepancy})</span>
+        <button class="modal-cancel" style="padding:4px 8px; font-size:10.5px;" data-correct-sku="${i.sku}" data-correct-qty="${i.countedQty}">Correct to ${i.countedQty}</button>
+      </div>`).join('')}
+    </div>`;
+  });
+  area.innerHTML = html;
+  area.querySelectorAll('button[data-correct-sku]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const sku = btn.dataset.correctSku;
+      const newQty = parseInt(btn.dataset.correctQty, 10);
+      const products = await getAll('products');
+      const p = products.find(x=>x.sku===sku);
+      if(!p) return;
+      const oldQty = p.stock;
+      p.stock = newQty;
+      await put('products', p);
+      await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+      logAudit('Corrected stock after stock take', `${p.name}: ${oldQty} → ${newQty}`);
+      toast(`${p.name} corrected to ${newQty}`);
+      btn.textContent = 'Corrected ✓'; btn.disabled = true;
+      renderStockTable();
+    });
+  });
+}
+
+// ---------- Refunds — cash or M-Pesa, optionally returning items to stock ----------
+let refundingSale = null;
+let refundMethod = 'cash';
+async function openRefundModal(saleId){
+  const sales = await getAll('sales');
+  const sale = sales.find(s=>s.id===saleId);
+  if(!sale){ toast('Could not find that sale'); return; }
+  refundingSale = sale;
+  refundMethod = 'cash';
+  document.querySelectorAll('.refund-method-btn').forEach(b=>b.classList.remove('active-method'));
+  document.querySelector('.refund-method-btn[data-method="cash"]').classList.add('active-method');
+  $('refundSaleInfo').textContent = `Original sale: ${fmtKsh(sale.total)} via ${sale.method} — ${sale.lines.map(l=>`${l.qty}×${l.name}`).join(', ')}`;
+  $('refundAmountInput').value = sale.total;
+  $('refundReasonInput').value = '';
+  $('refundRestockInput').checked = false;
+  $('refundModal').classList.add('show');
+}
+document.querySelectorAll('.refund-method-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    refundMethod = btn.dataset.method;
+    document.querySelectorAll('.refund-method-btn').forEach(b=>b.classList.remove('active-method'));
+    btn.classList.add('active-method');
+  });
+});
+$('refundCancelBtn').addEventListener('click', ()=>{ $('refundModal').classList.remove('show'); refundingSale = null; });
+$('refundConfirmBtn').addEventListener('click', async ()=>{
+  if(!refundingSale) return;
+  const amount = parseFloat($('refundAmountInput').value);
+  if(isNaN(amount) || amount<=0){ toast('Enter a valid refund amount'); return; }
+  if(amount > refundingSale.total){ toast('Refund can\'t be more than the original sale total'); return; }
+  const reason = $('refundReasonInput').value.trim();
+  const restock = $('refundRestockInput').checked;
+  const refund = {
+    id: 'refund_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    saleId: refundingSale.id, amount, method: refundMethod, reason: reason||null,
+    restocked: restock, ts: new Date().toISOString(), by: currentUser?currentUser.name:'Unknown',
+  };
+  await put('refunds', refund);
+  await queuePush('refund_record', refund);
+  if(restock){
+    const products = await getAll('products');
+    for(const line of refundingSale.lines){
+      const p = products.find(x=>x.sku===line.sku);
+      if(p && p.stock!==null && p.stock!==undefined){
+        p.stock += line.qty;
+        await put('products', p);
+        await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+      }
+    }
+  }
+  logAudit('Refund processed', `${fmtKsh(amount)} via ${refundMethod} for sale ${refundingSale.id}${reason?' — '+reason:''}${restock?' (items returned to stock)':''}`);
+  toast(`Refund of ${fmtKsh(amount)} recorded`);
+  $('refundModal').classList.remove('show');
+  refundingSale = null;
+  renderReports();
+});
+
 async function tryRestoreSession(){
   // If the browser silently reloaded this tab (very common on Android when backgrounded,
   // to save memory) this brings the same person straight back to where they were signed
