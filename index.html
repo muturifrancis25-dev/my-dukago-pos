@@ -6,6 +6,9 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#12241f">
 <title>My DukaGO POS — Till</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script>
   // Applied before first paint so there's no light-mode flash on a dark-mode reload.
   try{
@@ -33,9 +36,17 @@
     --muted:#8c7c5e;
     --bg-glow:#faf4e6; /* soft lift at the top of the background — replaces flat, slightly muddy color */
     --accent-text:var(--teal-dark); /* foreground emphasis on a panel — flips in dark mode, chrome (--teal-dark itself) never does */
-    --mono:ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-    --display:-apple-system,BlinkMacSystemFont,'Segoe UI Semibold','Helvetica Neue',Arial,sans-serif;
+    /* Custom type system, not default system fonts — three purposes, not one font doing
+       everything. Fraunces (a warm, characterful serif) is reserved for moments that carry
+       the brand — the wordmark, section headings, the big total — where personality actually
+       matters. Small UI chrome (buttons, chips, labels) stays a clean sans at that size a
+       serif can start to hurt legibility, not help it. All three still fall back gracefully
+       to plain system fonts offline — same "needs internet once" tradeoff as the login photos,
+       nothing about selling or printing a receipt depends on these loading. */
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
+    --sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+    --display:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI Semibold','Helvetica Neue',Arial,sans-serif;
+    --brand:'Fraunces',Georgia,'Segoe UI Semibold','Helvetica Neue',Arial,serif;
     /* legacy aliases so the rest of the stylesheet repaints without a full rewrite */
     --navy:var(--teal); --navy-dark:var(--teal-dark);
     --blue:var(--marigold); --blue-dark:var(--marigold-dark); --blue-pale:var(--marigold-pale);
@@ -79,12 +90,13 @@
   }
   header .left{display:flex; align-items:center; gap:11px; min-width:0; flex:1 1 auto;}
   header .mark{
-    width:32px;height:32px;border-radius:50%;background:var(--marigold); flex:none;
-    display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--teal-dark);
-    font-family:var(--display);font-size:12px; letter-spacing:-.5px; box-shadow:inset 0 0 0 2px rgba(15,38,32,.25);
+    width:34px;height:34px;border-radius:32%;background:var(--marigold); flex:none;
+    display:flex;align-items:center;justify-content:center; color:var(--teal-dark);
+    box-shadow:inset 0 0 0 2px rgba(15,38,32,.2);
   }
+  header .mark svg{width:19px;height:19px;}
   header .storeline{min-width:0;}
-  header .storeline b{font-family:var(--display); font-size:16px; letter-spacing:.2px;}
+  header .storeline b{font-family:var(--brand); font-weight:600; font-size:17px; letter-spacing:.2px;}
   header .storeline span{display:block; font-size:10px; color:#9fb3ac; letter-spacing:.5px; text-transform:uppercase; white-space:normal; word-break:break-word;}
   header .right{display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0; row-gap:6px;}
   .icon-btn{background:none; border:none; color:#aeb6c4; cursor:pointer; padding:5px; display:flex; align-items:center; border-radius:6px; flex:none;}
@@ -137,7 +149,7 @@
   }
   @media (min-width:901px){ .receipt-panel{height:100%; min-height:0;} }
   .customer-strip{padding:14px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; border-radius:14px 14px 0 0;}
-  .customer-strip .avatar{width:38px;height:38px;border-radius:50%;background:var(--marigold-pale); color:var(--marigold-dark); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; font-family:var(--display);}
+  .customer-strip .avatar{width:38px;height:38px;border-radius:28%;background:var(--marigold-pale); color:var(--marigold-dark); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; font-family:var(--brand);}
   .customer-strip .cname{font-weight:700; font-size:13.5px; font-family:var(--display);}
   .customer-strip .csub{font-size:10.5px; color:var(--muted);}
 
@@ -167,7 +179,7 @@
   .totals-block::before{ left:-9px; }
   .totals-block::after{ right:-9px; }
   .trow{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding:3px 0; font-family:var(--mono);}
-  .trow.grand{font-family:var(--display); font-size:24px; font-weight:700; color:var(--accent-text); padding:9px 0 2px; border-top:1px solid var(--line); margin-top:6px;}
+  .trow.grand{font-family:var(--brand); font-size:25px; font-weight:600; color:var(--accent-text); padding:9px 0 2px; border-top:1px solid var(--line); margin-top:6px;}
   .trow.grand span:last-child{font-family:var(--mono);}
 
   .action-row{display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:14px 14px 16px;}
@@ -203,7 +215,7 @@
 
   /* ================= BACK OFFICE VIEWS ================= */
   .panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; max-width:1100px; margin-left:auto; margin-right:auto;}
-  .panel h3{margin:0 0 4px; font-size:15px; font-family:var(--display); font-weight:700;}
+  .panel h3{margin:0 0 4px; font-size:15px; font-family:var(--brand); font-weight:600;}
   .panel p.hint{margin:0 0 14px; font-size:12px; color:var(--muted);}
   .form-row{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px;}
   @media (max-width:700px){.form-row{grid-template-columns:1fr 1fr;}}
@@ -258,13 +270,21 @@
   .scene-layer{
     position:absolute; inset:0; opacity:0; transition:opacity 1.4s ease-in-out;
     background-size:cover; background-position:center; background-color:var(--marigold-pale);
+    /* A consistent brand color treatment over every scene photo — turns six unrelated stock
+       photos into what reads as one deliberate photographic style, not random stock imagery.
+       Saturate+sepia pushes them toward the marigold/teal palette; the gradient below adds
+       the actual color wash on top. */
+    filter:saturate(.72) sepia(.22) contrast(1.03);
   }
   .scene-layer.showing{opacity:1;}
   .scene-overlay{
     position:absolute; inset:0;
-    /* Light, warm wash — keeps the photo bright and readable rather than moody,
-       with just enough lift at the very bottom for the caption and card to sit on. */
-    background:linear-gradient(180deg, rgba(15,38,32,.12), rgba(15,38,32,.18) 55%, rgba(15,38,32,.52) 100%);
+    /* Brand duotone wash — teal shadows, marigold highlight — instead of a plain neutral
+       dim. This is what makes the photography feel chosen and treated on purpose. */
+    background:
+      linear-gradient(180deg, rgba(15,38,32,.22), rgba(15,38,32,.24) 45%, rgba(15,38,32,.62) 100%),
+      linear-gradient(15deg, rgba(226,160,52,.16), transparent 55%);
+    mix-blend-mode:normal;
   }
   .scene-caption{
     position:absolute; left:0; right:0; bottom:clamp(14px,4vh,28px); text-align:center;
@@ -278,11 +298,12 @@
     box-shadow:0 20px 60px rgba(0,0,0,.45);
   }
   .login-mark{
-    width:52px;height:52px;border-radius:50%;background:var(--marigold); color:var(--teal-dark);
-    display:flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:800;
-    font-size:18px; letter-spacing:-.5px; margin:0 auto 12px;
+    width:56px;height:56px;border-radius:30%;background:var(--marigold); color:var(--teal-dark);
+    display:flex; align-items:center; justify-content:center;
+    margin:0 auto 12px; box-shadow:inset 0 0 0 2px rgba(15,38,32,.2), 0 6px 16px rgba(226,160,52,.35);
   }
-  .login-card h2{margin:0 0 4px; font-family:var(--display); font-size:clamp(19px,4vw,22px);}
+  .login-mark svg{width:30px;height:30px;}
+  .login-card h2{margin:0 0 4px; font-family:var(--brand); font-weight:600; font-size:clamp(19px,4vw,22px);}
   .login-card p{margin:0 0 16px; font-size:12.5px; color:var(--muted);}
   .staff-picker{display:flex; flex-direction:column; gap:6px; margin-bottom:14px; max-height:200px; overflow-y:auto;}
   .staff-chip{
@@ -388,7 +409,7 @@
 
 <header>
   <div class="left">
-    <div class="mark">MD</div>
+    <div class="mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <div class="storeline"><b id="storeNameDisplay">My DukaGO POS</b><span id="storeSubtitle">Outlet #001 · Till 1</span></div>
   </div>
   <div class="right">
@@ -827,7 +848,7 @@
      no menu, no choice, nothing to explain to a shopkeeper. Type 1234, set a real PIN, done. -->
 <div class="login-screen hide" id="setAdminPinScreen">
   <div class="login-card">
-    <div class="login-mark">MD</div>
+    <div class="login-mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <h2>Welcome!</h2>
     <p id="setPinStepLabel">Choose a 6-digit PIN — this becomes your permanent Admin login for this shop.</p>
     <div class="pin-dots" id="setPinDots">
@@ -857,7 +878,7 @@
   <div class="scene-caption" id="sceneCaption">Every sale accounted for.</div>
 
   <div class="login-card">
-    <div class="login-mark">MD</div>
+    <div class="login-mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <h2>My DukaGO POS</h2>
     <p>Enter your PIN to start this till.</p>
     <p style="text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
