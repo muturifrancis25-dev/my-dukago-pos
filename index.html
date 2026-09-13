@@ -416,8 +416,8 @@
     <span class="net-chip"><span class="net-dot off" id="netDot"></span><span id="netLabel">Offline</span><span id="pendingLabel"></span></span>
     <span class="cashier-chip" id="cashierChip">Not signed in</span>
     <button class="icon-btn" id="themeToggleBtn" title="Light / Dark mode">🌙</button>
-    <button class="icon-btn" id="adminGearBtn" title="Admin">⚙</button>
-    <button class="icon-btn" id="logoutBtn" title="Switch user">⏻</button>
+    <button class="icon-btn" id="adminGearBtn" title="Admin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    <button class="icon-btn" id="logoutBtn" title="Switch user"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></button>
   </div>
 </header>
 
@@ -432,7 +432,7 @@
     <button data-view="audit" class="admin-only-tab">Audit Log</button>
     <button data-view="sync">Sync &amp; Setup</button>
   </div>
-  <button class="lock-nav" id="lockBackofficeBtn">🔒 Exit</button>
+  <button class="lock-nav" id="lockBackofficeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Exit</button>
 </nav>
 
 <main>
@@ -468,11 +468,11 @@
           <button data-method="mpesa">M-Pesa</button>
         </div>
         <div class="action-row" style="margin-bottom:8px;">
-          <button class="modal-cancel" id="quickPayableBtn" style="flex:1; padding:9px; font-size:12px;">📋 Log invoice</button>
-          <button class="modal-cancel" id="quickDebtBtn" style="flex:1; padding:9px; font-size:12px;">💳 Customer credit</button>
+          <button class="modal-cancel" id="quickPayableBtn" style="flex:1; padding:9px; font-size:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="6" y="4" width="12" height="17" rx="1.5"/><path d="M9 2.5h6a1 1 0 0 1 1 1V5H8V3.5a1 1 0 0 1 1-1Z"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="13.5" x2="15" y2="13.5"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Log invoice</button>
+          <button class="modal-cancel" id="quickDebtBtn" style="flex:1; padding:9px; font-size:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="9.5" x2="22" y2="9.5"/><line x1="5.5" y1="14.5" x2="9.5" y2="14.5"/></svg>Customer credit</button>
         </div>
         <div class="action-row">
-          <button class="btn-lock" id="lockScreenBtn">🔒 Lock</button>
+          <button class="btn-lock" id="lockScreenBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Lock</button>
           <button class="btn-clear" id="clearCartBtn">Clear</button>
           <button class="btn-pay" id="checkoutBtn" disabled>PAY</button>
         </div>
@@ -581,10 +581,22 @@
   <section class="view" id="view-payables">
     <div class="panel">
       <h3>Add a supplier invoice</h3>
-      <p class="hint">Snap a photo of the invoice or upload one — due date defaults to 30 days from the invoice date, the usual supplier credit term, but you can change it.</p>
+      <p class="hint">Pick the payment terms agreed with this supplier — the due date sets itself from there, though you can still adjust it by hand.</p>
       <div class="form-row">
         <div><label>Supplier name</label><input id="payableSupplier" placeholder="e.g. Bidco Distributors"></div>
         <div><label>Amount (KSh)</label><input id="payableAmount" type="number" placeholder="0"></div>
+      </div>
+      <label>Payment terms</label>
+      <select id="payableTerms" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--sans); font-size:13px; background:var(--panel); color:var(--ink);">
+        <option value="0">Cash — due immediately</option>
+        <option value="30" selected>30 days</option>
+        <option value="60">60 days</option>
+        <option value="90">90 days</option>
+        <option value="custom">Custom — set number of days</option>
+      </select>
+      <div id="payableCustomDaysRow" style="display:none; margin-bottom:10px;">
+        <label>Custom term (days)</label>
+        <input id="payableCustomDays" type="number" placeholder="e.g. 45">
       </div>
       <div class="form-row">
         <div><label>Invoice date</label><input id="payableInvoiceDate" type="date"></div>
@@ -697,6 +709,10 @@
       <div class="stat-card"><div class="slabel">Stock purchased (cost)</div><div class="sval" id="statPurchases">KSh 0</div></div>
       <div class="stat-card"><div class="slabel">Profit</div><div class="sval" id="statProfit">KSh 0</div></div>
       <div class="stat-card"><div class="slabel">Low stock right now</div><div class="sval" id="statLow">0</div></div>
+      <div class="stat-card"><div class="slabel">You owe suppliers (now)</div><div class="sval" id="statPayablesOutstanding">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel" id="statPayablesPaidLabel">Paid to suppliers — today</div><div class="sval" id="statPayablesPaid">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel">Customers owe you (now)</div><div class="sval" id="statDebtsOutstanding">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel" id="statDebtsPaidLabel">Collected from customers — today</div><div class="sval" id="statDebtsPaid">KSh 0</div></div>
     </div>
 
     <div class="panel" id="bizBreakdownWrap">
@@ -881,7 +897,7 @@
     <div class="login-mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <h2>My DukaGO POS</h2>
     <p>Enter your PIN to start this till.</p>
-    <p style="text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
+    <p style="display:none; text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
@@ -947,12 +963,25 @@
     <input id="qpSupplier" placeholder="e.g. Bidco Distributors" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
     <label>Amount (KSh)</label>
     <input id="qpAmount" type="number" placeholder="0" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Payment terms</label>
+    <select id="qpTerms" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--sans); font-size:13px; background:var(--panel); color:var(--ink);">
+      <option value="0">Cash — due immediately</option>
+      <option value="30" selected>30 days</option>
+      <option value="60">60 days</option>
+      <option value="90">90 days</option>
+      <option value="custom">Custom — set number of days</option>
+    </select>
+    <div id="qpCustomDaysRow" style="display:none; margin-bottom:10px;">
+      <label>Custom term (days)</label>
+      <input id="qpCustomDays" type="number" placeholder="e.g. 45" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line);">
+    </div>
+    <input type="hidden" id="qpInvoiceDateHidden">
+    <input type="hidden" id="qpDueDateHidden">
     <label>Notes (optional)</label>
     <input id="qpNotes" placeholder="e.g. Invoice #4521" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
     <label>Photo of invoice (optional)</label>
     <input id="qpPhotoInput" type="file" accept="image/*" capture="environment" style="width:100%; margin:4px 0 10px;">
     <div id="qpPhotoPreview" style="display:none; margin-bottom:10px;"><img id="qpPhotoImg" style="max-width:100%; max-height:160px; border-radius:8px; border:1px solid var(--line);"></div>
-    <p style="font-size:10.5px; color:var(--muted); margin:0 0 12px;">Due date is set automatically to 30 days from today — an admin can adjust it later under Payables.</p>
     <div class="modal-actions">
       <button class="modal-cancel" id="qpCancelBtn">Cancel</button>
       <button class="modal-confirm" id="qpSaveBtn">Save invoice</button>
@@ -2045,14 +2074,42 @@ async function renderStockTable(){
 // the business, not a routine operational task.
 function todayIso(){ return new Date().toISOString().slice(0,10); }
 function addDaysIso(iso, days){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
+// Shared by both the full Payables form and the quick-action modal — reads whichever terms
+// dropdown/custom-days field/date fields belong to that instance and keeps the due date in
+// sync with the selected terms, without duplicating this logic in two places to drift apart.
+function wireUpPaymentTerms(termsSelectId, customRowId, customDaysId, invoiceDateId, dueDateId){
+  const termsEl = $(termsSelectId), customRow = $(customRowId), customDaysEl = $(customDaysId);
+  const invoiceEl = $(invoiceDateId), dueEl = $(dueDateId);
+  function recompute(){
+    const invoiceDate = invoiceEl.value || todayIso();
+    const termsVal = termsEl.value;
+    if(termsVal==='custom'){
+      customRow.style.display = 'block';
+      const days = parseInt(customDaysEl.value, 10);
+      if(!isNaN(days) && days>=0) dueEl.value = addDaysIso(invoiceDate, days);
+    } else {
+      customRow.style.display = 'none';
+      dueEl.value = addDaysIso(invoiceDate, parseInt(termsVal, 10));
+    }
+  }
+  termsEl.addEventListener('change', recompute);
+  customDaysEl.addEventListener('input', recompute);
+  invoiceEl.addEventListener('change', recompute);
+  return recompute;
+}
+function termsLabel(days){
+  if(days===0) return 'Cash';
+  if(days===30 || days===60 || days===90) return days+' days';
+  return days+' days (custom)';
+}
+const recomputePayableDue = wireUpPaymentTerms('payableTerms','payableCustomDaysRow','payableCustomDays','payableInvoiceDate','payableDueDate');
+const recomputeQpDue = wireUpPaymentTerms('qpTerms','qpCustomDaysRow','qpCustomDays','qpInvoiceDateHidden','qpDueDateHidden');
 function prefillPayableDates(){
   if(!$('payableInvoiceDate').value) $('payableInvoiceDate').value = todayIso();
-  if(!$('payableDueDate').value) $('payableDueDate').value = addDaysIso(todayIso(), 30);
+  $('payableTerms').value = '30';
+  $('payableCustomDaysRow').style.display = 'none';
+  recomputePayableDue();
 }
-$('payableInvoiceDate').addEventListener('change', ()=>{
-  // keep the due date pinned to +30 days unless the person has deliberately typed their own
-  if($('payableInvoiceDate').value) $('payableDueDate').value = addDaysIso($('payableInvoiceDate').value, 30);
-});
 let payablePhotoData = null;
 $('payablePhotoInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
@@ -2110,7 +2167,7 @@ $('addPayableBtn').addEventListener('click', async ()=>{
   await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:payablePhotoData});
   toast('Invoice saved');
   $('payableSupplier').value=''; $('payableAmount').value=''; $('payableNotes').value='';
-  $('payableInvoiceDate').value=''; $('payableDueDate').value='';
+  $('payableInvoiceDate').value=''; $('payableDueDate').value=''; $('payableCustomDays').value='';
   $('payablePhotoInput').value=''; $('payablePhotoPreview').style.display='none'; payablePhotoData=null;
   prefillPayableDates();
   renderPayablesLists();
@@ -2138,7 +2195,7 @@ async function renderPayablesLists(){
     row.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:start; gap:10px;">
         <div>
-          <b>${p.supplierName}</b><br>
+          <b>${p.supplierName}</b> <span style="font-size:10.5px; color:var(--muted); font-family:var(--mono);">· ${termsLabel(Math.round((new Date(p.dueDate)-new Date(p.invoiceDate))/86400000))}</span><br>
           <span style="font-size:12px; color:var(--muted);">${p.notes || 'No notes'}</span><br>
           <span style="font-size:11.5px; color:${dueColor}; font-weight:600;">${dueText} (${p.dueDate})</span>
         </div>
@@ -2274,8 +2331,11 @@ async function renderDebtsLists(){
 // ---------- Quick-action modals — reachable straight from the till by any role ----------
 let qpPhotoData = null;
 $('quickPayableBtn').addEventListener('click', ()=>{
-  $('qpSupplier').value=''; $('qpAmount').value=''; $('qpNotes').value='';
+  $('qpSupplier').value=''; $('qpAmount').value=''; $('qpNotes').value=''; $('qpCustomDays').value='';
   $('qpPhotoInput').value=''; $('qpPhotoPreview').style.display='none'; qpPhotoData=null;
+  $('qpTerms').value = '30'; $('qpCustomDaysRow').style.display = 'none';
+  $('qpInvoiceDateHidden').value = todayIso();
+  recomputeQpDue();
   $('quickPayableModal').classList.add('show');
 });
 $('qpCancelBtn').addEventListener('click', ()=> $('quickPayableModal').classList.remove('show'));
@@ -2292,8 +2352,9 @@ $('qpSaveBtn').addEventListener('click', async ()=>{
   const notes = $('qpNotes').value.trim();
   if(!supplierName){ toast('Enter the supplier\'s name'); return; }
   if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
-  const invoiceDate = todayIso();
-  await savePayable({supplierName, amount, invoiceDate, dueDate: addDaysIso(invoiceDate,30), notes, photo:qpPhotoData});
+  const invoiceDate = $('qpInvoiceDateHidden').value || todayIso();
+  const dueDate = $('qpDueDateHidden').value || addDaysIso(invoiceDate, 30);
+  await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:qpPhotoData});
   toast('Invoice saved — an admin can see it under Payables');
   $('quickPayableModal').classList.remove('show');
 });
@@ -2382,6 +2443,22 @@ async function renderReports(){
   $('statPurchases').textContent = fmtKsh(purchasesCost);
   $('statProfit').textContent = fmtKsh(profit);
   $('statLow').textContent = lowStock;
+
+  // Payables/Customer credit — outstanding is a point-in-time balance (not period-filtered,
+  // since "what you owe right now" doesn't mean anything scoped to "this week"); paid-this-
+  // period IS filtered, so clearing a debt or invoice visibly shows up here once it happens.
+  const allPayables = await getAll('payables');
+  const allDebts = await getAll('customer_debts');
+  const payablesOutstanding = allPayables.filter(p=>p.status!=='paid').reduce((s,p)=>s+p.amount,0);
+  const payablesPaidThisPeriod = allPayables.filter(p=>p.status==='paid' && p.paidDate && withinPeriod(p.paidDate+'T12:00:00', reportPeriod)).reduce((s,p)=>s+p.amount,0);
+  const debtsOutstanding = allDebts.filter(d=>d.status!=='paid').reduce((s,d)=>s+d.amount,0);
+  const debtsPaidThisPeriod = allDebts.filter(d=>d.status==='paid' && d.paidDate && withinPeriod(d.paidDate+'T12:00:00', reportPeriod)).reduce((s,d)=>s+d.amount,0);
+  $('statPayablesOutstanding').textContent = fmtKsh(payablesOutstanding);
+  $('statPayablesPaidLabel').textContent = 'Paid to suppliers — ' + periodLabel.toLowerCase();
+  $('statPayablesPaid').textContent = fmtKsh(payablesPaidThisPeriod);
+  $('statDebtsOutstanding').textContent = fmtKsh(debtsOutstanding);
+  $('statDebtsPaidLabel').textContent = 'Collected from customers — ' + periodLabel.toLowerCase();
+  $('statDebtsPaid').textContent = fmtKsh(debtsPaidThisPeriod);
 
   // Payment method breakdown — split cash vs M-Pesa, but reconciled against the same total above
   const cashSales = sales.filter(s=>s.method==='cash');
@@ -2587,6 +2664,33 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
       'Processed by': r.by || '',
     }));
 
+    // Sheet: supplier invoices — every one, so this doubles as a full payables register
+    const allPayablesExport = await getAll('payables');
+    const payablesRows = allPayablesExport.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).map(p => ({
+      'Supplier': p.supplierName,
+      'Amount': p.amount,
+      'Invoice date': p.invoiceDate,
+      'Due date': p.dueDate,
+      'Terms': termsLabel(Math.round((new Date(p.dueDate)-new Date(p.invoiceDate))/86400000)),
+      'Status': p.status,
+      'Notes': p.notes || '',
+      'Added by': p.addedBy || '',
+      'Paid date': p.paidDate || '',
+      'Paid by': p.paidBy || '',
+    }));
+    // Sheet: customer credit — every one, a full debtors register
+    const allDebtsExport = await getAll('customer_debts');
+    const debtsRows = allDebtsExport.sort((a,b)=>new Date(a.dateGiven)-new Date(b.dateGiven)).map(d => ({
+      'Customer': d.customerName,
+      'Phone': d.customerPhone || '',
+      'Amount': d.amount,
+      'Date given': d.dateGiven,
+      'Status': d.status,
+      'Notes': d.notes || '',
+      'Added by': d.addedBy || '',
+      'Paid date': d.paidDate || '',
+    }));
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
     // One sheet per business type — this is the "extract an individual report" piece, only
@@ -2632,6 +2736,8 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salesRows), 'Sales');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(purchaseRows), 'Stock received');
     if(refundRows.length>0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(refundRows), 'Refunds');
+    if(payablesRows.length>0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(payablesRows), 'Payables');
+    if(debtsRows.length>0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(debtsRows), 'Customer Credit');
     const filename = `${safeFilenamePart(businessProfile.storeName)}-Sales-${periodLabel.replace(/\s+/g,'')}-${new Date().toISOString().slice(0,10)}.xlsx`;
     XLSX.writeFile(wb, filename);
     logAudit('Exported sales report to Excel', `${periodLabel} — ${sales.length} sale(s)`);
@@ -4307,11 +4413,13 @@ $('logoutBtn').addEventListener('click', async ()=>{
 });
 
 // ---------- Theme (light / dark) ----------
+const ICON_MOON = '<svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1Z"/></svg>';
+const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="17" height="17"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
 function applyTheme(theme){
   if(theme==='dark') document.documentElement.setAttribute('data-theme','dark');
   else document.documentElement.removeAttribute('data-theme');
   try{ localStorage.setItem('my_duka_theme', theme); }catch(e){}
-  $('themeToggleBtn').textContent = theme==='dark' ? '☀️' : '🌙';
+  $('themeToggleBtn').innerHTML = theme==='dark' ? ICON_SUN : ICON_MOON;
 }
 $('themeToggleBtn').addEventListener('click', ()=>{
   const isDark = document.documentElement.getAttribute('data-theme')==='dark';
@@ -4323,7 +4431,7 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 // been set up before or not. The PIN entry logic itself figures out what to do; boot's only
 // job is getting the local database and UI into a ready state.
 (async function init(){
-  $('themeToggleBtn').textContent = document.documentElement.getAttribute('data-theme')==='dark' ? '☀️' : '🌙';
+  $('themeToggleBtn').innerHTML = document.documentElement.getAttribute('data-theme')==='dark' ? ICON_SUN : ICON_MOON;
   $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
   db = await openDB();
   await loadShopIdentity();
