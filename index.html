@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#12241f">
-<title>My DukaGO POS — Till</title>
+<title>My DukaGO POS — Counter</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -410,7 +410,7 @@
 <header>
   <div class="left">
     <div class="mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
-    <div class="storeline"><b id="storeNameDisplay">My DukaGO POS</b><span id="storeSubtitle">Outlet #001 · Till 1</span></div>
+    <div class="storeline"><b id="storeNameDisplay">My DukaGO POS</b><span id="storeSubtitle">Outlet #001 · Counter 1</span></div>
   </div>
   <div class="right">
     <span class="net-chip"><span class="net-dot off" id="netDot"></span><span id="netLabel">Offline</span><span id="pendingLabel"></span></span>
@@ -493,7 +493,7 @@
   <section class="view" id="view-business">
     <div class="panel">
       <h3>Business profile</h3>
-      <p class="hint">This is the actual shop's own details — name, owner, contact, and location. It's what prints on receipts and shows in the till header, separate from the My DukaGO POS app itself.</p>
+      <p class="hint">This is the actual shop's own details — name, owner, contact, and location. It's what prints on receipts and shows in the counter header, separate from the My DukaGO POS app itself.</p>
       <div class="form-row" style="grid-template-columns:1fr 1fr;">
         <input id="profStoreName" placeholder="Business / shop name">
         <input id="profOwnerName" placeholder="Owner / manager name">
@@ -513,18 +513,18 @@
       <p class="hint">There's no code to hand out — a staff member's own PIN <i>is</i> their identity. Add them under Staff below with their name, role, and a PIN, then tell them that PIN. They can type it into this same app on their own phone, anywhere, anytime — the app finds this shop automatically and pulls everything in.</p>
     </div>
     <div class="panel">
-      <h3>This till / pay station</h3>
-      <p class="hint">Only matters if there's more than one till — a supermarket with several pay stations, for example. This label is set per device, not synced, so each till can be told apart in the header and on its receipts.</p>
+      <h3>This counter / pay station</h3>
+      <p class="hint">Only matters if there's more than one counter — a supermarket with several pay stations, for example. This label is set per device, not synced, so each counter can be told apart in the header and on its receipts.</p>
       <div class="form-row" style="grid-template-columns:220px;">
-        <input id="tillLabelInput" placeholder="e.g. Till 1, Checkout A">
+        <input id="tillLabelInput" placeholder="e.g. Counter 1, Checkout A">
       </div>
-      <button class="primary-btn" id="saveTillLabelBtn">Save till label</button>
+      <button class="primary-btn" id="saveTillLabelBtn">Save counter label</button>
     </div>
     <div class="panel">
       <h3>Business type</h3>
       <p class="hint">This sets what the sales screen looks like — categories, starter catalog, and whether items are tracked as stock or sold as a service. Switching doesn't delete anything you've already added; it just loads that type's starter items in.</p>
       <div class="toggle-row">
-        <div><b style="font-size:13px; font-family:var(--display);">Combine multiple types</b><br><span class="hint" style="margin:0;">Running more than one business from this till? Turn this on to pick several — e.g. Duka + Carwash — in one go.</span></div>
+        <div><b style="font-size:13px; font-family:var(--display);">Combine multiple types</b><br><span class="hint" style="margin:0;">Running more than one business from this counter? Turn this on to pick several — e.g. Duka + Carwash — in one go.</span></div>
         <button class="primary-btn" id="combineModeBtn">Turn on</button>
       </div>
       <div class="biz-grid" id="bizGrid"></div>
@@ -683,7 +683,7 @@
     </div>
     <div class="panel">
       <h3>Attendance — sign-in times</h3>
-      <p class="hint">Every sign-in and sign-out, whether from the header logout or the till's Lock button, most recent first.</p>
+      <p class="hint">Every sign-in and sign-out, whether from the header logout or the counter's Lock button, most recent first.</p>
       <div class="table-scroll"><table><thead><tr><th>Name</th><th>Role</th><th>Signed in</th><th>Signed out</th><th>Duration</th></tr></thead>
       <tbody id="attendanceTable"></tbody></table></div>
     </div>
@@ -720,7 +720,7 @@
 
     <div class="panel" id="bizBreakdownWrap">
       <h3>By business type</h3>
-      <p class="hint">This till is running more than one business — so the combined total above can hide a loser behind a winner. Here's each one on its own.</p>
+      <p class="hint">This counter is running more than one business — so the combined total above can hide a loser behind a winner. Here's each one on its own.</p>
       <div class="table-scroll"><table><thead><tr><th>Business</th><th>Revenue</th><th>Profit</th><th>Items sold</th><th>Stock purchased</th></tr></thead>
       <tbody id="bizBreakdownTable"></tbody></table></div>
     </div>
@@ -739,7 +739,7 @@
 
     <div class="panel" id="stockCompareWrap">
       <h3>Stock: this morning vs now</h3>
-      <p class="hint">Only tracked for today — opening stock is captured once, the first time the till is opened each day.</p>
+      <p class="hint">Only tracked for today — opening stock is captured once, the first time the counter is opened each day.</p>
       <div class="table-scroll"><table><thead><tr><th>Product</th><th>Opening (this morning)</th><th>Sold today</th><th>Received today</th><th>Now</th></tr></thead>
       <tbody id="stockCompareTable"></tbody></table></div>
     </div>
@@ -761,7 +761,7 @@
   <section class="view" id="view-sync">
     <div class="panel">
       <h3>Tax (VAT)</h3>
-      <p class="hint">Prices on the till are tax-inclusive — VAT is already inside the price shown on each tile, not added at checkout. Turning this on just splits it out on the receipt and in reports so it's visible, without changing what the customer pays. The toggle applies immediately — no separate save needed.</p>
+      <p class="hint">Prices at the counter are tax-inclusive — VAT is already inside the price shown on each tile, not added at checkout. Turning this on just splits it out on the receipt and in reports so it's visible, without changing what the customer pays. The toggle applies immediately — no separate save needed.</p>
       <div class="toggle-row">
         <div><b style="font-size:13px;">Charge VAT</b></div>
         <button class="primary-btn" id="vatToggleBtn">Turn on</button>
@@ -813,7 +813,7 @@
         own Google Drive — private to them, not shared with any other outlet. The backup includes the full
         audit log and staff list (never PINs), so an admin can open that file from any device — their laptop,
         another phone, anywhere — and review exactly what every cashier did since they signed in, without
-        needing to be at the till itself. It's a snapshot from the last backup, not a live feed — for that,
+        needing to be at the counter itself. It's a snapshot from the last backup, not a live feed — for that,
         someone would need to trigger "Back up now" first. Needs a Google Cloud OAuth Client ID (free, one per
         deployment) and the page served over http/https — it won't work opened as a raw file, and Google
         requires your Gmail added as a "test user" on the OAuth screen until the app is verified.
@@ -837,7 +837,7 @@
       <h3>Online / offline behavior</h3>
       <p class="hint">This isn't a toggle you manage day to day — it's automatic.</p>
       <p style="font-size:13px; line-height:1.6;">
-        The till watches the device's real network state. Lose signal mid-sale and nothing changes for the
+        The app watches the device's real network state. Lose signal mid-sale and nothing changes for the
         cashier — sales keep ringing up, stock keeps deducting, everything queues locally. The moment the
         connection is back, queued sales and stock updates drain to the backend on their own. The button below
         is only there to test that flow on demand, without physically switching off wifi.
@@ -845,7 +845,7 @@
         One thing to set up once you host this for real: the page itself needs to survive a reload with zero
         network too — that's what <code style="background:var(--bg);padding:2px 6px;border-radius:5px;">manifest.json</code>
         and <code style="background:var(--bg);padding:2px 6px;border-radius:5px;">sw.js</code> (included alongside
-        this file) handle. Host all three together and open the till once while online — after that, it opens
+        this file) handle. Host all three together and open the app once while online — after that, it opens
         offline, cold, with no connection at all.
       </p>
     </div>
@@ -899,7 +899,7 @@
   <div class="login-card">
     <div class="login-mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <h2>My DukaGO POS</h2>
-    <p>Enter your PIN to start this till.</p>
+    <p>Enter your PIN to start this counter.</p>
     <p style="display:none; text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
@@ -1362,7 +1362,7 @@ const ROLE_RANK = {cashier:1, supervisor:2, admin:3};
 let db, cart = [], isOnline = false, activeCat = 'All', searchTerm = '';
 let vatEnabled = false, vatRate = 16; // VAT is off by default — admin turns it on in Sync & Setup
 let businessProfile = {storeName:'', ownerName:'', phone:'', address:'', location:''};
-let tillLabel = 'Till 1'; // configurable per device — matters for a supermarket with several pay stations
+let tillLabel = 'Counter 1'; // configurable per device — matters for a supermarket with several pay stations
 
 // ---------- Shop identity — what makes "cashier joins on her own phone" possible ----------
 // PLATFORM_SUPABASE_URL/KEY belong to YOU, the platform operator, not individual shop owners.
@@ -2623,7 +2623,7 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
     const salesRows = sales.map(s => ({
       'Date/Time': new Date(s.ts).toLocaleString('en-KE',{hour12:false}),
       'Cashier': s.cashier || '',
-      'Till': s.till || '',
+      'Counter': s.till || '',
       'Items': s.lines.map(l=>`${l.qty}x ${l.name}`).join(', '),
       'Subtotal': s.subtotal,
       'VAT': s.tax || 0,
@@ -3520,19 +3520,19 @@ function populateProfileForm(){
   $('profAddress').value = businessProfile.address || '';
   $('profileStatus').textContent = businessProfile.storeName
     ? ''
-    : 'Not filled in yet — receipts and the till header show "My DukaGO POS" until this is saved.';
+    : 'Not filled in yet — receipts and the counter header show "My DukaGO POS" until this is saved.';
   $('tillLabelInput').value = tillLabel;
 }
 $('saveTillLabelBtn').addEventListener('click', async ()=>{
   const label = $('tillLabelInput').value.trim();
-  if(!label){ toast('Enter a till label'); return; }
+  if(!label){ toast('Enter a counter label'); return; }
   tillLabel = label;
   await put('settings', {key:'till_label', value:tillLabel});
   // Deliberately NOT pushed to the shared backend — this is what tells two tills at the
   // same shop apart, so it has to stay local to this one device, never overwritten by another.
   $('storeSubtitle').textContent = `${tillLabel} · ${$('storeSubtitle').textContent.split(' · ').slice(1).join(' · ')}`;
   logAudit('Updated till label', tillLabel);
-  toast('Till label saved');
+  toast('Counter label saved');
 });
 $('saveProfileBtn').addEventListener('click', async ()=>{
   const storeName = $('profStoreName').value.trim();
@@ -3552,7 +3552,7 @@ $('saveProfileBtn').addEventListener('click', async ()=>{
   applyStoreNameToUI();
   logAudit('Updated business profile', `${storeName}${businessProfile.location?' — '+businessProfile.location:''}`);
   $('profileStatus').textContent = 'Saved.';
-  toast('Business profile saved'+(shopId ? ' — every till at this shop will pick it up' : ''));
+  toast('Business profile saved'+(shopId ? ' — every counter at this shop will pick it up' : ''));
 });
 
 async function updateDeviceDiagnostics(){
@@ -3565,7 +3565,7 @@ async function updateDeviceDiagnostics(){
     `Business type(s) saved locally: ${localBizSetting ? JSON.stringify(localBizSetting.value) : '(none saved)'}${localBizSetting && localBizSetting.updated_at ? ' — updated '+new Date(localBizSetting.updated_at).toLocaleString('en-KE',{hour12:false}) : ''}`,
     `VAT live now: ${vatEnabled ? 'ON at '+vatRate+'%' : 'OFF'}`,
     `VAT saved locally: ${localVatSetting ? JSON.stringify(localVatSetting.value) : '(none saved)'}${localVatSetting && localVatSetting.updated_at ? ' — updated '+new Date(localVatSetting.updated_at).toLocaleString('en-KE',{hour12:false}) : ''}`,
-    `Till label (this device only): ${tillLabel}`,
+    `Counter label (this device only): ${tillLabel}`,
     `Backend connected: ${backendLive() ? 'Yes' : 'No'}`,
     `Online right now: ${isOnline ? 'Yes' : 'No'}`,
   ];
