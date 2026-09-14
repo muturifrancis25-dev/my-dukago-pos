@@ -633,6 +633,9 @@
         <div><label>Amount (KSh)</label><input id="debtAmount" type="number" placeholder="0"></div>
         <div><label>Date given</label><input id="debtDate" type="date"></div>
       </div>
+      <label>Cost of the goods given (optional)</label>
+      <input id="debtCost" type="number" placeholder="e.g. 300 — leave blank if unsure" style="margin-bottom:4px;">
+      <p style="font-size:10.5px; color:var(--muted); margin:0 0 10px;">If you know roughly what these goods cost you, add it here — once this credit is paid, the difference counts toward that day's profit in Reports, same as a normal sale. Leave blank and the full amount counts as profit once paid.</p>
       <label>What was it for (optional)</label>
       <input id="debtNotes" placeholder="e.g. 2kg sugar, 1L cooking oil" style="margin-bottom:10px;">
       <button class="primary-btn" id="addDebtBtn" style="width:100%;">Save credit</button>
@@ -997,6 +1000,8 @@
     <input id="qdPhone" placeholder="07XX XXX XXX" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
     <label>Amount (KSh)</label>
     <input id="qdAmount" type="number" placeholder="0" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Cost of goods (optional)</label>
+    <input id="qdCost" type="number" placeholder="Leave blank if unsure" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
     <label>What was it for (optional)</label>
     <input id="qdNotes" placeholder="e.g. 2kg sugar, 1L cooking oil" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 12px;">
     <div class="modal-actions">
@@ -2248,10 +2253,11 @@ async function renderPayablesLists(){
 function prefillDebtDate(){
   if(!$('debtDate').value) $('debtDate').value = todayIso();
 }
-async function saveDebt({customerName, customerPhone, amount, dateGiven, notes}){
+async function saveDebt({customerName, customerPhone, amount, dateGiven, notes, cost}){
   const debt = {
     id: 'debt_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
     customerName, customerPhone, amount, dateGiven, notes, status:'owing',
+    cost: (cost!==undefined && cost!==null && !isNaN(cost)) ? cost : null,
     addedBy: currentUser ? currentUser.name : 'Unknown', paidDate: null,
   };
   await put('customer_debts', debt);
@@ -2265,11 +2271,13 @@ $('addDebtBtn').addEventListener('click', async ()=>{
   const amount = parseFloat($('debtAmount').value);
   const dateGiven = $('debtDate').value || todayIso();
   const notes = $('debtNotes').value.trim();
+  const costRaw = $('debtCost').value.trim();
+  const cost = costRaw ? parseFloat(costRaw) : null;
   if(!customerName){ toast('Enter the customer\'s name'); return; }
   if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
-  await saveDebt({customerName, customerPhone, amount, dateGiven, notes});
+  await saveDebt({customerName, customerPhone, amount, dateGiven, notes, cost});
   toast('Credit recorded');
-  $('debtCustomerName').value=''; $('debtCustomerPhone').value=''; $('debtAmount').value=''; $('debtNotes').value=''; $('debtDate').value='';
+  $('debtCustomerName').value=''; $('debtCustomerPhone').value=''; $('debtAmount').value=''; $('debtNotes').value=''; $('debtDate').value=''; $('debtCost').value='';
   prefillDebtDate();
   renderDebtsLists();
 });
@@ -2360,7 +2368,7 @@ $('qpSaveBtn').addEventListener('click', async ()=>{
 });
 
 $('quickDebtBtn').addEventListener('click', ()=>{
-  $('qdCustomer').value=''; $('qdPhone').value=''; $('qdAmount').value=''; $('qdNotes').value='';
+  $('qdCustomer').value=''; $('qdPhone').value=''; $('qdAmount').value=''; $('qdNotes').value=''; $('qdCost').value='';
   $('quickDebtModal').classList.add('show');
 });
 $('qdCancelBtn').addEventListener('click', ()=> $('quickDebtModal').classList.remove('show'));
@@ -2369,9 +2377,11 @@ $('qdSaveBtn').addEventListener('click', async ()=>{
   const customerPhone = $('qdPhone').value.trim();
   const amount = parseFloat($('qdAmount').value);
   const notes = $('qdNotes').value.trim();
+  const costRaw = $('qdCost').value.trim();
+  const cost = costRaw ? parseFloat(costRaw) : null;
   if(!customerName){ toast('Enter the customer\'s name'); return; }
   if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
-  await saveDebt({customerName, customerPhone, amount, dateGiven: todayIso(), notes});
+  await saveDebt({customerName, customerPhone, amount, dateGiven: todayIso(), notes, cost});
   toast('Credit recorded');
   $('quickDebtModal').classList.remove('show');
 });
@@ -2425,24 +2435,11 @@ async function renderReports(){
 
   const grossRevenue = sales.reduce((s,x)=>s+x.total,0);
   const refundTotal = refunds.reduce((s,x)=>s+x.amount,0);
-  const revenue = grossRevenue - refundTotal; // net — what the shop actually kept, not just what was rung up
   const vatCollected = sales.reduce((s,x)=>s+(x.tax||0),0);
   const itemCount = sales.reduce((s,x)=>s+x.lines.reduce((a,l)=>a+l.qty,0),0);
   const cogs = sales.reduce((s,x)=>s + x.lines.reduce((a,l)=>a+(l.qty*(l.cost||0)),0), 0);
   const purchasesCost = movements.reduce((s,m)=>s+(m.qty*(m.cost||0)),0);
-  // VAT collected isn't the shop's money — it's held for KRA, not profit. Profit is
-  // calculated off net revenue (VAT stripped out, refunds already netted out), never off
-  // what was simply collected at the till before any of that.
-  const profit = (revenue - vatCollected) - cogs;
   const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=5).length;
-
-  $('statSalesCount').textContent = sales.length;
-  $('statRevenue').textContent = fmtKsh(revenue);
-  $('statRevenueLabel').textContent = (vatEnabled ? `Revenue incl. VAT — ` : `Revenue — `) + periodLabel.toLowerCase() + (refundTotal>0 ? ` (after ${fmtKsh(refundTotal)} refunded)` : '');
-  $('statItems').textContent = itemCount;
-  $('statPurchases').textContent = fmtKsh(purchasesCost);
-  $('statProfit').textContent = fmtKsh(profit);
-  $('statLow').textContent = lowStock;
 
   // Payables/Customer credit — outstanding is a point-in-time balance (not period-filtered,
   // since "what you owe right now" doesn't mean anything scoped to "this week"); paid-this-
@@ -2452,7 +2449,28 @@ async function renderReports(){
   const payablesOutstanding = allPayables.filter(p=>p.status!=='paid').reduce((s,p)=>s+p.amount,0);
   const payablesPaidThisPeriod = allPayables.filter(p=>p.status==='paid' && p.paidDate && withinPeriod(p.paidDate+'T12:00:00', reportPeriod)).reduce((s,p)=>s+p.amount,0);
   const debtsOutstanding = allDebts.filter(d=>d.status!=='paid').reduce((s,d)=>s+d.amount,0);
-  const debtsPaidThisPeriod = allDebts.filter(d=>d.status==='paid' && d.paidDate && withinPeriod(d.paidDate+'T12:00:00', reportPeriod)).reduce((s,d)=>s+d.amount,0);
+  const debtsPaidRecords = allDebts.filter(d=>d.status==='paid' && d.paidDate && withinPeriod(d.paidDate+'T12:00:00', reportPeriod));
+  const debtsPaidThisPeriod = debtsPaidRecords.reduce((s,d)=>s+d.amount,0);
+  // A cleared customer credit is cash-basis income the moment it's actually collected — not
+  // on the day the goods went out, since that's when the money genuinely arrived. Its margin
+  // (amount minus whatever cost was recorded, or the full amount if no cost was given) folds
+  // straight into this period's Revenue and Profit, same as any normal sale would.
+  const debtsCollectedMargin = debtsPaidRecords.reduce((s,d)=>s + (d.amount - (d.cost || 0)), 0);
+
+  const revenue = (grossRevenue - refundTotal) + debtsPaidThisPeriod; // net — what the shop actually kept, not just what was rung up
+  // VAT collected isn't the shop's money — it's held for KRA, not profit. Profit is
+  // calculated off net revenue (VAT stripped out, refunds already netted out), never off
+  // what was simply collected at the till before any of that.
+  const profit = (revenue - debtsPaidThisPeriod - vatCollected) - cogs + debtsCollectedMargin;
+
+  $('statSalesCount').textContent = sales.length;
+  $('statRevenue').textContent = fmtKsh(revenue);
+  $('statRevenueLabel').textContent = (vatEnabled ? `Revenue incl. VAT — ` : `Revenue — `) + periodLabel.toLowerCase() + (refundTotal>0 ? ` (after ${fmtKsh(refundTotal)} refunded)` : '') + (debtsPaidThisPeriod>0 ? ` (incl. ${fmtKsh(debtsPaidThisPeriod)} collected credit)` : '');
+  $('statItems').textContent = itemCount;
+  $('statPurchases').textContent = fmtKsh(purchasesCost);
+  $('statProfit').textContent = fmtKsh(profit);
+  $('statLow').textContent = lowStock;
+
   $('statPayablesOutstanding').textContent = fmtKsh(payablesOutstanding);
   $('statPayablesPaidLabel').textContent = 'Paid to suppliers — ' + periodLabel.toLowerCase();
   $('statPayablesPaid').textContent = fmtKsh(payablesPaidThisPeriod);
@@ -2616,13 +2634,21 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
     }));
     const grossRevenue = sales.reduce((a,x)=>a+x.total,0);
     const refundTotal = refunds.reduce((a,x)=>a+x.amount,0);
-    const revenue = grossRevenue - refundTotal;
     const vatCollected = sales.reduce((a,x)=>a+(x.tax||0),0);
     const cogs = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+(l.qty*(l.cost||0)),0),0);
     const purchasesCost = movements.reduce((a,m)=>a+(m.qty*(m.cost||0)),0);
     const itemCount = sales.reduce((a,x)=>a+x.lines.reduce((b,l)=>b+l.qty,0),0);
     const cashTotal = sales.filter(s=>s.method==='cash').reduce((a,x)=>a+x.total,0);
     const mpesaTotal = sales.filter(s=>s.method==='mpesa').reduce((a,x)=>a+x.total,0);
+
+    // Same cash-basis folding as the on-screen Reports view — a customer credit counts as
+    // revenue and profit on the day it's actually collected, not the day the goods went out.
+    const allDebtsExportCalc = await getAll('customer_debts');
+    const debtsPaidRecordsExport = allDebtsExportCalc.filter(d=>d.status==='paid' && d.paidDate && withinPeriod(d.paidDate+'T12:00:00', reportPeriod));
+    const debtsPaidThisPeriodExport = debtsPaidRecordsExport.reduce((a,d)=>a+d.amount,0);
+    const debtsCollectedMarginExport = debtsPaidRecordsExport.reduce((a,d)=>a+(d.amount-(d.cost||0)),0);
+    const revenue = (grossRevenue - refundTotal) + debtsPaidThisPeriodExport;
+    const profit = (grossRevenue - refundTotal - vatCollected) - cogs + debtsCollectedMarginExport;
 
     // Sheet 2: the same summary numbers shown on screen, so the file matches what was seen
     const summaryRows = [
@@ -2631,10 +2657,11 @@ $('exportReportsBtn').addEventListener('click', async ()=>{
       {Metric:'Sales count', Value: sales.length},
       {Metric:'Gross revenue (before refunds)', Value: grossRevenue},
       {Metric:'Refunds issued', Value: refundTotal},
-      {Metric:'Net revenue (after refunds)', Value: revenue},
+      {Metric:'Customer credit collected this period', Value: debtsPaidThisPeriodExport},
+      {Metric:'Net revenue (incl. collected credit)', Value: revenue},
       {Metric:'VAT collected (not counted in Profit)', Value: vatCollected},
       {Metric:'Cost of goods sold', Value: cogs},
-      {Metric:'Profit', Value: (revenue - vatCollected) - cogs},
+      {Metric:'Profit (incl. margin on collected credit)', Value: profit},
       {Metric:'Items sold', Value: itemCount},
       {Metric:'Stock purchased (cost)', Value: purchasesCost},
       {Metric:'', Value:''},
@@ -2842,7 +2869,7 @@ async function pushToSupabase(item){
     const p = item.payload;
     body = {
       id:p.id, shop_id:shopId, customer_name:p.customerName, customer_phone:p.customerPhone,
-      amount:p.amount, date_given:p.dateGiven, notes:p.notes, status:p.status,
+      amount:p.amount, date_given:p.dateGiven, notes:p.notes, status:p.status, cost:p.cost,
       paid_date:p.paidDate, added_by:p.addedBy,
       updated_at:p.updated_at || new Date().toISOString(),
     };
@@ -3064,7 +3091,7 @@ async function pullShopData(fullPull, force){
       for(const rd of remoteDebts){
         const ld = localDebts.find(d=>d.id===rd.id);
         if(!ld || !ld.updated_at || new Date(rd.updated_at) > new Date(ld.updated_at)){
-          await put('customer_debts', {id:rd.id, customerName:rd.customer_name, customerPhone:rd.customer_phone, amount:rd.amount, dateGiven:rd.date_given, notes:rd.notes, status:rd.status, paidDate:rd.paid_date, addedBy:rd.added_by, updated_at:rd.updated_at});
+          await put('customer_debts', {id:rd.id, customerName:rd.customer_name, customerPhone:rd.customer_phone, amount:rd.amount, dateGiven:rd.date_given, notes:rd.notes, status:rd.status, cost:rd.cost, paidDate:rd.paid_date, addedBy:rd.added_by, updated_at:rd.updated_at});
         }
       }
     }
