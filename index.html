@@ -920,6 +920,7 @@
       <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
     </div>
     <p class="login-hint" id="loginHint"></p>
+    <p style="text-align:center; margin:14px 0 0;"><span id="platformAdminLink" style="font-size:10px; color:var(--muted); opacity:.55; cursor:pointer; text-decoration:underline dotted;">Platform Administrator</span></p>
   </div>
 </div>
 
@@ -975,8 +976,8 @@
   <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
     <h3>Platform Administrator</h3>
     <p class="hint">This is separate from any shop's own admin login — for platform-level access only.</p>
-    <label>PIN</label>
-    <input id="saPinInput" type="password" inputmode="numeric" placeholder="Enter your Super Admin PIN" style="width:100%; padding:11px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--mono); letter-spacing:2px;">
+    <label>Password</label>
+    <input id="saPinInput" type="password" placeholder="Enter your Super Admin password" style="width:100%; padding:11px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--mono); letter-spacing:1px;">
     <p id="saLoginError" style="color:var(--clay); font-size:11.5px; min-height:16px; margin:0 0 10px;"></p>
     <div class="modal-actions">
       <button class="modal-cancel" id="saCancelBtn">Cancel</button>
@@ -1775,7 +1776,9 @@ function applySuperAdminGating(){
 // well-tested pattern Android itself uses for unlocking developer options. Deliberately NOT
 // a timed long-press: a real mouse drifts slightly during a hold and cancels it, and touch
 // timing varies enough across devices that a press-and-hold proved unreliable in practice.
-// A simple tap count works identically and predictably on both mouse and touch.
+// A simple tap count works identically and predictably on both mouse and touch. Each tap
+// gives a brief, visible pulse — with nothing else on screen to confirm a tap "counted,"
+// there was previously no way to tell a slow tap from a missed one.
 function wireSecretTapGesture(elementId){
   const el = $(elementId);
   if(!el) return;
@@ -1783,6 +1786,9 @@ function wireSecretTapGesture(elementId){
   let resetTimer = null;
   el.addEventListener('click', ()=>{
     tapCount++;
+    el.style.transition = 'transform .12s ease';
+    el.style.transform = 'scale(0.85)';
+    setTimeout(()=>{ el.style.transform = 'scale(1)'; }, 120);
     if(resetTimer) clearTimeout(resetTimer);
     resetTimer = setTimeout(()=>{ tapCount = 0; }, 3000);
     if(tapCount >= 5){
@@ -1794,6 +1800,11 @@ function wireSecretTapGesture(elementId){
 }
 wireSecretTapGesture('headerMark');
 wireSecretTapGesture('mainLoginMark');
+// A small, always-reliable backup — deliberately tiny and easy to overlook, but guaranteed to
+// work every time with a single tap, no counting required. The 5-tap gesture above stays as
+// the primary, more hidden path; this exists so getting in never depends on tap-timing working
+// out on a particular device.
+$('platformAdminLink').addEventListener('click', openSuperAdminModal);
 function openSuperAdminModal(){
   if(superAdminUnlocked){ toast('Already verified as Platform Administrator ('+superAdminName+')'); return; }
   $('saPinInput').value = '';
