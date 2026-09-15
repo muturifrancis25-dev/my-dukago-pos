@@ -243,7 +243,7 @@
   .toggle-row > button{flex:none;}
 
   /* ================= ADMIN PIN MODAL ================= */
-  .modal-overlay{position:fixed; inset:0; background:rgba(21,28,41,.55); display:none; align-items:center; justify-content:center; z-index:100;}
+  .modal-overlay{position:fixed; inset:0; background:rgba(21,28,41,.55); display:none; align-items:center; justify-content:center; z-index:250;}
   .modal-overlay.show{display:flex;}
   .modal-box{background:var(--panel); border-radius:14px; padding:22px; width:min(88vw,280px); text-align:center;}
   .modal-box h3{margin:0 0 4px; font-size:16px; font-family:var(--display);}
@@ -256,7 +256,7 @@
   .active-method{background:var(--teal-dark) !important; color:#fff !important;}
   .modal-confirm{background:var(--navy-dark); color:#fff;}
 
-  .toast{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--teal-dark); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; font-weight:600; z-index:150; opacity:0; pointer-events:none; transition:opacity .25s, bottom .25s;}
+  .toast{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--teal-dark); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; font-weight:600; z-index:300; opacity:0; pointer-events:none; transition:opacity .25s, bottom .25s;}
   .toast.show{opacity:1; bottom:26px;}
 
   /* ================= LOGIN SCREEN — rotating real photos, kept bright ================= */
@@ -920,7 +920,7 @@
       <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
     </div>
     <p class="login-hint" id="loginHint"></p>
-    <p style="text-align:center; margin:14px 0 0;"><span id="platformAdminLink" style="font-size:10px; color:var(--muted); opacity:.55; cursor:pointer; text-decoration:underline dotted;">Platform Administrator</span></p>
+    <p id="platformAdminLinkWrap" style="text-align:center; margin:14px 0 0; padding:10px; cursor:pointer;"><span id="platformAdminLink" style="font-size:11px; color:var(--muted); opacity:.7; text-decoration:underline dotted;">Platform Administrator</span></p>
   </div>
 </div>
 
@@ -1804,7 +1804,7 @@ wireSecretTapGesture('mainLoginMark');
 // work every time with a single tap, no counting required. The 5-tap gesture above stays as
 // the primary, more hidden path; this exists so getting in never depends on tap-timing working
 // out on a particular device.
-$('platformAdminLink').addEventListener('click', openSuperAdminModal);
+$('platformAdminLinkWrap').addEventListener('click', openSuperAdminModal);
 function openSuperAdminModal(){
   if(superAdminUnlocked){ toast('Already verified as Platform Administrator ('+superAdminName+')'); return; }
   $('saPinInput').value = '';
