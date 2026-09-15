@@ -534,8 +534,10 @@
       <h3>This device — technical details</h3>
       <p class="hint">Useful when something looks wrong and you need to see exactly what this specific device currently thinks is true, instead of guessing.</p>
       <div style="background:var(--bg); border-radius:10px; padding:12px 14px; font-family:var(--mono); font-size:11.5px; line-height:1.8;" id="deviceDiagnostics">—</div>
-      <button class="primary-btn" id="forceResyncBtn" style="margin-top:12px; display:none;">Force re-sync from server now</button>
-      <p id="forceResyncStatus" class="hint" style="margin:8px 0 0;"></p>
+      <div id="forceResyncControls" style="display:none;">
+        <button class="primary-btn" id="forceResyncBtn" style="margin-top:12px;">Force re-sync from server now</button>
+        <p id="forceResyncStatus" class="hint" style="margin:8px 0 0;"></p>
+      </div>
       <p class="hint" id="forceResyncLockedNotice" style="margin-top:10px;">A full re-sync from the server is available to your platform administrator — contact them if this device looks out of date and reloading doesn't fix it.</p>
     </div>
   </section>
@@ -983,6 +985,22 @@
       <button class="modal-cancel" id="saCancelBtn">Cancel</button>
       <button class="modal-confirm" id="saVerifyBtn">Verify</button>
     </div>
+  </div>
+</div>
+
+<!-- Super Admin dedicated screen — reached DIRECTLY after password verification, no shop
+     credentials needed at all. The three platform-level panels get physically MOVED in here
+     (not duplicated — duplicating would mean two elements sharing the same id, which breaks
+     getElementById) the moment login succeeds, and moved back out if this is ever closed
+     without navigating elsewhere. -->
+<div class="login-screen" id="superAdminView" style="display:none; z-index:260; align-items:flex-start; overflow-y:auto; padding-top:30px;">
+  <div class="login-card" style="width:min(94vw,560px); text-align:left; max-height:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <h2 style="margin:0;">Platform Administrator</h2>
+      <button class="modal-cancel" id="saExitBtn" style="padding:7px 14px; font-size:12px;">Exit</button>
+    </div>
+    <p class="hint" id="saCurrentShopLine" style="margin:0 0 16px;">—</p>
+    <div id="superAdminPanelBody"></div>
   </div>
 </div>
 
@@ -1762,14 +1780,20 @@ $('mpesaSendBtn').addEventListener('click', async ()=>{
 let superAdminUnlocked = false;
 let superAdminName = null;
 
-function applySuperAdminGating(){
-  const show = superAdminUnlocked;
-  $('backendConnectionPanel').style.display = show ? 'block' : 'none';
-  $('backendConnectionLockedNotice').style.display = show ? 'none' : 'block';
-  $('gdrivePanel').style.display = show ? 'block' : 'none';
-  $('gdriveLockedNotice').style.display = show ? 'none' : 'block';
-  $('forceResyncBtn').style.display = show ? 'block' : 'none';
-  $('forceResyncLockedNotice').style.display = show ? 'none' : 'block';
+// Physically relocates the three platform-level controls into the dedicated Super Admin
+// view, once, at boot — not toggled visible/hidden in place. This is what makes Super Admin
+// access self-contained: these controls are simply never reachable through any shop admin
+// screen at all, regardless of who's signed in there, and getting to them never requires
+// also knowing a specific shop's own admin PIN.
+function relocatePlatformControlsToSuperAdminView(){
+  const body = $('superAdminPanelBody');
+  ['backendConnectionPanel','gdrivePanel'].forEach(id=>{
+    const el = $(id);
+    el.style.display = 'block';
+    body.appendChild(el);
+  });
+  $('forceResyncControls').style.display = 'block';
+  body.appendChild($('forceResyncControls'));
 }
 
 // Tap the logo 5 times quickly (within 3 seconds) to reach the Super Admin login — the same
@@ -1829,13 +1853,22 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
     superAdminUnlocked = true;
     superAdminName = data.name || 'Platform Admin';
     $('superAdminModal').classList.remove('show');
-    applySuperAdminGating();
-    if($('view-business').classList.contains('active')) renderBizGrid();
     logAudit('Platform Administrator verified on this device', superAdminName);
-    toast('Verified — platform-level settings unlocked for this session');
+    // Straight into the dedicated Super Admin screen — no shop credentials needed at all,
+    // which is the whole point: this identity is platform-wide, not tied to any one shop.
+    $('loginScreen').classList.add('hide');
+    $('saCurrentShopLine').textContent = shopId
+      ? `Currently showing settings for the shop loaded on this device (${businessProfile.storeName || 'unnamed shop'}).`
+      : `No shop is set up on this device yet — settings below apply once one is.`;
+    $('superAdminView').style.display = 'flex';
+    toast('Verified — welcome, '+superAdminName);
   }catch(e){
     $('saLoginError').textContent = 'Could not reach the platform admin service — check your connection';
   }
+});
+$('saExitBtn').addEventListener('click', ()=>{
+  $('superAdminView').style.display = 'none';
+  showLoginScreen();
 });
 document.addEventListener('keydown', e=>{
   if(!$('superAdminModal').classList.contains('show')) return;
@@ -4577,7 +4610,7 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 (async function init(){
   $('themeToggleBtn').innerHTML = document.documentElement.getAttribute('data-theme')==='dark' ? ICON_SUN : ICON_MOON;
   $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
-  applySuperAdminGating(); // starts locked, every load, on purpose — see the flag's own comment
+  relocatePlatformControlsToSuperAdminView(); // done once, every load — see the function's own comment
   db = await openDB();
   await loadShopIdentity();
   await seedIfEmpty();
