@@ -409,7 +409,7 @@
 
 <header>
   <div class="left">
-    <div class="mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
+    <div class="mark" id="headerMark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <div class="storeline"><b id="storeNameDisplay">My DukaGO POS</b><span id="storeSubtitle">Outlet #001 · Counter 1</span></div>
   </div>
   <div class="right">
@@ -534,8 +534,9 @@
       <h3>This device — technical details</h3>
       <p class="hint">Useful when something looks wrong and you need to see exactly what this specific device currently thinks is true, instead of guessing.</p>
       <div style="background:var(--bg); border-radius:10px; padding:12px 14px; font-family:var(--mono); font-size:11.5px; line-height:1.8;" id="deviceDiagnostics">—</div>
-      <button class="primary-btn" id="forceResyncBtn" style="margin-top:12px;">Force re-sync from server now</button>
+      <button class="primary-btn" id="forceResyncBtn" style="margin-top:12px; display:none;">Force re-sync from server now</button>
       <p id="forceResyncStatus" class="hint" style="margin:8px 0 0;"></p>
+      <p class="hint" id="forceResyncLockedNotice" style="margin-top:10px;">A full re-sync from the server is available to your platform administrator — contact them if this device looks out of date and reloading doesn't fix it.</p>
     </div>
   </section>
 
@@ -796,7 +797,7 @@
       <button class="primary-btn" id="testPrintBtn" style="background:var(--sage); margin-left:8px;">Test print</button>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="backendConnectionPanel" style="display:none;">
       <h3>Backend connection</h3>
       <p class="hint">Paste your Supabase project keys to switch from simulated to live sync across every outlet.</p>
       <div class="form-row" style="grid-template-columns:1fr 1fr;">
@@ -805,8 +806,12 @@
       </div>
       <button class="primary-btn" id="saveSupaBtn">Save &amp; connect</button>
     </div>
+    <div class="panel" id="backendConnectionLockedNotice">
+      <h3>Backend connection</h3>
+      <p class="hint">This shop's connection to the platform is managed centrally and isn't something a shop admin can change — that's what keeps every shop's data reliably syncing to the right place. Contact your platform administrator if this ever needs attention.</p>
+    </div>
 
-    <div class="panel">
+    <div class="panel" id="gdrivePanel" style="display:none;">
       <h3>Personal backup — Google Drive</h3>
       <p class="hint">
         Separate from the backend above: this backs this outlet's own data up into the signed-in owner's
@@ -832,6 +837,10 @@
       </div>
       <button class="primary-btn" id="gdriveBackupNowBtn" style="background:var(--sage); margin-top:4px;" disabled>Back up now</button>
       <p id="gdriveLastBackup" class="hint" style="margin:10px 0 0;"></p>
+    </div>
+    <div class="panel" id="gdriveLockedNotice">
+      <h3>Personal backup — Google Drive</h3>
+      <p class="hint">Backup connections are managed by your platform administrator. Contact them if you'd like this set up for your shop.</p>
     </div>
     <div class="panel">
       <h3>Online / offline behavior</h3>
@@ -959,6 +968,23 @@
 <!-- Quick-action modals reachable directly from the till by ANY role — no backoffice access
      needed, since logging an invoice or a customer credit is normal operational work, not
      something that should require an admin/supervisor PIN just to open the screen. -->
+<!-- Super Admin — platform-level access, completely separate from any shop's own staff PINs.
+     Reached only by a long-press on the header logo — not discoverable by accident, and not
+     something a shop admin would stumble into while running their own business. -->
+<div class="modal-overlay" id="superAdminModal">
+  <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
+    <h3>Platform Administrator</h3>
+    <p class="hint">This is separate from any shop's own admin login — for platform-level access only.</p>
+    <label>PIN</label>
+    <input id="saPinInput" type="password" inputmode="numeric" placeholder="Enter your Super Admin PIN" style="width:100%; padding:11px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--mono); letter-spacing:2px;">
+    <p id="saLoginError" style="color:var(--clay); font-size:11.5px; min-height:16px; margin:0 0 10px;"></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="saCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="saVerifyBtn">Verify</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="quickPayableModal">
   <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
     <h3>Log a supplier invoice</h3>
@@ -1727,6 +1753,72 @@ $('mpesaSendBtn').addEventListener('click', async ()=>{
 });
 
 // ---------- Path 2: real STK push — talks to the actual Daraja sandbox backend ----------
+// ---------- Super Admin — platform-level access, separate from any shop's own staff ----------
+// Deliberately an in-memory flag only — never persisted to localStorage or IndexedDB, so it
+// resets on every reload and requires re-authenticating each time. That's a safety feature,
+// not an inconvenience: this is the one login in the whole app that should never be "stay
+// signed in."
+let superAdminUnlocked = false;
+let superAdminName = null;
+
+function applySuperAdminGating(){
+  const show = superAdminUnlocked;
+  $('backendConnectionPanel').style.display = show ? 'block' : 'none';
+  $('backendConnectionLockedNotice').style.display = show ? 'none' : 'block';
+  $('gdrivePanel').style.display = show ? 'block' : 'none';
+  $('gdriveLockedNotice').style.display = show ? 'none' : 'block';
+  $('forceResyncBtn').style.display = show ? 'block' : 'none';
+  $('forceResyncLockedNotice').style.display = show ? 'none' : 'block';
+}
+
+// Long-press the header logo (roughly 800ms) to reach the Super Admin login — not a button
+// anyone would stumble onto while just running their shop, but easy to find once you know.
+(function wireHeaderMarkLongPress(){
+  let pressTimer = null;
+  const mark = $('headerMark');
+  function start(){ pressTimer = setTimeout(openSuperAdminModal, 800); }
+  function cancelPress(){ if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; } }
+  mark.addEventListener('mousedown', start);
+  mark.addEventListener('touchstart', start, {passive:true});
+  ['mouseup','mouseleave','touchend','touchcancel'].forEach(evt=> mark.addEventListener(evt, cancelPress));
+})();
+function openSuperAdminModal(){
+  if(superAdminUnlocked){ toast('Already verified as Platform Administrator ('+superAdminName+')'); return; }
+  $('saPinInput').value = '';
+  $('saLoginError').textContent = '';
+  $('superAdminModal').classList.add('show');
+  $('saPinInput').focus();
+}
+$('saCancelBtn').addEventListener('click', ()=> $('superAdminModal').classList.remove('show'));
+$('saVerifyBtn').addEventListener('click', async ()=>{
+  const pin = $('saPinInput').value.trim();
+  if(!pin){ $('saLoginError').textContent = 'Enter a PIN'; return; }
+  $('saLoginError').textContent = 'Checking…';
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/super-admin-login`, {
+      method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify({pin}),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok || !data.ok){
+      $('saLoginError').textContent = data.error || 'Incorrect PIN';
+      return;
+    }
+    superAdminUnlocked = true;
+    superAdminName = data.name || 'Platform Admin';
+    $('superAdminModal').classList.remove('show');
+    applySuperAdminGating();
+    if($('view-business').classList.contains('active')) renderBizGrid();
+    logAudit('Platform Administrator verified on this device', superAdminName);
+    toast('Verified — platform-level settings unlocked for this session');
+  }catch(e){
+    $('saLoginError').textContent = 'Could not reach the platform admin service — check your connection';
+  }
+});
+document.addEventListener('keydown', e=>{
+  if(!$('superAdminModal').classList.contains('show')) return;
+  if(e.key==='Enter') $('saVerifyBtn').click();
+});
+
 function mpesaFunctionHeaders(){
   return {'Content-Type':'application/json', 'Authorization':'Bearer '+PLATFORM_SUPABASE_KEY, 'apikey':PLATFORM_SUPABASE_KEY};
 }
@@ -3629,7 +3721,9 @@ async function renderBizGrid(){
     $('addBizModal').classList.add('show');
     $('bizNameInput').focus();
   });
-  grid.appendChild(addCard);
+  // Creating an entirely new business type category is a platform-level decision, not a
+  // day-to-day shop operation — gated the same way as the backend connection and backups.
+  if(superAdminUnlocked) grid.appendChild(addCard);
   $('applyCombineBtn').style.display = combineMode ? 'block' : 'none';
   $('applyCombineBtn').textContent = `Apply combination (${combineSelection.length} selected)`;
 }
@@ -4460,6 +4554,7 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 (async function init(){
   $('themeToggleBtn').innerHTML = document.documentElement.getAttribute('data-theme')==='dark' ? ICON_SUN : ICON_MOON;
   $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
+  applySuperAdminGating(); // starts locked, every load, on purpose — see the flag's own comment
   db = await openDB();
   await loadShopIdentity();
   await seedIfEmpty();
