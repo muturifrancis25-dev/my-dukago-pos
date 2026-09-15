@@ -90,7 +90,7 @@
   }
   header .left{display:flex; align-items:center; gap:11px; min-width:0; flex:1 1 auto;}
   header .mark{
-    width:34px;height:34px;border-radius:32%;background:var(--marigold); flex:none;
+    width:34px;height:34px;border-radius:32%;background:var(--marigold); flex:none; cursor:pointer;
     display:flex;align-items:center;justify-content:center; color:var(--teal-dark);
     box-shadow:inset 0 0 0 2px rgba(15,38,32,.2);
   }
@@ -298,7 +298,7 @@
     box-shadow:0 20px 60px rgba(0,0,0,.45);
   }
   .login-mark{
-    width:56px;height:56px;border-radius:30%;background:var(--marigold); color:var(--teal-dark);
+    width:56px;height:56px;border-radius:30%;background:var(--marigold); color:var(--teal-dark); cursor:pointer;
     display:flex; align-items:center; justify-content:center;
     margin:0 auto 12px; box-shadow:inset 0 0 0 2px rgba(15,38,32,.2), 0 6px 16px rgba(226,160,52,.35);
   }
@@ -906,7 +906,7 @@
   <div class="scene-caption" id="sceneCaption">Every sale accounted for.</div>
 
   <div class="login-card">
-    <div class="login-mark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
+    <div class="login-mark" id="mainLoginMark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <h2>My DukaGO POS</h2>
     <p>Enter your PIN to start this counter.</p>
     <p style="display:none; text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
@@ -1771,17 +1771,29 @@ function applySuperAdminGating(){
   $('forceResyncLockedNotice').style.display = show ? 'none' : 'block';
 }
 
-// Long-press the header logo (roughly 800ms) to reach the Super Admin login — not a button
-// anyone would stumble onto while just running their shop, but easy to find once you know.
-(function wireHeaderMarkLongPress(){
-  let pressTimer = null;
-  const mark = $('headerMark');
-  function start(){ pressTimer = setTimeout(openSuperAdminModal, 800); }
-  function cancelPress(){ if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; } }
-  mark.addEventListener('mousedown', start);
-  mark.addEventListener('touchstart', start, {passive:true});
-  ['mouseup','mouseleave','touchend','touchcancel'].forEach(evt=> mark.addEventListener(evt, cancelPress));
-})();
+// Tap the logo 5 times quickly (within 3 seconds) to reach the Super Admin login — the same
+// well-tested pattern Android itself uses for unlocking developer options. Deliberately NOT
+// a timed long-press: a real mouse drifts slightly during a hold and cancels it, and touch
+// timing varies enough across devices that a press-and-hold proved unreliable in practice.
+// A simple tap count works identically and predictably on both mouse and touch.
+function wireSecretTapGesture(elementId){
+  const el = $(elementId);
+  if(!el) return;
+  let tapCount = 0;
+  let resetTimer = null;
+  el.addEventListener('click', ()=>{
+    tapCount++;
+    if(resetTimer) clearTimeout(resetTimer);
+    resetTimer = setTimeout(()=>{ tapCount = 0; }, 3000);
+    if(tapCount >= 5){
+      tapCount = 0;
+      clearTimeout(resetTimer);
+      openSuperAdminModal();
+    }
+  });
+}
+wireSecretTapGesture('headerMark');
+wireSecretTapGesture('mainLoginMark');
 function openSuperAdminModal(){
   if(superAdminUnlocked){ toast('Already verified as Platform Administrator ('+superAdminName+')'); return; }
   $('saPinInput').value = '';
