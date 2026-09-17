@@ -427,6 +427,7 @@
     <button data-view="stock">Stock</button>
     <button data-view="payables">Payables</button>
     <button data-view="debts">Customer Credit</button>
+    <button data-view="removals">Removals</button>
     <button data-view="reports">Reports</button>
     <button data-view="staff" class="admin-only-tab">Staff</button>
     <button data-view="audit" class="admin-only-tab">Audit Log</button>
@@ -466,6 +467,7 @@
         <div class="paymethod-row" id="payMethodRow">
           <button class="active" data-method="cash">Cash</button>
           <button data-method="mpesa">M-Pesa</button>
+          <button data-method="credit" id="payMethodCreditBtn" style="display:none;">Credit</button>
         </div>
         <div class="action-row" style="margin-bottom:8px;">
           <button class="modal-cancel" id="quickPayableBtn" style="flex:1; padding:9px; font-size:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="6" y="4" width="12" height="17" rx="1.5"/><path d="M9 2.5h6a1 1 0 0 1 1 1V5H8V3.5a1 1 0 0 1 1-1Z"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="13.5" x2="15" y2="13.5"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Log invoice</button>
@@ -507,6 +509,24 @@
       </div>
       <button class="primary-btn" id="saveProfileBtn">Save business profile</button>
       <p id="profileStatus" class="hint" style="margin:10px 0 0;"></p>
+    </div>
+    <div class="panel">
+      <h3>Branding — make it yours</h3>
+      <p class="hint">Your own logo and background tint, just for this shop — synced to every device signed into it. This is separate from business type, which stays with your platform administrator.</p>
+      <label>Shop logo (optional)</label>
+      <div style="display:flex; align-items:center; gap:14px; margin:6px 0 14px;">
+        <div id="brandLogoPreview" style="width:52px; height:52px; border-radius:30%; background:var(--marigold); color:var(--teal-dark); display:flex; align-items:center; justify-content:center; flex:none; overflow:hidden;">
+          <svg viewBox="0 0 24 24" fill="none" width="28" height="28"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg>
+        </div>
+        <div>
+          <input id="brandLogoInput" type="file" accept="image/*" style="margin-bottom:6px;">
+          <br><button class="modal-cancel" id="removeBrandLogoBtn" style="font-size:11px; padding:5px 10px;">Remove logo, use default</button>
+        </div>
+      </div>
+      <label>Background tint</label>
+      <div id="brandColorSwatches" style="display:flex; gap:10px; margin:8px 0 14px; flex-wrap:wrap;"></div>
+      <button class="primary-btn" id="saveBrandBtn">Save branding</button>
+      <p id="brandStatus" class="hint" style="margin:10px 0 0;"></p>
     </div>
     <div class="panel">
       <h3>How staff join this shop</h3>
@@ -636,6 +656,8 @@
         <div><label>Amount (KSh)</label><input id="debtAmount" type="number" placeholder="0"></div>
         <div><label>Date given</label><input id="debtDate" type="date"></div>
       </div>
+      <label>Date agreed for payment</label>
+      <input id="debtDueDate" type="date" style="margin-bottom:10px;">
       <label>Cost of the goods given (optional)</label>
       <input id="debtCost" type="number" placeholder="e.g. 300 — leave blank if unsure" style="margin-bottom:4px;">
       <p style="font-size:10.5px; color:var(--muted); margin:0 0 10px;">If you know roughly what these goods cost you, add it here — once this credit is paid, the difference counts toward that day's profit in Reports, same as a normal sale. Leave blank and the full amount counts as profit once paid.</p>
@@ -646,11 +668,26 @@
     <div class="panel">
       <h3>Owing — customers who haven't paid yet</h3>
       <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total owed to you</div><div class="sval" id="debtsOutstandingTotal">KSh 0</div></div>
+      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Overdue right now</div><div class="sval" id="debtsOverdueTotal" style="color:var(--clay);">KSh 0</div></div>
       <div id="debtsUnpaidList"></div>
     </div>
     <div class="panel">
       <h3>Paid — history</h3>
       <div id="debtsPaidList"></div>
+    </div>
+  </section>
+
+  <!-- ============ REMOVALS — cashier item/cart removals awaiting review ============ -->
+  <section class="view" id="view-removals">
+    <div class="panel">
+      <h3>Awaiting review</h3>
+      <p class="hint">When a cashier removes something, the sale keeps moving — this is where it lands afterward so an admin or supervisor can see the reason and clear it, with a proper trail either way.</p>
+      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Pending review</div><div class="sval" id="removalsPendingCount">0</div></div>
+      <div id="removalsPendingList"></div>
+    </div>
+    <div class="panel">
+      <h3>Reviewed — history</h3>
+      <div id="removalsReviewedList"></div>
     </div>
   </section>
 
@@ -667,14 +704,15 @@
           <option value="admin">Admin</option>
         </select>
         <input id="newStaffPin" placeholder="PIN — 4 digits, or 6 for Admin" maxlength="6" inputmode="numeric">
+        <input id="newStaffEmail" type="email" placeholder="Email (optional)">
         <button class="primary-btn" id="addStaffBtn" style="grid-column:span 1;">Add staff</button>
       </div>
     </div>
     <div class="panel">
       <h3>Roles, in short</h3>
       <p class="hint" style="line-height:1.6;">
-        <b>Cashier</b> — sells only, 4-digit PIN. Voiding a line or clearing a cart needs sign-off.<br>
-        <b>Supervisor</b> — everything a cashier can do, plus can approve voids with their own 4-digit PIN.<br>
+        <b>Cashier</b> — sells only, 4-digit PIN. Removing a line or clearing a cart is never blocked — the sale keeps moving — but it's sent to Admin → Removals for an admin or supervisor to review afterward.<br>
+        <b>Supervisor</b> — everything a cashier can do, plus can remove items or clear a cart immediately, no review needed, still fully logged.<br>
         <b>Admin</b> — full access: Stock, Reports, Sync setup, and assigning everyone else's role. Admin PINs are 6 digits — longer on purpose, so it's harder for a cashier to glance at the keypad and pick it up.
       </p>
     </div>
@@ -718,6 +756,7 @@
       <div class="stat-card"><div class="slabel">You owe suppliers (now)</div><div class="sval" id="statPayablesOutstanding">KSh 0</div></div>
       <div class="stat-card"><div class="slabel" id="statPayablesPaidLabel">Paid to suppliers — today</div><div class="sval" id="statPayablesPaid">KSh 0</div></div>
       <div class="stat-card"><div class="slabel">Customers owe you (now)</div><div class="sval" id="statDebtsOutstanding">KSh 0</div></div>
+      <div class="stat-card"><div class="slabel">Overdue credit (now)</div><div class="sval" id="statDebtsOverdue" style="color:var(--clay);">KSh 0</div></div>
       <div class="stat-card"><div class="slabel" id="statDebtsPaidLabel">Collected from customers — today</div><div class="sval" id="statDebtsPaid">KSh 0</div></div>
     </div>
 
@@ -773,6 +812,15 @@
         <input id="vatRateInput" type="number" placeholder="VAT rate %" min="0" max="100" value="16">
       </div>
       <button class="primary-btn" id="saveVatBtn">Save VAT rate</button>
+    </div>
+
+    <div class="panel">
+      <h3>Credit sales</h3>
+      <p class="hint">Not every shop extends credit — off by default. Turn this on to let cashiers ring up a sale as "Credit" right at the till, tied to a real cart (so stock still deducts correctly), with an agreed payment date. It's recorded under Customer Credit, and counts toward revenue and profit the day it's actually paid, not the day it was sold.</p>
+      <div class="toggle-row">
+        <div><b style="font-size:13px;">Allow credit sales at the till</b></div>
+        <button class="primary-btn" id="creditToggleBtn">Turn on</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -891,6 +939,8 @@
       <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
     </div>
     <p id="setPinError" style="color:var(--clay); font-size:12px; min-height:16px; margin-top:10px; text-align:center;"></p>
+    <label style="font-size:11.5px; color:var(--muted); display:block; margin-top:8px;">Email (optional — for account recovery later)</label>
+    <input id="setPinEmailInput" type="email" placeholder="Not required — most small shops skip this" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-top:4px; font-size:13px;">
   </div>
 </div>
 
@@ -1000,6 +1050,28 @@
       <button class="modal-cancel" id="saExitBtn" style="padding:7px 14px; font-size:12px;">Exit</button>
     </div>
     <p class="hint" id="saCurrentShopLine" style="margin:0 0 16px;">—</p>
+
+    <div class="panel">
+      <h3>All shops on this platform</h3>
+      <p class="hint">Every shop ever set up, regardless of which device you're using right now — this is genuinely platform-wide, not scoped to this device.</p>
+      <div class="stat-card" style="margin-bottom:12px;"><div class="slabel">Total shops</div><div class="sval" id="saShopCount">—</div></div>
+      <div id="saShopsList" style="max-height:280px; overflow-y:auto;">Loading…</div>
+      <button class="modal-cancel" id="saRefreshShopsBtn" style="margin-top:10px;">Refresh list</button>
+    </div>
+
+    <div class="panel">
+      <h3>Business types — available to every shop</h3>
+      <p class="hint">Types you add here show up automatically for every shop on the platform, the same way Duka or Fuel Station already do — not just the one shop currently loaded on this device.</p>
+      <div id="saBizTypesList" style="margin-bottom:14px;">—</div>
+      <div class="form-row">
+        <div><label>Label</label><input id="saBizLabel" placeholder="e.g. Barbershop"></div>
+        <div><label>Emoji</label><input id="saBizEmoji" placeholder="e.g. 💈" maxlength="4"></div>
+      </div>
+      <label>Categories (comma-separated)</label>
+      <input id="saBizCats" placeholder="e.g. Haircuts, Grooming, Products, Other" style="margin-bottom:10px;">
+      <button class="primary-btn" id="saAddBizTypeBtn" style="width:100%;">Add business type for every shop</button>
+    </div>
+
     <div id="superAdminPanelBody"></div>
   </div>
 </div>
@@ -1059,6 +1131,26 @@
 <!-- M-Pesa payment — two paths, cashier's choice: enter a code manually (works right now,
      always), or send a real STK push prompt (wired to the actual Daraja sandbox backend —
      clearly labeled as test mode until real production credentials are in place). -->
+<div class="modal-overlay" id="creditSaleModal">
+  <div class="modal-box" style="width:min(90vw,360px); text-align:left;">
+    <h3>Record credit sale</h3>
+    <p class="hint" id="creditSaleDue" style="margin:0 0 12px;">Amount due: KSh 0</p>
+    <label>Customer name</label>
+    <input id="csCustomerName" placeholder="e.g. Mama Achieng" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Phone (optional)</label>
+    <input id="csCustomerPhone" placeholder="07XX XXX XXX" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Date agreed for payment</label>
+    <input id="csDueDate" type="date" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 4px;">
+    <p id="csExistingNotice" style="display:none; font-size:11px; color:var(--marigold-dark); margin:0 0 10px;"></p>
+    <label>Notes (optional)</label>
+    <input id="csNotes" placeholder="Anything worth noting" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 12px;">
+    <div class="modal-actions">
+      <button class="modal-cancel" id="csCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="csConfirmBtn">Confirm credit sale</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="mpesaModal">
   <div class="modal-box" style="width:min(88vw,320px);">
     <h3>M-Pesa payment</h3>
@@ -1388,7 +1480,9 @@ const BUILTIN_BUSINESS_TYPES = {
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
-function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
+let PLATFORM_BUSINESS_TYPES = {}; // loaded fresh from the platform-wide table at boot —
+// business types the Super Admin has defined for every shop, not just one
+function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...PLATFORM_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
 // Larger, higher-stock-risk businesses get a recurring stock take reminder every 3 days —
 // small dukas/fuel/carwash/gas/water don't carry enough SKUs for this to be worth enforcing.
 const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet'];
@@ -1431,7 +1525,7 @@ const $ = id => document.getElementById(id);
 // ---------- IndexedDB ----------
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('soko_pos_db_v1', 7);
+    const req = indexedDB.open('soko_pos_db_v1', 8);
     req.onupgradeneeded = e=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains('products')) d.createObjectStore('products',{keyPath:'sku'});
@@ -1446,6 +1540,7 @@ function openDB(){
       if(!d.objectStoreNames.contains('refunds')) d.createObjectStore('refunds',{keyPath:'id'});
       if(!d.objectStoreNames.contains('payables')) d.createObjectStore('payables',{keyPath:'id'});
       if(!d.objectStoreNames.contains('customer_debts')) d.createObjectStore('customer_debts',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('removal_requests')) d.createObjectStore('removal_requests',{keyPath:'id'});
     };
     req.onsuccess = e=>resolve(e.target.result);
     req.onerror = e=>reject(e);
@@ -1689,7 +1784,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const btn = e.target.closest('button[data-method]'); if(!btn) return;
     payMethod = btn.dataset.method;
     $('payMethodRow').querySelectorAll('button').forEach(b=>b.classList.toggle('active', b===btn));
-    $('checkoutBtn').textContent = payMethod==='cash' ? 'PAY' : 'PAY · M-PESA';
+    $('checkoutBtn').textContent = payMethod==='cash' ? 'PAY' : (payMethod==='credit' ? 'PAY · CREDIT' : 'PAY · M-PESA');
   });
 });
 
@@ -1708,6 +1803,8 @@ async function checkout(){
   const netSubtotal = grandTotal - tax;
   if(payMethod === 'mpesa'){
     openMpesaModal(netSubtotal, tax, grandTotal);
+  } else if(payMethod === 'credit'){
+    openCreditSaleModal(netSubtotal, tax, grandTotal);
   } else {
     openTenderModal(netSubtotal, tax, grandTotal);
   }
@@ -1862,6 +1959,8 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
       : `No shop is set up on this device yet — settings below apply once one is.`;
     $('superAdminView').style.display = 'flex';
     toast('Verified — welcome, '+superAdminName);
+    loadAllShopsList();
+    renderPlatformBizTypesList();
   }catch(e){
     $('saLoginError').textContent = 'Could not reach the platform admin service — check your connection';
   }
@@ -1873,6 +1972,92 @@ $('saExitBtn').addEventListener('click', ()=>{
 document.addEventListener('keydown', e=>{
   if(!$('superAdminModal').classList.contains('show')) return;
   if(e.key==='Enter') $('saVerifyBtn').click();
+});
+
+// ---------- Super Admin: genuinely platform-wide views ----------
+async function loadAllShopsList(){
+  const box = $('saShopsList');
+  box.innerHTML = 'Loading…';
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?select=*&order=created_at.desc`, {headers: mpesaFunctionHeaders()});
+    if(!res.ok){ box.innerHTML = '<p class="hint">Could not load — check the connection.</p>'; return; }
+    const shops = await res.json();
+    $('saShopCount').textContent = shops.length;
+    if(shops.length===0){ box.innerHTML = '<p class="hint">No shops registered yet.</p>'; return; }
+    box.innerHTML = '';
+    shops.forEach(s=>{
+      const isActive = s.active !== false;
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:9px 0; border-bottom:1px solid var(--line); font-size:12.5px;';
+      const created = s.created_at ? new Date(s.created_at).toLocaleDateString('en-KE') : '—';
+      row.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
+          <div>
+            <b>${s.name || 'Unnamed shop'}</b> ${isActive ? '' : '<span style="color:var(--clay); font-weight:700; font-size:10.5px;">· DEACTIVATED</span>'}<br>
+            <span style="color:var(--muted); font-family:var(--mono); font-size:10.5px;">${s.id}</span><br>
+            <span style="color:var(--muted);">Set up ${created}</span>
+          </div>
+          <button class="${isActive ? 'modal-cancel' : 'primary-btn'}" data-toggle-shop="${s.id}" data-currently-active="${isActive}" style="font-size:11px; padding:6px 10px; flex:none;">${isActive ? 'Deactivate' : 'Reactivate'}</button>
+        </div>
+      `;
+      box.appendChild(row);
+    });
+    box.querySelectorAll('button[data-toggle-shop]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const targetShopId = btn.dataset.toggleShop;
+        const currentlyActive = btn.dataset.currentlyActive === 'true';
+        const shopName = btn.closest('div').querySelector('b').textContent.replace('· DEACTIVATED','').trim();
+        const verb = currentlyActive ? 'deactivate' : 'reactivate';
+        if(!confirm(`${verb.charAt(0).toUpperCase()+verb.slice(1)} "${shopName}"? ${currentlyActive ? 'Its admin and staff will be signed out and blocked from signing back in until reactivated. Their data stays intact.' : 'This shop will be able to sign in and sync again.'}`)) return;
+        try{
+          const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+            method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive}),
+          });
+          if(!res.ok){ toast('Could not update — check the connection'); return; }
+          logAudit(`Shop ${currentlyActive ? 'deactivated' : 'reactivated'} by Platform Administrator`, `${shopName} (${targetShopId})`);
+          toast(`${shopName} ${currentlyActive ? 'deactivated' : 'reactivated'}`);
+          loadAllShopsList();
+        }catch(e){
+          toast('Could not update — check the connection');
+        }
+      });
+    });
+  }catch(e){
+    box.innerHTML = '<p class="hint">Could not load — check the connection.</p>';
+  }
+}
+$('saRefreshShopsBtn').addEventListener('click', loadAllShopsList);
+
+function renderPlatformBizTypesList(){
+  const box = $('saBizTypesList');
+  const types = Object.values(PLATFORM_BUSINESS_TYPES);
+  if(types.length===0){ box.innerHTML = '<p class="hint">None added yet — every shop currently sees only the built-in types.</p>'; return; }
+  box.innerHTML = types.map(t=>`<span style="display:inline-block; background:var(--bg); border-radius:999px; padding:5px 12px; margin:0 6px 6px 0; font-size:12px;">${t.emoji||''} ${t.label}</span>`).join('');
+}
+$('saAddBizTypeBtn').addEventListener('click', async ()=>{
+  const label = $('saBizLabel').value.trim();
+  const emoji = $('saBizEmoji').value.trim() || '🏪';
+  const catsRaw = $('saBizCats').value.trim();
+  if(!label){ toast('Enter a label for the new business type'); return; }
+  if(!catsRaw){ toast('Enter at least one category'); return; }
+  const cats = catsRaw.split(',').map(c=>c.trim()).filter(Boolean);
+  cats.push('Other');
+  const colors = {};
+  cats.forEach((c,i)=> colors[c] = BIZ_COLOR_PALETTE[i % BIZ_COLOR_PALETTE.length]);
+  const id = label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') + '-' + Date.now().toString().slice(-4);
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types`, {
+      method:'POST', headers: mpesaFunctionHeaders(),
+      body: JSON.stringify({id, label, emoji, description:label, cats, colors, created_by: superAdminName}),
+    });
+    if(!res.ok){ toast('Could not save — check the connection'); return; }
+    PLATFORM_BUSINESS_TYPES[id] = {label, emoji, desc:label, cats, colors, subtitle:label, unitLabel:'stock', starter:[]}; // local shape unchanged — this is a client-side field name, unrelated to the SQL column
+    renderPlatformBizTypesList();
+    $('saBizLabel').value=''; $('saBizEmoji').value=''; $('saBizCats').value='';
+    toast(label+' is now available to every shop on the platform');
+  }catch(e){
+    toast('Could not save — check the connection');
+  }
 });
 
 function mpesaFunctionHeaders(){
@@ -2082,6 +2267,77 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
   cart=[]; renderCart(); renderProductGrid(); updatePendingBadge();
   showSaleComplete(sale);
 }
+
+// ---------- Credit sale — tied to a real cart, real stock, real cost data ----------
+// Deliberately does NOT create a `sales` record — reuses the exact mechanism already built
+// for the standalone Customer Credit ledger: a debt only counts toward Revenue and Profit
+// the day it's actually paid, via renderReports()'s existing debtsCollectedMargin logic.
+// This just makes sure that debt starts life with REAL line-item cost data and real stock
+// deduction, instead of a single guessed "cost" figure from a manual form.
+let creditSalePending = null;
+async function openCreditSaleModal(subtotal, tax, total){
+  creditSalePending = {subtotal, tax, total};
+  $('creditSaleDue').textContent = 'Amount due: ' + fmtKsh(total);
+  $('csCustomerName').value = ''; $('csCustomerPhone').value = ''; $('csNotes').value = '';
+  $('csExistingNotice').style.display = 'none';
+  $('csDueDate').value = addDaysIso(todayIso(), 7); // a sensible default, always editable
+  $('creditSaleModal').classList.add('show');
+  $('csCustomerName').focus();
+}
+$('csCancelBtn').addEventListener('click', ()=>{ $('creditSaleModal').classList.remove('show'); creditSalePending = null; });
+$('csCustomerName').addEventListener('blur', async ()=>{
+  const name = $('csCustomerName').value.trim();
+  if(!name) return;
+  const existing = (await getAll('customer_debts')).filter(d=>d.status!=='paid' && d.customerName && d.customerName.toLowerCase()===name.toLowerCase());
+  if(existing.length){
+    const totalOwed = existing.reduce((s,d)=>s+d.amount,0);
+    $('csExistingNotice').textContent = `${name} already owes ${fmtKsh(totalOwed)} from earlier — this will be recorded as an additional, separate credit, with its own due date.`;
+    $('csExistingNotice').style.display = 'block';
+  } else {
+    $('csExistingNotice').style.display = 'none';
+  }
+});
+$('csConfirmBtn').addEventListener('click', async ()=>{
+  if(!creditSalePending) return;
+  const customerName = $('csCustomerName').value.trim();
+  const customerPhone = $('csCustomerPhone').value.trim();
+  const dueDate = $('csDueDate').value;
+  const notes = $('csNotes').value.trim();
+  if(!customerName){ toast('Enter the customer\'s name'); return; }
+  if(!dueDate){ toast('Pick the date agreed for payment'); return; }
+  const products = await getAll('products');
+  for(const item of cart){
+    const p = products.find(x=>x.sku===item.sku);
+    if(!p || (p.stock!==null && p.stock!==undefined && p.stock<item.qty)){
+      toast(`Stock changed for ${item.name} — recheck the cart before confirming`);
+      return;
+    }
+  }
+  const lineItems = [];
+  for(const item of cart){
+    const p = products.find(x=>x.sku===item.sku);
+    if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
+    lineItems.push({sku:item.sku, name:item.name, qty:item.qty, price:item.price, cost:(p.cost||0)});
+    await put('products', p);
+    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+  }
+  const totalCost = lineItems.reduce((s,l)=>s+(l.qty*l.cost),0);
+  const {total} = creditSalePending;
+  const debt = {
+    id: 'debt_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    customerName, customerPhone, amount: total, dateGiven: todayIso(), dueDate,
+    notes, status:'owing', cost: totalCost, lineItems,
+    addedBy: currentUser ? currentUser.name : 'Unknown', paidDate: null,
+  };
+  await put('customer_debts', debt);
+  await queuePush('debt_upsert', debt);
+  const itemSummary = lineItems.map(l=>`${l.qty}× ${l.name}`).join(', ');
+  logAudit('Credit sale recorded', `${customerName} — ${fmtKsh(total)} — due ${dueDate} — ${itemSummary}`);
+  cart=[]; renderCart(); renderProductGrid(); updatePendingBadge();
+  $('creditSaleModal').classList.remove('show');
+  creditSalePending = null;
+  toast(`Recorded on credit — due ${dueDate}`);
+});
 
 // ---------- Stock feed ----------
 function resolveTypeForCategory(cat){
@@ -2400,11 +2656,12 @@ async function renderPayablesLists(){
 // financial action the way marking a supplier invoice paid is.
 function prefillDebtDate(){
   if(!$('debtDate').value) $('debtDate').value = todayIso();
+  if(!$('debtDueDate').value) $('debtDueDate').value = addDaysIso(todayIso(), 7);
 }
-async function saveDebt({customerName, customerPhone, amount, dateGiven, notes, cost}){
+async function saveDebt({customerName, customerPhone, amount, dateGiven, notes, cost, dueDate}){
   const debt = {
     id: 'debt_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
-    customerName, customerPhone, amount, dateGiven, notes, status:'owing',
+    customerName, customerPhone, amount, dateGiven, notes, status:'owing', dueDate: dueDate || null,
     cost: (cost!==undefined && cost!==null && !isNaN(cost)) ? cost : null,
     addedBy: currentUser ? currentUser.name : 'Unknown', paidDate: null,
   };
@@ -2418,14 +2675,15 @@ $('addDebtBtn').addEventListener('click', async ()=>{
   const customerPhone = $('debtCustomerPhone').value.trim();
   const amount = parseFloat($('debtAmount').value);
   const dateGiven = $('debtDate').value || todayIso();
+  const dueDate = $('debtDueDate').value || null;
   const notes = $('debtNotes').value.trim();
   const costRaw = $('debtCost').value.trim();
   const cost = costRaw ? parseFloat(costRaw) : null;
   if(!customerName){ toast('Enter the customer\'s name'); return; }
   if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
-  await saveDebt({customerName, customerPhone, amount, dateGiven, notes, cost});
+  await saveDebt({customerName, customerPhone, amount, dateGiven, notes, cost, dueDate});
   toast('Credit recorded');
-  $('debtCustomerName').value=''; $('debtCustomerPhone').value=''; $('debtAmount').value=''; $('debtNotes').value=''; $('debtDate').value=''; $('debtCost').value='';
+  $('debtCustomerName').value=''; $('debtCustomerPhone').value=''; $('debtAmount').value=''; $('debtNotes').value=''; $('debtDate').value=''; $('debtCost').value=''; $('debtDueDate').value='';
   prefillDebtDate();
   renderDebtsLists();
 });
@@ -2434,7 +2692,9 @@ async function renderDebtsLists(){
   const owing = all.filter(d=>d.status!=='paid').sort((a,b)=>new Date(a.dateGiven)-new Date(b.dateGiven));
   const paid = all.filter(d=>d.status==='paid').sort((a,b)=>new Date(b.paidDate||0)-new Date(a.paidDate||0));
   const totalOwed = owing.reduce((s,d)=>s+d.amount,0);
+  const overdueTotal = owing.filter(d=>d.dueDate && d.dueDate < todayIso()).reduce((s,d)=>s+d.amount,0);
   $('debtsOutstandingTotal').textContent = fmtKsh(totalOwed);
+  if($('debtsOverdueTotal')) $('debtsOverdueTotal').textContent = fmtKsh(overdueTotal);
 
   const owingBox = $('debtsUnpaidList'); owingBox.innerHTML='';
   if(owing.length===0){
@@ -2442,14 +2702,18 @@ async function renderDebtsLists(){
   }
   owing.forEach(d=>{
     const daysOwing = Math.floor((new Date(todayIso()) - new Date(d.dateGiven)) / 86400000);
+    const isOverdue = d.dueDate && d.dueDate < todayIso();
+    const dueLine = d.dueDate
+      ? `<span style="font-size:11.5px; font-weight:600; color:${isOverdue ? 'var(--clay)' : 'var(--muted)'};">${isOverdue ? 'OVERDUE — was due' : 'Due'} ${d.dueDate}</span>`
+      : '';
     const row = document.createElement('div');
-    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;';
+    row.style.cssText = `border:1px solid ${isOverdue ? 'var(--clay)' : 'var(--line)'}; border-radius:9px; padding:12px 14px; margin-bottom:8px;`;
     row.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:start; gap:10px;">
         <div>
           <b>${d.customerName}</b> ${d.customerPhone ? `<span style="font-size:11px; color:var(--muted);">· ${d.customerPhone}</span>` : ''}<br>
           <span style="font-size:12px; color:var(--muted);">${d.notes || 'No notes'}</span><br>
-          <span style="font-size:11.5px; color:var(--muted);">Given ${d.dateGiven} (${daysOwing} day(s) ago)</span>
+          <span style="font-size:11.5px; color:var(--muted);">Given ${d.dateGiven} (${daysOwing} day(s) ago)</span>${dueLine ? '<br>'+dueLine : ''}
         </div>
         <div style="font-weight:800; font-family:var(--mono);">${fmtKsh(d.amount)}</div>
       </div>
@@ -2597,6 +2861,7 @@ async function renderReports(){
   const payablesOutstanding = allPayables.filter(p=>p.status!=='paid').reduce((s,p)=>s+p.amount,0);
   const payablesPaidThisPeriod = allPayables.filter(p=>p.status==='paid' && p.paidDate && withinPeriod(p.paidDate+'T12:00:00', reportPeriod)).reduce((s,p)=>s+p.amount,0);
   const debtsOutstanding = allDebts.filter(d=>d.status!=='paid').reduce((s,d)=>s+d.amount,0);
+  const debtsOverdue = allDebts.filter(d=>d.status!=='paid' && d.dueDate && d.dueDate < todayIso()).reduce((s,d)=>s+d.amount,0);
   const debtsPaidRecords = allDebts.filter(d=>d.status==='paid' && d.paidDate && withinPeriod(d.paidDate+'T12:00:00', reportPeriod));
   const debtsPaidThisPeriod = debtsPaidRecords.reduce((s,d)=>s+d.amount,0);
   // A cleared customer credit is cash-basis income the moment it's actually collected — not
@@ -2623,6 +2888,7 @@ async function renderReports(){
   $('statPayablesPaidLabel').textContent = 'Paid to suppliers — ' + periodLabel.toLowerCase();
   $('statPayablesPaid').textContent = fmtKsh(payablesPaidThisPeriod);
   $('statDebtsOutstanding').textContent = fmtKsh(debtsOutstanding);
+  $('statDebtsOverdue').textContent = fmtKsh(debtsOverdue);
   $('statDebtsPaidLabel').textContent = 'Collected from customers — ' + periodLabel.toLowerCase();
   $('statDebtsPaid').textContent = fmtKsh(debtsPaidThisPeriod);
 
@@ -3018,8 +3284,17 @@ async function pushToSupabase(item){
     body = {
       id:p.id, shop_id:shopId, customer_name:p.customerName, customer_phone:p.customerPhone,
       amount:p.amount, date_given:p.dateGiven, notes:p.notes, status:p.status, cost:p.cost,
-      paid_date:p.paidDate, added_by:p.addedBy,
+      paid_date:p.paidDate, added_by:p.addedBy, due_date:p.dueDate, line_items:p.lineItems,
       updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
+  else if(item.type==='removal_upsert'){
+    table='cart_removal_requests'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, kind:p.kind, item_info:p.itemInfo, reason:p.reason,
+      requested_by:p.requestedBy, requested_at:p.requestedAt, status:p.status,
+      reviewed_by:p.reviewedBy, reviewed_at:p.reviewedAt, review_note:p.reviewNote,
     };
   }
   else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
@@ -3163,7 +3438,7 @@ async function pullShopData(fullPull, force){
       for(const rs of remoteStaff){
         const ls = localStaff.find(u=>u.id===rs.id);
         if(force || !ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
-          await put('users', {id:rs.id, name:rs.name, role:rs.role, pin:rs.pin, active:rs.active!==false, updated_at:rs.updated_at});
+          await put('users', {id:rs.id, name:rs.name, role:rs.role, pin:rs.pin, active:rs.active!==false, email:rs.email, updated_at:rs.updated_at});
         }
       }
     }
@@ -3197,6 +3472,8 @@ async function pullShopData(fullPull, force){
       // backend, so pushing it back is redundant, and doing so was the other half of this bug.
       await loadBusinessProfile();
       await loadSettingsPanelValues();
+      await loadBranding(); // same reasoning as business type/VAT above — a pulled logo/color
+                             // change needs to actually repaint this device, not just save quietly
       if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
     }
     // Sales from OTHER devices — so the admin can see a cashier's phone sales too
@@ -3239,7 +3516,23 @@ async function pullShopData(fullPull, force){
       for(const rd of remoteDebts){
         const ld = localDebts.find(d=>d.id===rd.id);
         if(!ld || !ld.updated_at || new Date(rd.updated_at) > new Date(ld.updated_at)){
-          await put('customer_debts', {id:rd.id, customerName:rd.customer_name, customerPhone:rd.customer_phone, amount:rd.amount, dateGiven:rd.date_given, notes:rd.notes, status:rd.status, cost:rd.cost, paidDate:rd.paid_date, addedBy:rd.added_by, updated_at:rd.updated_at});
+          await put('customer_debts', {id:rd.id, customerName:rd.customer_name, customerPhone:rd.customer_phone, amount:rd.amount, dateGiven:rd.date_given, notes:rd.notes, status:rd.status, cost:rd.cost, paidDate:rd.paid_date, addedBy:rd.added_by, dueDate:rd.due_date, lineItems:rd.line_items, updated_at:rd.updated_at});
+        }
+      }
+    }
+    // Cashier removal requests awaiting review — same merge reasoning, keyed off whichever
+    // of requested/reviewed happened most recently, since a review is what updates a record
+    // after it's created.
+    const rmvRes = await fetch(`${supaUrl}/rest/v1/cart_removal_requests?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(rmvRes.ok){
+      const remoteRmv = await rmvRes.json();
+      const localRmv = await getAll('removal_requests');
+      for(const rr of remoteRmv){
+        const lr = localRmv.find(r=>r.id===rr.id);
+        const remoteChanged = rr.reviewed_at || rr.requested_at;
+        const localChanged = lr ? (lr.reviewedAt || lr.requestedAt) : null;
+        if(!lr || !localChanged || new Date(remoteChanged) > new Date(localChanged)){
+          await put('removal_requests', {id:rr.id, kind:rr.kind, itemInfo:rr.item_info, reason:rr.reason, requestedBy:rr.requested_by, requestedAt:rr.requested_at, status:rr.status, reviewedBy:rr.reviewed_by, reviewedAt:rr.reviewed_at, reviewNote:rr.review_note});
         }
       }
     }
@@ -3290,11 +3583,16 @@ async function verifyRealConnectivity(){
 setInterval(verifyRealConnectivity, 15000);
 
 // ---------- VAT & receipt settings ----------
+let creditSalesEnabled = false;
 async function loadSettingsPanelValues(){
   const vat = await getSetting('vat');
   if(vat){ vatEnabled = vat.value.enabled; vatRate = vat.value.rate; }
   $('vatToggleBtn').textContent = vatEnabled ? 'Turn off' : 'Turn on';
   $('vatRateInput').value = vatRate;
+  const credit = await getSetting('credit_sales_enabled');
+  creditSalesEnabled = credit ? !!credit.value : false;
+  $('creditToggleBtn').textContent = creditSalesEnabled ? 'Turn off' : 'Turn on';
+  applyCreditPaymentButtonVisibility();
   const receipt = await getSetting('receipt');
   if(receipt){ receiptAction = receipt.value.action; receiptPaperWidth = receipt.value.paper; }
   $('receiptActionSelect').value = receiptAction;
@@ -3328,6 +3626,19 @@ $('vatToggleBtn').addEventListener('click', async ()=>{
   $('vatToggleBtn').textContent = vatEnabled ? 'Turn off' : 'Turn on';
   await saveVatSettings(true); // applies and saves immediately — no separate step to forget
 });
+$('creditToggleBtn').addEventListener('click', async ()=>{
+  creditSalesEnabled = !creditSalesEnabled;
+  $('creditToggleBtn').textContent = creditSalesEnabled ? 'Turn off' : 'Turn on';
+  await put('settings', {key:'credit_sales_enabled', value: creditSalesEnabled});
+  await queuePush('settings_upsert', {key:'credit_sales_enabled', value: creditSalesEnabled});
+  applyCreditPaymentButtonVisibility();
+  logAudit('Updated credit sales setting', creditSalesEnabled ? 'Enabled' : 'Disabled');
+  toast(creditSalesEnabled ? 'Credit sales enabled at the till' : 'Credit sales disabled at the till');
+});
+function applyCreditPaymentButtonVisibility(){
+  const btn = $('payMethodCreditBtn');
+  if(btn) btn.style.display = creditSalesEnabled ? 'inline-block' : 'none';
+}
 $('saveVatBtn').addEventListener('click', ()=> saveVatSettings(true));
 $('saveReceiptBtn').addEventListener('click', async ()=>{
   receiptAction = $('receiptActionSelect').value;
@@ -3642,6 +3953,25 @@ async function loadCustomBusinessTypes(){
   CUSTOM_BUSINESS_TYPES = {};
   (setting ? setting.value : []).forEach(t => CUSTOM_BUSINESS_TYPES[t.id] = t);
 }
+// Pulled fresh at every boot, for every shop — this is what makes a type the Super Admin
+// adds show up automatically for every shop on the platform, not just the one it was added
+// from. Uses PLATFORM_SUPABASE_URL directly (not the possibly-overridden supaUrl) since this
+// is platform-wide data, not any one shop's own connection.
+async function loadPlatformBusinessTypes(){
+  PLATFORM_BUSINESS_TYPES = {};
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types?select=*`, {headers: mpesaFunctionHeaders()});
+    if(res.ok){
+      const rows = await res.json();
+      rows.forEach(r => {
+        PLATFORM_BUSINESS_TYPES[r.id] = {
+          label:r.label, emoji:r.emoji, desc:r.description, cats:r.cats, colors:r.colors,
+          subtitle:r.label, unitLabel:'stock', starter:[],
+        };
+      });
+    }
+  }catch(e){ /* offline or unreachable — shop still works fine with built-in + its own custom types */ }
+}
 async function saveCustomBusinessTypes(){
   await put('settings', {key:'custom_business_types', value: Object.values(CUSTOM_BUSINESS_TYPES)});
 }
@@ -3701,6 +4031,78 @@ $('saveProfileBtn').addEventListener('click', async ()=>{
   logAudit('Updated business profile', `${storeName}${businessProfile.location?' — '+businessProfile.location:''}`);
   $('profileStatus').textContent = 'Saved.';
   toast('Business profile saved'+(shopId ? ' — every counter at this shop will pick it up' : ''));
+});
+
+// ---------- Branding — shop admin's own logo and background tint ----------
+// Deliberately a curated palette, not a free color picker — an admin picking a color that
+// makes text unreadable is a real support burden avoided entirely by only offering options
+// already checked for contrast. Applies to light mode only; dark mode keeps its own tuned
+// values regardless, to avoid an untested light-tint/dark-mode combination.
+const BRAND_COLOR_PRESETS = [
+  {id:'marigold', name:'Marigold (default)', bg:'#f3ebda', glow:'#faf4e6', swatch:'#e2a034'},
+  {id:'sage',     name:'Sage',               bg:'#eef0e0', glow:'#f5f7ec', swatch:'#7a9c6f'},
+  {id:'sky',      name:'Sky',                bg:'#e8eef0', glow:'#f2f6f7', swatch:'#5f92a3'},
+  {id:'clay',     name:'Clay',               bg:'#f5e9e3', glow:'#faf1ed', swatch:'#c17a5c'},
+  {id:'slate',    name:'Slate',              bg:'#e9ebee', glow:'#f3f5f7', swatch:'#7d8a9a'},
+  {id:'cream',    name:'Cream',              bg:'#f7f2e8', glow:'#fcf9f2', swatch:'#d8c9a3'},
+];
+let selectedBrandColor = 'marigold';
+let brandLogoData = null;
+function renderBrandSwatches(){
+  const box = $('brandColorSwatches');
+  box.innerHTML = '';
+  BRAND_COLOR_PRESETS.forEach(preset=>{
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.title = preset.name;
+    const selected = selectedBrandColor === preset.id;
+    sw.style.cssText = `width:36px; height:36px; border-radius:50%; background:${preset.swatch}; border:3px solid ${selected ? 'var(--teal-dark)' : 'transparent'}; cursor:pointer; box-shadow:0 0 0 1px var(--line);`;
+    sw.addEventListener('click', ()=>{ selectedBrandColor = preset.id; renderBrandSwatches(); });
+    box.appendChild(sw);
+  });
+}
+function applyBrandColor(colorId){
+  const preset = BRAND_COLOR_PRESETS.find(p=>p.id===colorId) || BRAND_COLOR_PRESETS[0];
+  if(document.documentElement.getAttribute('data-theme') !== 'dark'){
+    document.documentElement.style.setProperty('--bg', preset.bg);
+    document.documentElement.style.setProperty('--bg-glow', preset.glow);
+  }
+}
+function applyBrandLogo(dataUrl){
+  const svgFallback = '<svg viewBox="0 0 24 24" fill="none" width="28" height="28"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg>';
+  const html = dataUrl ? `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:cover;">` : svgFallback;
+  ['headerMark','mainLoginMark'].forEach(id=>{ const el=$(id); if(el) el.innerHTML = html; });
+  const preview = $('brandLogoPreview'); if(preview) preview.innerHTML = dataUrl ? `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:cover;">` : svgFallback;
+}
+async function loadBranding(){
+  const saved = await getSetting('branding');
+  const brand = saved ? saved.value : {};
+  selectedBrandColor = brand.color || 'marigold';
+  brandLogoData = brand.logo || null;
+  applyBrandColor(selectedBrandColor);
+  applyBrandLogo(brandLogoData);
+  renderBrandSwatches();
+}
+$('brandLogoInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  brandLogoData = await compressImageToDataUrl(file, 300, 0.8); // small — this is an icon, not a photo
+  applyBrandLogo(brandLogoData);
+});
+$('removeBrandLogoBtn').addEventListener('click', ()=>{
+  brandLogoData = null;
+  applyBrandLogo(null);
+  toast('Logo removed — click "Save branding" to make this permanent');
+});
+$('saveBrandBtn').addEventListener('click', async ()=>{
+  const branding = {color: selectedBrandColor, logo: brandLogoData};
+  await put('settings', {key:'branding', value:branding});
+  await queuePush('settings_upsert', {key:'branding', value:branding});
+  applyBrandColor(selectedBrandColor);
+  applyBrandLogo(brandLogoData);
+  logAudit('Updated shop branding', `color: ${selectedBrandColor}, logo: ${brandLogoData ? 'set' : 'default'}`);
+  $('brandStatus').textContent = 'Saved — every device signed into this shop will pick it up.';
+  toast('Branding saved');
 });
 
 async function updateDeviceDiagnostics(){
@@ -3966,15 +4368,16 @@ $('addStaffBtn').addEventListener('click', async ()=>{
   const name = $('newStaffName').value.trim();
   const role = $('newStaffRole').value;
   const pin = $('newStaffPin').value.trim();
+  const email = $('newStaffEmail').value.trim();
   const requiredLen = role==='admin' ? 6 : 4;
   if(!name){ toast('Enter a name'); return; }
   if(!new RegExp(`^\\d{${requiredLen}}$`).test(pin)){ toast(`Enter a ${requiredLen}-digit PIN${role==='admin'?' (admin accounts need 6 digits)':''}`); return; }
   const uniqueCheck = await isPinGloballyUnique(pin, null);
   if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
-  const newUser = {id:'u_'+Date.now(), name, role, pin, active:true};
+  const newUser = {id:'u_'+Date.now(), name, role, pin, active:true, email: email || null};
   await put('users', newUser);
   await queuePush('staff_upsert', newUser);
-  $('newStaffName').value=''; $('newStaffPin').value='';
+  $('newStaffName').value=''; $('newStaffPin').value=''; $('newStaffEmail').value='';
   renderStaffTable();
   toast(name+' added as '+role+' — they can sign in with this PIN on their own phone, anywhere');
   logAudit('Added staff account', `${name} (${role})`);
@@ -4052,7 +4455,7 @@ function requestCartRemoval(kind, itemInfo, doIt){
   const contextLabel = kind==='clear_cart'
     ? `Clearing the whole cart — ${itemInfo.count} item(s), ${fmtKsh(itemInfo.total)}`
     : `Removing ${itemInfo.qty}× ${itemInfo.name} (${fmtKsh(itemInfo.qty*itemInfo.price)})`;
-  openReasonModal(contextLabel, (reason)=>{
+  openReasonModal(contextLabel, async (reason)=>{
     const requester = currentUser ? currentUser.name : 'Unknown';
     if(currentUser && ROLE_RANK[currentUser.role] >= ROLE_RANK.supervisor){
       // Supervisor/admin already has the rights — no separate approval step, but it's still logged in full.
@@ -4060,12 +4463,83 @@ function requestCartRemoval(kind, itemInfo, doIt){
       logRemovalAudit(kind, itemInfo, reason, requester, null);
       return;
     }
-    openPinModal({
-      title:'Supervisor approval needed',
-      sub: kind==='clear_cart' ? 'Clearing the whole cart needs a supervisor or admin PIN.' : 'Removing an item needs a supervisor or admin PIN.',
-      mode:'approval',
-      onVerified: (approverName)=>{ doIt(); logRemovalAudit(kind, itemInfo, reason, requester, approverName); }
+    // A cashier's removal goes through differently — the sale keeps moving (this might be a
+    // genuine mistake, no reason to make a paying customer wait), but the removal itself is
+    // logged as a pending request for an admin or supervisor to review afterward, with the
+    // reason attached, before it's considered properly documented.
+    doIt();
+    const request = {
+      id: 'rmv_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+      kind, itemInfo, reason, requestedBy: requester,
+      requestedAt: new Date().toISOString(), status: 'pending',
+      reviewedBy: null, reviewedAt: null, reviewNote: null,
+    };
+    await put('removal_requests', request);
+    await queuePush('removal_upsert', request);
+    logRemovalAudit(kind, itemInfo, reason, requester, null);
+    logAudit('Removal pending review', `${requester} — awaiting an admin or supervisor to review`);
+    toast('Removed — sent for admin/supervisor review');
+  });
+}
+
+async function renderRemovalsList(){
+  const all = await getAll('removal_requests');
+  const pending = all.filter(r=>r.status==='pending').sort((a,b)=>new Date(b.requestedAt)-new Date(a.requestedAt));
+  const reviewed = all.filter(r=>r.status!=='pending').sort((a,b)=>new Date(b.reviewedAt||0)-new Date(a.reviewedAt||0));
+  $('removalsPendingCount').textContent = pending.length;
+
+  function describeRemoval(r){
+    return r.kind==='clear_cart'
+      ? `Cleared cart — ${r.itemInfo.count} item(s), ${fmtKsh(r.itemInfo.total)}`
+      : `Removed ${r.itemInfo.qty}× ${r.itemInfo.name} (${fmtKsh(r.itemInfo.qty*r.itemInfo.price)})`;
+  }
+
+  const pendingBox = $('removalsPendingList'); pendingBox.innerHTML = '';
+  if(pending.length===0){
+    pendingBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing waiting on review.</p>`;
+  }
+  pending.forEach(r=>{
+    const when = new Date(r.requestedAt).toLocaleString('en-KE',{hour12:false});
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;';
+    row.innerHTML = `
+      <b>${describeRemoval(r)}</b><br>
+      <span style="font-size:12px; color:var(--muted);">Reason given: "${r.reason}"</span><br>
+      <span style="font-size:11.5px; color:var(--muted);">${r.requestedBy} · ${when}</span>
+      <div class="modal-actions" style="margin-top:10px;">
+        <button class="modal-cancel" data-flag="${r.id}" style="font-size:11.5px;">Flag for follow-up</button>
+        <button class="primary-btn" data-clear="${r.id}" style="font-size:11.5px;">Clear — reason is fine</button>
+      </div>
+    `;
+    pendingBox.appendChild(row);
+  });
+  pendingBox.querySelectorAll('button[data-clear], button[data-flag]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.clear || btn.dataset.flag;
+      const isClear = !!btn.dataset.clear;
+      const r = pending.find(x=>x.id===id);
+      if(!r) return;
+      r.status = isClear ? 'cleared' : 'flagged';
+      r.reviewedBy = currentUser ? currentUser.name : 'Unknown';
+      r.reviewedAt = new Date().toISOString();
+      await put('removal_requests', r);
+      await queuePush('removal_upsert', r);
+      logAudit(isClear ? 'Removal cleared' : 'Removal flagged for follow-up', `${describeRemoval(r)} — requested by ${r.requestedBy}, reviewed by ${r.reviewedBy}`);
+      toast(isClear ? 'Cleared' : 'Flagged for follow-up');
+      renderRemovalsList();
     });
+  });
+
+  const reviewedBox = $('removalsReviewedList'); reviewedBox.innerHTML = '';
+  if(reviewed.length===0){
+    reviewedBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing reviewed yet.</p>`;
+  }
+  reviewed.slice(0,40).forEach(r=>{
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:8px 0; border-bottom:1px solid var(--line); font-size:12px;';
+    const statusColor = r.status==='cleared' ? 'var(--sage-dark)' : 'var(--clay)';
+    row.innerHTML = `<span>${describeRemoval(r)} <span style="color:var(--muted);">— ${r.requestedBy}, reviewed by ${r.reviewedBy}</span></span><br><span style="color:${statusColor}; font-weight:600; font-size:11px; text-transform:uppercase;">${r.status}</span>`;
+    reviewedBox.appendChild(row);
   });
 }
 
@@ -4083,6 +4557,7 @@ function switchBackofficeView(viewName){
   if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); }
   if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
   if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
+  if(viewName==='removals') renderRemovalsList();
   if(viewName==='reports') renderReports();
   if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
   if(viewName==='audit') renderAuditTable();
@@ -4266,7 +4741,8 @@ async function handleSetPinDigit(k){
     return;
   }
   $('setPinError').textContent = '';
-  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:setPinFirstEntry, active:true};
+  const adminEmail = $('setPinEmailInput').value.trim();
+  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:setPinFirstEntry, active:true, email: adminEmail || null};
   await put('users', adminUser);
   await queuePush('staff_upsert', adminUser);
   setPinBuffer=''; setPinFirstEntry='';
@@ -4326,7 +4802,30 @@ async function attemptLogin(){
 }
 // Shared by both the normal login path and the "just finished setting up a new Admin PIN"
 // path, so the two can never quietly drift apart and cause a bug in only one of them.
+// Checked at every path into an active session — a fresh sign-in, AND a restored one (see
+// tryRestoreSession below) — since a shop that's already signed in on a device would
+// otherwise bypass a deactivation entirely just by never re-entering their PIN. Returns
+// true/false when it can genuinely check, or null when it can't (offline) — offline-first
+// means we never block a sign-in over a check we simply couldn't make.
+async function isShopActive(){
+  if(!shopId) return true; // nothing to check yet — a device mid-setup isn't anyone's business to block
+  if(!isOnline || !backendLive()) return null;
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active`, {headers: mpesaFunctionHeaders()});
+    if(!res.ok) return null;
+    const rows = await res.json();
+    if(!rows.length) return null; // shop record not found remotely — don't block on ambiguity
+    return rows[0].active !== false;
+  }catch(e){ return null; }
+}
 async function completeSignIn(u, opts={}){
+  const active = await isShopActive();
+  if(active === false){
+    toast('This shop has been deactivated — contact your platform administrator');
+    logAudit('Sign-in blocked — shop deactivated', u.name);
+    showLoginScreen();
+    return;
+  }
   currentUser = u;
   $('loginScreen').classList.add('hide');
   $('setAdminPinScreen').classList.add('hide');
@@ -4570,6 +5069,13 @@ async function tryRestoreSession(){
   const users = await getAll('users');
   const u = users.find(x => x.id===uid && x.active!==false);
   if(!u) return false;
+  const active = await isShopActive();
+  if(active === false){
+    try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+    logAudit('Session restore blocked — shop deactivated', u.name);
+    toast('This shop has been deactivated — contact your platform administrator');
+    return false; // falls through to showLoginScreen() in init()
+  }
   currentUser = u;
   $('cashierChip').textContent = `${u.name} · ${u.role}`;
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -4616,8 +5122,10 @@ $('themeToggleBtn').addEventListener('click', ()=>{
   await seedIfEmpty();
   await ensureTodaySnapshot();
   await loadCustomBusinessTypes();
+  await loadPlatformBusinessTypes();
   await loadSettingsPanelValues(); // VAT + receipt prefs, needed before the first sale can be rung up correctly
   await loadBusinessProfile();
+  await loadBranding();
   let savedTypes = await getSetting('active_business_types');
   if(!savedTypes){
     const legacy = await getSetting('business_type'); // migrate from the old single-type setting
