@@ -588,6 +588,8 @@
         <input id="newQty" type="number" placeholder="Qty received (blank = no change / service if new)" min="1">
         <input id="newCost" type="number" placeholder="Cost price (KSh, optional)" min="0">
         <input id="newPrice" type="number" placeholder="Sell price (KSh)" min="0">
+        <input id="newSupplier" placeholder="Supplier (optional)">
+        <input id="newReorderAt" type="number" placeholder="Reorder below (default 10)" min="0">
       </div>
       <p id="perPieceCostPreview" class="hint" style="margin:-4px 0 10px; display:none;"></p>
       <button class="primary-btn" id="addStockBtn">Add to stock</button>
@@ -597,6 +599,11 @@
       <h3>Inventory</h3>
       <div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th><th>SKU</th><th>Stock on hand</th><th>Cost</th><th>Price</th><th>Margin</th><th></th></tr></thead>
       <tbody id="stockTable"></tbody></table></div>
+    </div>
+    <div class="panel">
+      <h3>Reorder needed</h3>
+      <p class="hint">Anything below its reorder point, grouped by supplier. Products with no supplier set can't be turned into a PO until one is added above.</p>
+      <div id="reorderList"></div>
     </div>
   </section>
 
@@ -1525,7 +1532,7 @@ const $ = id => document.getElementById(id);
 // ---------- IndexedDB ----------
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('soko_pos_db_v1', 8);
+    const req = indexedDB.open('soko_pos_db_v1', 9);
     req.onupgradeneeded = e=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains('products')) d.createObjectStore('products',{keyPath:'sku'});
@@ -1541,6 +1548,7 @@ function openDB(){
       if(!d.objectStoreNames.contains('payables')) d.createObjectStore('payables',{keyPath:'id'});
       if(!d.objectStoreNames.contains('customer_debts')) d.createObjectStore('customer_debts',{keyPath:'id'});
       if(!d.objectStoreNames.contains('removal_requests')) d.createObjectStore('removal_requests',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('purchase_orders')) d.createObjectStore('purchase_orders',{keyPath:'id'});
     };
     req.onsuccess = e=>resolve(e.target.result);
     req.onerror = e=>reject(e);
@@ -2374,17 +2382,24 @@ async function addStock(){
   let p = products.find(x=>x.sku===sku);
   const isNew = !p;
   const cost = costRaw==='' ? (p ? p.cost : 0) : parseFloat(costRaw);
+  const supplierNameInput = $('newSupplier').value.trim();
+  const reorderAtRaw = $('newReorderAt').value.trim();
+  const reorderThresholdInput = reorderAtRaw==='' ? null : parseInt(reorderAtRaw, 10);
   if(p){
     // Editing an existing product: blank quantity means "don't touch the stock count" —
     // it must never silently convert a tracked item into an unlimited service item.
     if(qtyProvided) p.stock = (p.stock===null||p.stock===undefined?0:p.stock) + qty;
     p.price=price; p.name=name; p.cat=cat; p.cost=cost||0;
+    if(supplierNameInput) p.supplierName = supplierNameInput;
+    if(reorderThresholdInput!==null && !isNaN(reorderThresholdInput)) p.reorderThreshold = reorderThresholdInput;
   } else {
     // Brand-new product: blank quantity is the intentional way to mark it a service/unlimited item.
-    p={sku,name,price,stock:qty,cat,cost:cost||0,btype:resolveTypeForCategory(cat)};
+    p={sku,name,price,stock:qty,cat,cost:cost||0,btype:resolveTypeForCategory(cat),
+       supplierName: supplierNameInput || null,
+       reorderThreshold: (reorderThresholdInput!==null && !isNaN(reorderThresholdInput)) ? reorderThresholdInput : 10};
   }
   await put('products', p);
-  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10});
   // Log it as a purchase for the Reports "stock received" numbers — only when actual units came in
   if(qtyProvided && qty>0){
     const movement = {sku, name, qty, cost: cost||0, btype: resolveTypeForCategory(cat), ts:new Date().toISOString()};
@@ -2394,6 +2409,7 @@ async function addStock(){
   log(`Stock ${isNew?'added':'updated'}: ${name} (${sku})${qtyProvided?' +'+qty:''}. Queued for sync.`,'warn');
   logAudit(isNew ? 'Added new product' : 'Updated product', `${name} (${sku})`);
   $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
+  $('newSupplier').value=''; $('newReorderAt').value='';
   $('costModeSelect').value='piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
   editingSku = null;
   $('addStockBtn').textContent = 'Add to stock';
@@ -2413,6 +2429,8 @@ function editProduct(sku){
     $('newCat').value = p.cat;
     $('newCost').value = p.cost || '';
     $('newPrice').value = p.price;
+    $('newSupplier').value = p.supplierName || '';
+    $('newReorderAt').value = (p.reorderThreshold!==undefined && p.reorderThreshold!==null) ? p.reorderThreshold : '';
     $('newQty').value = ''; // blank = leave stock count untouched, per the fix above
     $('costModeSelect').value = 'piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
     $('addStockBtn').textContent = 'Save changes';
@@ -2475,6 +2493,113 @@ async function renderStockTable(){
       else if(b.dataset.act==='rename') renameProductSku(b.dataset.sku);
     });
   });
+}
+
+// ---------- Low-stock reorder + Purchase Orders ----------
+async function renderReorderPanel(){
+  const box = $('reorderList');
+  if(!box) return;
+  const products = (await getAll('products')).filter(p =>
+    currentBusinessTypes.includes(p.btype||'duka') &&
+    p.stock !== null && p.stock !== undefined &&
+    p.stock < (p.reorderThreshold || 10)
+  );
+  if(products.length===0){
+    box.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing below its reorder point right now.</p>`;
+    return;
+  }
+  const bySupplier = {};
+  const noSupplier = [];
+  products.forEach(p=>{
+    if(!p.supplierName){ noSupplier.push(p); return; }
+    (bySupplier[p.supplierName] = bySupplier[p.supplierName] || []).push(p);
+  });
+
+  let html = '';
+  Object.entries(bySupplier).forEach(([supplier, items])=>{
+    const rows = items.map(p=>`<div style="display:flex; justify-content:space-between; padding:4px 0; font-size:12.5px;">
+      <span>${p.name} — ${p.stock} left</span><span style="color:var(--muted);">order ${(p.reorderQty||20)}</span></div>`).join('');
+    html += `<div style="border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;">
+      <b>${supplier}</b> — ${items.length} item(s)
+      ${rows}
+      <button class="primary-btn" data-gen-po="${supplier}" style="width:100%; margin-top:10px; padding:8px;">Order Now — creates PO</button>
+    </div>`;
+  });
+  if(noSupplier.length){
+    const rows = noSupplier.map(p=>`<div style="font-size:12.5px; padding:3px 0;">${p.name} — ${p.stock} left</div>`).join('');
+    html += `<div style="border:1px dashed var(--clay); border-radius:9px; padding:12px 14px;">
+      <b style="color:var(--clay);">No supplier set — can't order yet</b>
+      ${rows}
+      <p class="hint" style="margin:8px 0 0;">Edit these in Stock and add a supplier name.</p>
+    </div>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('button[data-gen-po]').forEach(btn=>{
+    btn.addEventListener('click', ()=> generateAndPrintPO(btn.dataset.genPo));
+  });
+}
+
+async function generateAndPrintPO(supplierName){
+  const products = (await getAll('products')).filter(p =>
+    currentBusinessTypes.includes(p.btype||'duka') &&
+    p.supplierName === supplierName &&
+    p.stock !== null && p.stock !== undefined &&
+    p.stock < (p.reorderThreshold || 10)
+  );
+  if(products.length===0){ toast('Nothing to order for '+supplierName); return; }
+
+  let poNumber;
+  if(backendLive() && shopId){
+    try{
+      const res = await fetch(`${supaUrl}/rest/v1/rpc/next_po_number`, {
+        method:'POST', headers: sbHeaders(), body: JSON.stringify({p_shop_id: shopId})
+      });
+      poNumber = res.ok ? await res.json() : null;
+    }catch(e){ /* fall through to local fallback */ }
+  }
+  if(!poNumber) poNumber = 'PO-' + new Date().getFullYear() + '-' + Date.now().toString().slice(-5);
+
+  const items = products.map(p => ({sku:p.sku, name:p.name, qty:(p.reorderQty||20), cost:p.cost||0}));
+  const po = {
+    id: 'po_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    poNumber, supplierName, items, status:'draft',
+    createdBy: currentUser ? currentUser.name : 'Unknown',
+    createdAt: new Date().toISOString(),
+    invoiceNumber: null, invoicePhoto: null, receivedAt: null,
+  };
+  await put('purchase_orders', po);
+  await queuePush('po_upsert', po);
+  logAudit('Purchase order created', `${poNumber} — ${supplierName} — ${items.length} item(s)`);
+  toast(`${poNumber} created for ${supplierName}`);
+  printPurchaseOrder(po);
+  renderReorderPanel();
+}
+
+function buildPOPrintHTML(po){
+  const itemsHtml = po.items.map(i=>`<div class="rcpt-line"><span>${i.qty}× ${i.name}</span><span>${i.cost?fmtKsh(i.cost*i.qty):''}</span></div>`).join('');
+  const storeName = businessProfile.storeName || 'My DukaGO POS';
+  return `
+    <div class="rcpt-store">${storeName}</div>
+    <div class="rcpt-meta">Purchase Order ${po.poNumber}</div>
+    <div class="rcpt-meta">Supplier: ${po.supplierName}</div>
+    <div class="rcpt-meta">${new Date(po.createdAt).toLocaleString('en-KE',{hour12:false})}</div>
+    <div class="rcpt-divider"></div>
+    ${itemsHtml}
+    <div class="rcpt-divider"></div>
+    <div class="rcpt-footer">Prepared by ${po.createdBy}</div>
+  `;
+}
+// Reuses the exact same #receiptPrintArea + body.printing-receipt mechanism the sale
+// receipt already uses — same native print dialog, same printer picker.
+function printPurchaseOrder(po){
+  $('receiptPrintArea').innerHTML = buildPOPrintHTML(po);
+  $('receiptPrintArea').className = 'paper-'+receiptPaperWidth.replace('mm','');
+  document.body.classList.add('printing-receipt');
+  let cleaned = false;
+  const cleanup = ()=>{ if(cleaned) return; cleaned=true; document.body.classList.remove('printing-receipt'); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 6000);
 }
 
 // ---------- Payables — what the shop owes its suppliers ----------
@@ -3297,6 +3422,16 @@ async function pushToSupabase(item){
       reviewed_by:p.reviewedBy, reviewed_at:p.reviewedAt, review_note:p.reviewNote,
     };
   }
+  else if(item.type==='po_upsert'){
+    table='purchase_orders'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, po_number:p.poNumber, supplier_name:p.supplierName,
+      items:p.items, status:p.status, created_by:p.createdBy, created_at:p.createdAt,
+      invoice_number:p.invoiceNumber, invoice_photo:p.invoicePhoto, received_at:p.receivedAt,
+      updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
   else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
   const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
     method:'POST', headers: sbHeaders({'Prefer':prefer}),
@@ -3533,6 +3668,23 @@ async function pullShopData(fullPull, force){
         const localChanged = lr ? (lr.reviewedAt || lr.requestedAt) : null;
         if(!lr || !localChanged || new Date(remoteChanged) > new Date(localChanged)){
           await put('removal_requests', {id:rr.id, kind:rr.kind, itemInfo:rr.item_info, reason:rr.reason, requestedBy:rr.requested_by, requestedAt:rr.requested_at, status:rr.status, reviewedBy:rr.reviewed_by, reviewedAt:rr.reviewed_at, reviewNote:rr.review_note});
+        }
+      }
+    }
+    // Purchase orders — created on one device (e.g. via Order Now), visible on all others.
+    const poRes = await fetch(`${supaUrl}/rest/v1/purchase_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(poRes.ok){
+      const remotePOs = await poRes.json();
+      const localPOs = await getAll('purchase_orders');
+      for(const rp of remotePOs){
+        const lp = localPOs.find(p=>p.id===rp.id);
+        if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
+          await put('purchase_orders', {
+            id:rp.id, poNumber:rp.po_number, supplierName:rp.supplier_name, items:rp.items,
+            status:rp.status, createdBy:rp.created_by, createdAt:rp.created_at,
+            invoiceNumber:rp.invoice_number, invoicePhoto:rp.invoice_photo, receivedAt:rp.received_at,
+            updated_at:rp.updated_at,
+          });
         }
       }
     }
@@ -4554,7 +4706,7 @@ function switchBackofficeView(viewName){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-'+viewName).classList.add('active');
   if(viewName==='business'){ renderBizGrid(); populateProfileForm(); updateDeviceDiagnostics(); }
-  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); }
+  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); renderReorderPanel(); }
   if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
   if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
   if(viewName==='removals') renderRemovalsList();
