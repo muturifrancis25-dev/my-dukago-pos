@@ -226,9 +226,11 @@
   table{width:100%; border-collapse:collapse; font-size:12.5px;}
   .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -2px;}
   .table-scroll table{min-width:520px;}
-  th{text-align:left; padding:8px 6px; color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid var(--bg);}
-  td{padding:9px 6px; border-bottom:1px solid var(--bg); font-family:var(--mono);}
+  th{text-align:left; padding:8px 10px; color:var(--ink); font-size:12.5px; font-weight:700; border-bottom:2px solid var(--ink);}
+  td{padding:8px 10px; border-bottom:1px solid var(--line); font-family:var(--mono);}
   td.name{font-family:var(--sans); font-weight:600;}
+  tbody tr:nth-child(even){background:rgba(0,0,0,.018);}
+  html[data-theme="dark"] tbody tr:nth-child(even){background:rgba(255,255,255,.03);}
   .low-badge{background:#f3ddd6; color:var(--clay); padding:2px 7px; border-radius:5px; font-size:10px; font-weight:700; margin-left:6px;}
 
   .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; max-width:1100px; margin-left:auto; margin-right:auto;}
@@ -419,6 +421,23 @@
     font-family:var(--display); font-weight:600; font-size:12px; cursor:pointer; color:var(--muted);
   }
   .paymethod-row button.active{border-color:var(--teal-dark); background:var(--teal-dark); color:#fff;}
+
+  /* ---- M-Pesa payment picker — three real option cards, each with its own icon, title,
+     description and a colored accent stripe, instead of three identical grey buttons. ---- */
+  .mpesa-option{
+    width:100%; display:flex; align-items:center; gap:12px; text-align:left;
+    background:var(--panel); border:1.5px solid var(--line); border-left:4px solid var(--opt-color, var(--line));
+    border-radius:10px; padding:12px 14px; margin-bottom:8px; cursor:pointer; font-family:var(--sans);
+  }
+  .mpesa-option:active{ background:var(--bg); transform:scale(.99); }
+  .mpesa-opt-icon{
+    width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center;
+    font-size:16px; background:var(--bg); border:1px solid var(--line);
+  }
+  .mpesa-opt-text{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .mpesa-opt-text b{ font-family:var(--display); font-size:13.5px; color:var(--ink); font-weight:700; display:block; }
+  .mpesa-opt-text span{ font-size:10.5px; color:var(--muted); line-height:1.3; display:block; }
+  .mpesa-opt-arrow{ flex:none; font-size:20px; color:var(--muted); }
 
   /* ---- Business type picker ---- */
   .biz-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(180px,1fr)); gap:12px;}
@@ -625,7 +644,10 @@
         <input id="newQty" type="number" placeholder="Qty received (blank = no change / service if new)" min="1">
         <input id="newCost" type="number" placeholder="Cost price (KSh, optional)" min="0">
         <input id="newPrice" type="number" placeholder="Sell price (KSh)" min="0">
-        <input id="newSupplier" placeholder="Supplier (optional)">
+        <input id="newSupplier" placeholder="Supplier (optional)" style="display:none;">
+        <select id="newSupplierSelect">
+          <option value="">No supplier</option>
+        </select>
         <input id="newReorderAt" type="number" placeholder="Reorder below (default 10)" min="0">
       </div>
       <p id="perPieceCostPreview" class="hint" style="margin:-4px 0 10px; display:none;"></p>
@@ -636,6 +658,16 @@
       <h3>Inventory</h3>
       <div class="table-scroll"><table><thead><tr><th>Product</th><th>Category</th><th>SKU</th><th>Stock on hand</th><th>Cost</th><th>Price</th><th>Margin</th><th></th></tr></thead>
       <tbody id="stockTable"></tbody></table></div>
+    </div>
+    <div class="panel">
+      <h3>Suppliers</h3>
+      <p class="hint">Your registered suppliers — this list is what the Supplier dropdown in Feed Stock pulls from, and it's what auto-generated purchase orders group by.</p>
+      <div class="form-row" style="grid-template-columns:1fr 1fr; margin-bottom:8px;">
+        <input id="newSupplierName" placeholder="Supplier name">
+        <input id="newSupplierPhone" placeholder="Phone (optional)">
+      </div>
+      <button class="primary-btn" id="addSupplierBtn">Add supplier</button>
+      <div id="suppliersList" style="margin-top:12px;"></div>
     </div>
     <div class="panel">
       <h3>Reorder needed</h3>
@@ -1231,16 +1263,26 @@
 </div>
 
 <div class="modal-overlay" id="mpesaModal">
-  <div class="modal-box" style="width:min(88vw,320px);">
+  <div class="modal-box" style="width:min(90vw,360px);">
     <h3>M-Pesa payment</h3>
     <p id="mpesaDue">Amount due: KSh 0</p>
 
     <div id="mpesaChoiceStep">
-      <button class="modal-confirm" id="mpesaStkChoiceBtn" style="width:100%; padding:13px; margin:12px 0 6px;">📱 Send payment prompt</button>
-      <p style="font-size:10px; color:var(--muted); text-align:center; margin:0 0 10px;">🧪 Sandbox test mode — simulated by Safaricom, not yet live</p>
-      <button class="modal-cancel" id="mpesaC2bChoiceBtn" style="width:100%; padding:13px; margin-bottom:6px;">🔎 Customer already paid directly</button>
-      <p style="font-size:10px; color:var(--muted); text-align:center; margin:0 0 14px;">For a customer who paid your till on their own, without a prompt</p>
-      <button class="modal-cancel" id="mpesaManualChoiceBtn" style="width:100%; padding:13px;">✍️ Enter code manually</button>
+      <button class="mpesa-option" id="mpesaStkChoiceBtn" style="--opt-color:var(--sage);">
+        <span class="mpesa-opt-icon">📱</span>
+        <span class="mpesa-opt-text"><b>Send payment prompt</b><span>Sandbox test mode — simulated by Safaricom, not yet live</span></span>
+        <span class="mpesa-opt-arrow">›</span>
+      </button>
+      <button class="mpesa-option" id="mpesaC2bChoiceBtn" style="--opt-color:var(--marigold);">
+        <span class="mpesa-opt-icon">🔎</span>
+        <span class="mpesa-opt-text"><b>Customer already paid</b><span>Match a payment they sent directly to your till, no prompt needed</span></span>
+        <span class="mpesa-opt-arrow">›</span>
+      </button>
+      <button class="mpesa-option" id="mpesaManualChoiceBtn" style="--opt-color:var(--teal-dark);">
+        <span class="mpesa-opt-icon">✍️</span>
+        <span class="mpesa-opt-text"><b>Enter code manually</b><span>Type in the confirmation code from their SMS</span></span>
+        <span class="mpesa-opt-arrow">›</span>
+      </button>
       <button class="modal-cancel" id="mpesaCancelBtn" style="width:100%; margin-top:10px; padding:11px;">Cancel</button>
     </div>
 
@@ -1600,6 +1642,7 @@ const BUILTIN_BUSINESS_TYPES = {
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
+let SUPPLIERS = []; // registered suppliers — [{name, phone}], stored/synced the same way custom business types are
 let PLATFORM_BUSINESS_TYPES = {}; // loaded fresh from the platform-wide table at boot —
 // business types the Super Admin has defined for every shop, not just one
 function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...PLATFORM_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
@@ -2522,7 +2565,7 @@ async function addStock(){
   log(`Stock ${isNew?'added':'updated'}: ${name} (${sku})${qtyProvided?' +'+qty:''}. Queued for sync.`,'warn');
   logAudit(isNew ? 'Added new product' : 'Updated product', `${name} (${sku})`);
   $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
-  $('newSupplier').value=''; $('newReorderAt').value='';
+  $('newSupplier').value=''; $('newReorderAt').value=''; populateSupplierSelect('');
   $('costModeSelect').value='piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
   editingSku = null;
   $('addStockBtn').textContent = 'Add to stock';
@@ -2543,6 +2586,7 @@ function editProduct(sku){
     $('newCost').value = p.cost || '';
     $('newPrice').value = p.price;
     $('newSupplier').value = p.supplierName || '';
+    populateSupplierSelect(p.supplierName || '');
     $('newReorderAt').value = (p.reorderThreshold!==undefined && p.reorderThreshold!==null) ? p.reorderThreshold : '';
     $('newQty').value = ''; // blank = leave stock count untouched, per the fix above
     $('costModeSelect').value = 'piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
@@ -2552,6 +2596,7 @@ function editProduct(sku){
       e.preventDefault();
       editingSku = null;
       $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
+      $('newReorderAt').value=''; populateSupplierSelect('');
       $('addStockBtn').textContent = 'Add to stock';
       $('editingNotice').textContent = '';
     });
@@ -2690,6 +2735,83 @@ async function renderReorderPanel(){
     btn.addEventListener('click', ()=> generateAndPrintPO(btn.dataset.genPo));
   });
 }
+
+// ---------- Suppliers — registered list, drives the Feed Stock dropdown and PO grouping ----------
+async function loadSuppliers(){
+  const s = await getSetting('suppliers');
+  SUPPLIERS = s ? s.value : [];
+}
+async function saveSuppliers(){
+  await put('settings', {key:'suppliers', value: SUPPLIERS});
+  await queuePush('settings_upsert', {key:'suppliers', value: SUPPLIERS});
+}
+// Keeps the visible <select> and the hidden #newSupplier bridge input in sync — addStock()
+// and editProduct() already read/write #newSupplier directly, so routing the dropdown
+// through that same hidden field means neither of them needed to change at all.
+function populateSupplierSelect(selectedName){
+  const sel = $('newSupplierSelect');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">No supplier</option>' +
+    SUPPLIERS.map(s=>`<option value="${s.name}" ${s.name===selectedName?'selected':''}>${s.name}</option>`).join('');
+  $('newSupplier').value = selectedName || '';
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const sel = $('newSupplierSelect');
+  if(sel) sel.addEventListener('change', ()=>{ $('newSupplier').value = sel.value; });
+});
+async function renderSuppliersList(){
+  const box = $('suppliersList');
+  if(!box) return;
+  if(SUPPLIERS.length===0){
+    box.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">No suppliers registered yet — add one above.</p>`;
+    return;
+  }
+  box.innerHTML = SUPPLIERS.map(s=>`
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px;">
+      <span><b>${s.name}</b>${s.phone ? ` <span style="color:var(--muted);">· ${s.phone}</span>` : ''}</span>
+      <span style="display:flex; gap:6px;">
+        <button class="modal-cancel" data-edit-supplier="${s.name}" style="padding:5px 9px; font-size:11px;">Edit</button>
+        <button class="modal-cancel" data-remove-supplier="${s.name}" style="padding:5px 9px; font-size:11px; color:var(--clay);">Remove</button>
+      </span>
+    </div>
+  `).join('');
+  box.querySelectorAll('button[data-edit-supplier]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const s = SUPPLIERS.find(x=>x.name===btn.dataset.editSupplier);
+      if(!s) return;
+      const newPhone = prompt(`Phone number for ${s.name} (blank to clear):`, s.phone||'');
+      if(newPhone===null) return;
+      s.phone = newPhone.trim();
+      await saveSuppliers();
+      logAudit('Updated supplier', s.name);
+      renderSuppliersList();
+    });
+  });
+  box.querySelectorAll('button[data-remove-supplier]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const name = btn.dataset.removeSupplier;
+      if(!confirm(`Remove "${name}" from your suppliers list? Products already assigned to them keep the name, but won't offer them in the dropdown for new items.`)) return;
+      SUPPLIERS = SUPPLIERS.filter(x=>x.name!==name);
+      await saveSuppliers();
+      logAudit('Removed supplier', name);
+      renderSuppliersList();
+      populateSupplierSelect($('newSupplier').value);
+    });
+  });
+}
+$('addSupplierBtn').addEventListener('click', async ()=>{
+  const name = $('newSupplierName').value.trim();
+  const phone = $('newSupplierPhone').value.trim();
+  if(!name){ toast('Enter a supplier name'); return; }
+  if(SUPPLIERS.some(s=>s.name.toLowerCase()===name.toLowerCase())){ toast('That supplier is already registered'); return; }
+  SUPPLIERS.push({name, phone});
+  await saveSuppliers();
+  logAudit('Added supplier', name + (phone?` — ${phone}`:''));
+  toast(name+' added');
+  $('newSupplierName').value=''; $('newSupplierPhone').value='';
+  renderSuppliersList();
+  populateSupplierSelect($('newSupplier').value);
+});
 
 async function generateAndPrintPO(supplierName){
   const products = (await getAll('products')).filter(p =>
@@ -4109,16 +4231,31 @@ async function pullSpecificShop(targetShopId){
 // alone is what identifies a person now.
 async function isPinGloballyUnique(pinValue, excludeUserId){
   const localUsers = await getAll('users');
-  const localClash = localUsers.find(u=>u.pin===pinValue && u.id!==excludeUserId && u.active!==false);
+  // Exact match, AND a prefix collision in either direction — a 4-digit PIN that is the
+  // start of someone else's 6-digit PIN (or vice versa) is just as dangerous as an exact
+  // duplicate: the login screen checks for a match the moment 4 digits are typed, so a
+  // shorter PIN that's a prefix of a longer one hijacks the login before the remaining
+  // digits are ever entered. Both directions must be blocked, not just exact equality.
+  const clashes = (pin) => pin===pinValue || pin.startsWith(pinValue) || pinValue.startsWith(pin);
+  const localClash = localUsers.find(u=>clashes(u.pin) && u.id!==excludeUserId && u.active!==false);
   if(localClash) return {unique:false, ownerName:localClash.name, checkedRemote:false};
   if(backendLive()){
     try{
-      const res = await fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=id,name`, {headers: sbHeaders()});
-      if(res.ok){
-        const rows = await res.json();
-        const remoteClash = rows.find(r=>r.id!==excludeUserId);
-        if(remoteClash) return {unique:false, ownerName:remoteClash.name, checkedRemote:true};
-      }
+      // Exact match, plus: if pinValue is 4 digits, any 6-digit PIN starting with it;
+      // if pinValue is 6 digits, the 4-digit PIN that would be its prefix. Two queries
+      // covers both directions without needing a substring scan across the whole table.
+      const shortPrefix = pinValue.length===6 ? pinValue.slice(0,4) : pinValue;
+      const [exactRes, prefixRes] = await Promise.all([
+        fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
+        pinValue.length===4
+          ? fetch(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(pinValue)}*&active=eq.true&select=id,name,pin`, {headers: sbHeaders()})
+          : fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(shortPrefix)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
+      ]);
+      const exactRows = exactRes.ok ? await exactRes.json() : [];
+      const prefixRows = prefixRes.ok ? await prefixRes.json() : [];
+      const allRows = [...exactRows, ...prefixRows];
+      const remoteClash = allRows.find(r=>r.id!==excludeUserId);
+      if(remoteClash) return {unique:false, ownerName:remoteClash.name, checkedRemote:true};
     }catch(e){ /* couldn't verify remotely — fall through as locally-unique-but-unconfirmed */ }
   }
   return {unique:true, checkedRemote: backendLive()};
@@ -4185,6 +4322,8 @@ async function pullShopData(fullPull, force){
       await loadSettingsPanelValues();
       await loadBranding(); // same reasoning as business type/VAT above — a pulled logo/color
                              // change needs to actually repaint this device, not just save quietly
+      await loadSuppliers(); // a supplier added on another device needs to show up in this
+                              // device's dropdown without waiting for a reload
       if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
     }
     // Sales from OTHER devices — so the admin can see a cashier's phone sales too
@@ -4609,6 +4748,15 @@ scanInput.addEventListener('input', ()=>{
   renderProductGrid(); // live-filters the tile grid by name or SKU as you type
 });
 document.addEventListener('click', e=>{
+  // Guards against a real bug: view-till stays classed "active" underneath the login
+  // overlay even while it's covering the whole screen, so a tap on any non-button element
+  // of the login card (title, subtitle, the gap between PIN dots) used to bubble through
+  // and silently focus this hidden text input — which is exactly what summons the phone's
+  // on-screen keyboard over a login screen that has no text field of its own.
+  const loginShowing = !$('loginScreen').classList.contains('hide');
+  const setupShowing = !$('setAdminPinScreen').classList.contains('hide');
+  const superAdminShowing = $('superAdminView').style.display === 'flex';
+  if(loginShowing || setupShowing || superAdminShowing) return;
   if($('view-till').classList.contains('active') && !['INPUT','BUTTON'].includes(e.target.tagName)) scanInput.focus();
 });
 $('checkoutBtn').addEventListener('click', checkout);
@@ -4774,7 +4922,7 @@ $('saveProfileBtn').addEventListener('click', async ()=>{
 // already checked for contrast. Applies to light mode only; dark mode keeps its own tuned
 // values regardless, to avoid an untested light-tint/dark-mode combination.
 const BRAND_COLOR_PRESETS = [
-  {id:'marigold', name:'Marigold (default)', bg:'#f3ebda', glow:'#faf4e6', swatch:'#e2a034'},
+  {id:'marigold', name:'White (default)', bg:'#ffffff', glow:'#ffffff', swatch:'#e2a034'},
   {id:'sage',     name:'Sage',               bg:'#eef0e0', glow:'#f5f7ec', swatch:'#7a9c6f'},
   {id:'sky',      name:'Sky',                bg:'#e8eef0', glow:'#f2f6f7', swatch:'#5f92a3'},
   {id:'clay',     name:'Clay',               bg:'#f5e9e3', glow:'#faf1ed', swatch:'#c17a5c'},
@@ -5293,7 +5441,7 @@ function switchBackofficeView(viewName){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-'+viewName).classList.add('active');
   if(viewName==='business'){ renderBizGrid(); populateProfileForm(); updateDeviceDiagnostics(); }
-  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); renderReorderPanel(); renderPoList(); }
+  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); renderReorderPanel(); renderPoList(); renderSuppliersList(); populateSupplierSelect($('newSupplier').value); }
   if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
   if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
   if(viewName==='removals') renderRemovalsList();
@@ -5867,6 +6015,7 @@ $('themeToggleBtn').addEventListener('click', ()=>{
   await seedIfEmpty();
   await ensureTodaySnapshot();
   await loadCustomBusinessTypes();
+  await loadSuppliers();
   await loadPlatformBusinessTypes();
   await loadSettingsPanelValues(); // VAT + receipt prefs, needed before the first sale can be rung up correctly
   await loadBusinessProfile();
