@@ -20,8 +20,8 @@
 <style>
   :root{
     --ink:#2a2118;
-    --bg:#f3ebda;
-    --panel:#fffcf5;
+    --bg:#ffffff;
+    --panel:#ffffff;
     --line:#ddccA1;
     --teal:#163b31;
     --teal-dark:#0f2620;
@@ -34,7 +34,7 @@
     --sage-dark:#35573a;
     --clay:#b33f2e;
     --muted:#8c7c5e;
-    --bg-glow:#faf4e6; /* soft lift at the top of the background — replaces flat, slightly muddy color */
+    --bg-glow:#ffffff; /* base is white now — no warm cream lift needed */
     --accent-text:var(--teal-dark); /* foreground emphasis on a panel — flips in dark mode, chrome (--teal-dark itself) never does */
     /* Custom type system, not default system fonts — three purposes, not one font doing
        everything. Fraunces (a warm, characterful serif) is reserved for moments that carry
@@ -236,6 +236,23 @@
   .stat-card .slabel{font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted);}
   .stat-card .sval{font-family:var(--mono); font-size:22px; font-weight:800; color:var(--navy); margin-top:4px;}
 
+  /* ---- Reports headline pair — the two numbers a shop owner actually checks first,
+     set large in the brand serif rather than boxed up identically with everything else. ---- */
+  .reports-headline{display:flex; align-items:flex-end; gap:clamp(20px,4vw,36px); margin:2px auto 20px; max-width:1100px; flex-wrap:wrap;}
+  .hm-block{flex:1 1 180px; min-width:0;}
+  .hm-label{font-size:12.5px; color:var(--muted); margin-bottom:3px;}
+  .hm-value{font-family:var(--brand); font-weight:600; font-size:clamp(26px,4vw,38px); color:var(--accent-text); line-height:1.08; overflow-wrap:break-word;}
+  .hm-divider{width:1px; align-self:stretch; background:var(--line); flex:none;}
+  @media (max-width:520px){ .hm-divider{display:none;} }
+
+  /* ---- Everything else — a single quiet ledger, not a wall of identical cards. ---- */
+  .stat-list{max-width:1100px; margin:0 auto 14px;}
+  .stat-list .stat-row{display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:9px 0; border-bottom:1px solid var(--bg); font-size:13.5px;}
+  .stat-list .stat-row:last-child{border-bottom:none;}
+  .stat-list .stat-row > span{color:var(--ink); min-width:0;}
+  .stat-list .stat-row > b{font-family:var(--mono); font-weight:700; flex:none; text-align:right;}
+  .stat-list .stat-row.group-start{margin-top:6px; padding-top:15px; border-top:1px dashed var(--line);}
+
   .sync-log{background:var(--navy-dark); color:#c9d3e0; border-radius:10px; padding:12px; font-family:var(--mono); font-size:11.5px; max-height:220px; overflow-y:auto; line-height:1.7;}
   .sync-log .ok{color:#5fd897;} .sync-log .warn{color:#e0a94a;}
   .toggle-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--bg); flex-wrap:wrap; gap:10px;}
@@ -367,6 +384,26 @@
     #receiptPrintArea.paper-58{ width:58mm; font-size:10px; }
     #receiptPrintArea.paper-80{ width:80mm; font-size:11.5px; }
     #receiptPrintArea.paper-a4{ width:100%; font-size:13px; padding:20mm; }
+
+    /* ---- Formal financial statement — P&L / Balance Sheet, laid out like an actual
+       accounting document: serif masthead, ruled subtotals, double rule on the final
+       total. A4, not the thermal-receipt styling above. ---- */
+    body.printing-statement > *{ display:none !important; }
+    body.printing-statement #receiptPrintArea{
+      display:block !important; font-family:Georgia,'Times New Roman',serif; color:#000;
+      margin:0 auto; width:100%; padding:22mm 20mm; font-size:12.5px;
+    }
+    .stmt-header{text-align:center; margin-bottom:22px; padding-bottom:14px; border-bottom:2px solid #000;}
+    .stmt-store{font-size:18px; font-weight:700; letter-spacing:.3px;}
+    .stmt-title{font-size:14px; font-weight:700; margin-top:8px; text-transform:uppercase; letter-spacing:.5px;}
+    .stmt-sub{font-size:11px; color:#444; margin-top:2px;}
+    .stmt-table{width:100%; border-collapse:collapse; margin-top:6px;}
+    .stmt-table td{padding:6px 2px; font-size:12.5px; vertical-align:top;}
+    .stmt-table td.amt{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+    .stmt-table tr.stmt-section td{font-weight:700; text-transform:uppercase; font-size:11px; letter-spacing:.4px; padding-top:16px; padding-bottom:4px; border-bottom:1px solid #000;}
+    .stmt-table tr.stmt-subtotal td{border-top:1px solid #000; font-weight:700; padding-top:8px;}
+    .stmt-table tr.stmt-total td{border-top:3px double #000; font-weight:800; font-size:14px; padding-top:10px;}
+    .stmt-footer{margin-top:26px; padding-top:10px; border-top:1px solid #ccc; font-size:10px; color:#555; line-height:1.5;}
     .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
     .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
     .rcpt-divider{border-top:1px dashed #000; margin:6px 0;}
@@ -426,7 +463,7 @@
     <button class="active" data-view="business">Business</button>
     <button data-view="stock">Stock<span id="stockLowBadge" style="display:none; background:var(--clay); color:#fff; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:999px; margin-left:5px;">0</span></button>
     <button data-view="payables">Payables</button>
-    <button data-view="debts">Customer Credit</button>
+    <button data-view="debts" id="navCustomerCreditBtn">Customer Credit</button>
     <button data-view="removals">Removals</button>
     <button data-view="reports">Reports</button>
     <button data-view="staff" class="admin-only-tab">Staff</button>
@@ -761,18 +798,28 @@
     <div class="cat-row" id="reportPeriodRow" style="margin-bottom:14px;"></div>
     <button class="primary-btn" id="exportReportsBtn" style="margin-bottom:14px;">⬇ Export to Excel</button>
 
-    <div class="stat-grid">
-      <div class="stat-card"><div class="slabel" id="statSalesLabel">Sales — today</div><div class="sval" id="statSalesCount">0</div></div>
-      <div class="stat-card"><div class="slabel" id="statRevenueLabel">Revenue — today</div><div class="sval" id="statRevenue">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel">Items sold</div><div class="sval" id="statItems">0</div></div>
-      <div class="stat-card"><div class="slabel">Stock purchased (cost)</div><div class="sval" id="statPurchases">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel">Profit</div><div class="sval" id="statProfit">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel">Low stock right now</div><div class="sval" id="statLow">0</div></div>
-      <div class="stat-card"><div class="slabel">You owe suppliers (now)</div><div class="sval" id="statPayablesOutstanding">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel" id="statPayablesPaidLabel">Paid to suppliers — today</div><div class="sval" id="statPayablesPaid">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel">Customers owe you (now)</div><div class="sval" id="statDebtsOutstanding">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel">Overdue credit (now)</div><div class="sval" id="statDebtsOverdue" style="color:var(--clay);">KSh 0</div></div>
-      <div class="stat-card"><div class="slabel" id="statDebtsPaidLabel">Collected from customers — today</div><div class="sval" id="statDebtsPaid">KSh 0</div></div>
+    <div class="reports-headline">
+      <div class="hm-block">
+        <div class="hm-label" id="statRevenueLabel">Revenue — today</div>
+        <div class="hm-value" id="statRevenue">KSh 0</div>
+      </div>
+      <div class="hm-divider"></div>
+      <div class="hm-block">
+        <div class="hm-label">Profit</div>
+        <div class="hm-value" id="statProfit">KSh 0</div>
+      </div>
+    </div>
+
+    <div class="panel stat-list">
+      <div class="stat-row"><span id="statSalesLabel">Sales — today</span><b id="statSalesCount">0</b></div>
+      <div class="stat-row"><span>Items sold</span><b id="statItems">0</b></div>
+      <div class="stat-row"><span>Stock purchased (cost)</span><b id="statPurchases">KSh 0</b></div>
+      <div class="stat-row"><span>Low stock right now</span><b id="statLow">0</b></div>
+      <div class="stat-row group-start"><span>You owe suppliers (now)</span><b id="statPayablesOutstanding">KSh 0</b></div>
+      <div class="stat-row"><span id="statPayablesPaidLabel">Paid to suppliers — today</span><b id="statPayablesPaid">KSh 0</b></div>
+      <div class="stat-row group-start"><span>Customers owe you (now)</span><b id="statDebtsOutstanding">KSh 0</b></div>
+      <div class="stat-row"><span>Overdue credit (now)</span><b id="statDebtsOverdue" style="color:var(--clay);">KSh 0</b></div>
+      <div class="stat-row"><span id="statDebtsPaidLabel">Collected from customers — today</span><b id="statDebtsPaid">KSh 0</b></div>
     </div>
 
     <div class="panel" id="bizBreakdownWrap">
@@ -798,12 +845,14 @@
       <h3>Profit &amp; Loss — <span id="plPeriodLabel">today</span></h3>
       <p class="hint">Built from the same sales, stock and credit records as the stats above — not a separate ledger, so it always matches.</p>
       <div class="table-scroll"><table><tbody id="plTable"></tbody></table></div>
+      <button class="primary-btn" id="downloadPLBtn" style="margin-top:12px;">Print / Save as PDF</button>
     </div>
 
     <div class="panel">
       <h3>Balance Sheet — as of now</h3>
       <p class="hint">A simplified snapshot, not full double-entry accounting: stock is valued at cost, and there's no separate cash-on-hand ledger, so "Cash & M-Pesa" below is everything collected since records began, not a real till count. Good for a directional picture, not a statutory filing.</p>
       <div class="table-scroll"><table><tbody id="bsTable"></tbody></table></div>
+      <button class="primary-btn" id="downloadBSBtn" style="margin-top:12px;">Print / Save as PDF</button>
     </div>
 
     <div class="panel" id="stockCompareWrap">
@@ -2529,6 +2578,24 @@ async function renameProductSku(oldSku){
   renderStockTable(); renderProductGrid();
 }
 
+async function deleteProduct(sku){
+  const products = await getAll('products');
+  const p = products.find(x=>x.sku===sku);
+  if(!p) return;
+  // Permanent and irreversible on purpose — past sales/receipts/reports already have this
+  // product's name and price baked into them at the time of each sale, so history stays
+  // intact; only the live Stock entry and its ability to be sold going forward disappear.
+  const warning = (p.stock && p.stock>0)
+    ? `"${p.name}" still shows ${p.stock} in stock. Delete it anyway? Past sales stay in your records — this only removes it from Stock going forward.`
+    : `Permanently delete "${p.name}"? This can't be undone. Past sales stay in your records.`;
+  if(!confirm(warning)) return;
+  await del('products', sku);
+  await queuePush('product_delete', {sku});
+  logAudit('Deleted product', `${p.name} (${sku})`);
+  toast(`${p.name} deleted`);
+  renderStockTable(); renderProductGrid(); renderReorderPanel(); updateStockLowBadge();
+}
+
 async function renderStockTable(){
   populateCatSelect();
   const products = (await getAll('products')).filter(p => currentBusinessTypes.includes(p.btype||'duka'));
@@ -2548,6 +2615,7 @@ async function renderStockTable(){
       <td style="white-space:nowrap; display:flex; gap:6px;">
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="edit" data-sku="${p.sku}">Edit</button>
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="rename" data-sku="${p.sku}">SKU</button>
+        <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;color:var(--clay);" data-act="delete" data-sku="${p.sku}">Delete</button>
       </td>`;
     body.appendChild(tr);
   });
@@ -2555,6 +2623,7 @@ async function renderStockTable(){
     b.addEventListener('click', ()=>{
       if(b.dataset.act==='edit') editProduct(b.dataset.sku);
       else if(b.dataset.act==='rename') renameProductSku(b.dataset.sku);
+      else if(b.dataset.act==='delete') deleteProduct(b.dataset.sku);
     });
   });
 }
@@ -2685,6 +2754,120 @@ function printPurchaseOrder(po){
   window.print();
   setTimeout(cleanup, 6000);
 }
+
+// ---------- Formal statements — Profit & Loss and Balance Sheet, laid out like the real
+// documents (sectioned line items, ruled subtotals, double-ruled final total) rather than
+// the on-screen quick-read table. Each recomputes independently from the underlying
+// records, same self-contained pattern the Excel export already uses, so it's correct
+// whenever it's opened rather than depending on Reports having just been rendered. ----------
+async function computePLStatementData(){
+  await ensureTodaySnapshot();
+  const periodLabel = REPORT_PERIODS.find(p=>p.id===reportPeriod).label;
+  const allSales = await getAll('sales');
+  const allRefunds = await getAll('refunds');
+  const sales = allSales.filter(s => withinPeriod(s.ts, reportPeriod) && (!s.btypes || s.btypes.some(bt => currentBusinessTypes.includes(bt))));
+  const refunds = allRefunds.filter(r => withinPeriod(r.ts, reportPeriod));
+  const grossRevenue = sales.reduce((s,x)=>s+x.total,0);
+  const refundTotal = refunds.reduce((s,x)=>s+x.amount,0);
+  const vatCollected = sales.reduce((s,x)=>s+(x.tax||0),0);
+  const cogs = sales.reduce((s,x)=>s + x.lines.reduce((a,l)=>a+(l.qty*(l.cost||0)),0), 0);
+  const allDebts = await getAll('customer_debts');
+  const debtsPaidRecords = allDebts.filter(d=>d.status==='paid' && d.paidDate && withinPeriod(d.paidDate+'T12:00:00', reportPeriod));
+  const debtsPaidThisPeriod = debtsPaidRecords.reduce((s,d)=>s+d.amount,0);
+  const debtsCollectedMargin = debtsPaidRecords.reduce((s,d)=>s + (d.amount - (d.cost || 0)), 0);
+  const netRevenue = (grossRevenue - refundTotal) + debtsPaidThisPeriod;
+  const netProfit = (netRevenue - vatCollected) - cogs + debtsCollectedMargin;
+  return {periodLabel, grossRevenue, refundTotal, vatCollected, cogs, debtsPaidThisPeriod, netRevenue, netProfit};
+}
+async function computeBSStatementData(){
+  const allProducts = await getAll('products');
+  const stockValue = allProducts.reduce((s,p)=> s + ((p.stock||0) * (p.cost||0)), 0);
+  const allSalesAllTime = await getAll('sales');
+  const cashCollectedAllTime = allSalesAllTime.filter(s=>s.method==='cash').reduce((s,x)=>s+x.total,0);
+  const mpesaCollectedAllTime = allSalesAllTime.filter(s=>s.method==='mpesa').reduce((s,x)=>s+x.total,0);
+  const allRefundsAllTime = await getAll('refunds');
+  const refundsAllTime = allRefundsAllTime.reduce((s,r)=>s+r.amount,0);
+  const cashAndMpesa = cashCollectedAllTime + mpesaCollectedAllTime - refundsAllTime;
+  const allDebts = await getAll('customer_debts');
+  const debtorsBS = allDebts.filter(d=>d.status!=='paid').reduce((s,d)=>s+d.amount,0);
+  const allPayables = await getAll('payables');
+  const payablesBS = allPayables.filter(p=>p.status!=='paid').reduce((s,p)=>s+p.amount,0);
+  const totalAssets = cashAndMpesa + stockValue + debtorsBS;
+  const equity = totalAssets - payablesBS;
+  return {cashAndMpesa, stockValue, debtorsBS, totalAssets, payablesBS, equity};
+}
+function buildPLStatementHTML(d){
+  const storeName = businessProfile.storeName || 'My DukaGO POS';
+  const addrLine = [businessProfile.address, businessProfile.location].filter(Boolean).join(', ');
+  const generated = new Date().toLocaleDateString('en-KE', {year:'numeric', month:'long', day:'numeric'});
+  const line = (label, val, cls='') => `<tr class="${cls}"><td>${label}</td><td class="amt">${val<0?'('+fmtKsh(Math.abs(val))+')':fmtKsh(val)}</td></tr>`;
+  return `
+    <div class="stmt-header">
+      <div class="stmt-store">${storeName}</div>
+      ${addrLine ? `<div class="stmt-sub">${addrLine}</div>` : ''}
+      <div class="stmt-title">Profit &amp; Loss Statement</div>
+      <div class="stmt-sub">For the period: ${d.periodLabel} &nbsp;·&nbsp; Generated ${generated}</div>
+    </div>
+    <table class="stmt-table">
+      <tr class="stmt-section"><td colspan="2">Revenue</td></tr>
+      ${line('Sales revenue', d.grossRevenue)}
+      ${d.refundTotal>0 ? line('Less: refunds', -d.refundTotal) : ''}
+      ${d.debtsPaidThisPeriod>0 ? line('Customer credit collected this period', d.debtsPaidThisPeriod) : ''}
+      <tr class="stmt-subtotal"><td>Net Revenue</td><td class="amt">${fmtKsh(d.netRevenue)}</td></tr>
+      ${d.vatCollected>0 ? line('Less: VAT collected (held for KRA, not income)', -d.vatCollected) : ''}
+      ${line('Less: Cost of goods sold', -d.cogs)}
+      <tr class="stmt-total"><td>Net Profit</td><td class="amt">${d.netProfit<0?'('+fmtKsh(Math.abs(d.netProfit))+')':fmtKsh(d.netProfit)}</td></tr>
+    </table>
+    <div class="stmt-footer">Prepared by ${currentUser ? currentUser.name : '—'} using My DukaGO POS. Figures are drawn directly from recorded sales, stock and customer-credit transactions; this is not an audited financial statement.</div>
+  `;
+}
+function buildBSStatementHTML(d){
+  const storeName = businessProfile.storeName || 'My DukaGO POS';
+  const generated = new Date().toLocaleDateString('en-KE', {year:'numeric', month:'long', day:'numeric'});
+  const line = (label, val) => `<tr><td>${label}</td><td class="amt">${fmtKsh(val)}</td></tr>`;
+  return `
+    <div class="stmt-header">
+      <div class="stmt-store">${storeName}</div>
+      <div class="stmt-title">Balance Sheet</div>
+      <div class="stmt-sub">As of ${generated}</div>
+    </div>
+    <table class="stmt-table">
+      <tr class="stmt-section"><td colspan="2">Assets</td></tr>
+      ${line('Cash &amp; M-Pesa (all-time, net of refunds)', d.cashAndMpesa)}
+      ${line('Stock on hand (at cost)', d.stockValue)}
+      ${line('Accounts receivable (customer credit)', d.debtorsBS)}
+      <tr class="stmt-subtotal"><td>Total Assets</td><td class="amt">${fmtKsh(d.totalAssets)}</td></tr>
+
+      <tr class="stmt-section"><td colspan="2">Liabilities</td></tr>
+      ${line('Accounts payable (owed to suppliers)', d.payablesBS)}
+      <tr class="stmt-subtotal"><td>Total Liabilities</td><td class="amt">${fmtKsh(d.payablesBS)}</td></tr>
+
+      <tr class="stmt-section"><td colspan="2">Owner's Equity</td></tr>
+      <tr class="stmt-total"><td>Total Equity (Assets − Liabilities)</td><td class="amt">${fmtKsh(d.equity)}</td></tr>
+    </table>
+    <div class="stmt-footer">A simplified snapshot, not full double-entry accounting — stock is valued at cost and there is no separate cash-till ledger, so "Cash & M-Pesa" is everything collected since records began. Directional, not a statutory filing.</div>
+  `;
+}
+function printStatementDocument(html){
+  $('receiptPrintArea').innerHTML = html;
+  $('receiptPrintArea').className = '';
+  document.body.classList.add('printing-statement');
+  let cleaned = false;
+  const cleanup = ()=>{ if(cleaned) return; cleaned=true; document.body.classList.remove('printing-statement'); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 6000);
+}
+$('downloadPLBtn').addEventListener('click', async ()=>{
+  const d = await computePLStatementData();
+  logAudit('Printed/saved P&L statement', d.periodLabel);
+  printStatementDocument(buildPLStatementHTML(d));
+});
+$('downloadBSBtn').addEventListener('click', async ()=>{
+  const d = await computeBSStatementData();
+  logAudit('Printed/saved Balance Sheet');
+  printStatementDocument(buildBSStatementHTML(d));
+});
 
 // ---------- Purchase order list + receiving (invoice number links to PO, updates stock) ----------
 async function renderPoList(){
@@ -3732,6 +3915,16 @@ function sbHeaders(extra){
   return Object.assign({'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, extra||{});
 }
 async function pushToSupabase(item){
+  if(item.type==='product_delete'){
+    const res = await fetch(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&sku=eq.${encodeURIComponent(item.payload.sku)}`, {
+      method:'DELETE', headers: sbHeaders({'Prefer':'return=minimal'}),
+    });
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      throw new Error(`Supabase rejected the delete: ${res.status}${errText ? ' — '+errText.slice(0,150) : ''}`);
+    }
+    return;
+  }
   let table, body, prefer='return=minimal';
   if(item.type==='sale'){
     table='sales';
@@ -3749,7 +3942,16 @@ async function pushToSupabase(item){
   }
   else if(item.type==='stock_movement'){ table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
   else if(item.type==='staff_upsert'){ table='staff'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
-  else if(item.type==='product_upsert'){ table='products'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
+  else if(item.type==='product_upsert'){
+    table='products'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      shop_id:shopId, sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype,
+      supplier_name: p.supplierName || null,
+      reorder_threshold: p.reorderThreshold || 10,
+      updated_at: p.updated_at || new Date().toISOString(),
+    };
+  }
   else if(item.type==='settings_upsert'){ table='shop_settings'; body=Object.assign({shop_id:shopId}, item.payload); prefer='resolution=merge-duplicates,return=minimal'; }
   else if(item.type==='refund_record'){
     table='refunds';
@@ -3946,10 +4148,20 @@ async function pullShopData(fullPull, force){
     if(prodRes.ok){
       const remoteProducts = await prodRes.json();
       const localProducts = await getAll('products');
+      const remoteSkus = new Set(remoteProducts.map(rp=>rp.sku));
       for(const rp of remoteProducts){
         const lp = localProducts.find(p=>p.sku===rp.sku);
         if(force || !lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
-          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, updated_at:rp.updated_at});
+          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, supplierName:rp.supplier_name||null, reorderThreshold:rp.reorder_threshold||10, updated_at:rp.updated_at});
+        }
+      }
+      // A genuinely full pull is authoritative — a product deleted on another device
+      // (or from the backend directly) should disappear here too, not just stop updating.
+      // An incremental pull only returns recently-changed rows, so it says nothing about
+      // what's missing and must never be treated as grounds for deletion.
+      if(fullPull){
+        for(const lp of localProducts){
+          if(!remoteSkus.has(lp.sku)) await del('products', lp.sku);
         }
       }
     }
@@ -4154,6 +4366,13 @@ $('creditToggleBtn').addEventListener('click', async ()=>{
 function applyCreditPaymentButtonVisibility(){
   const btn = $('payMethodCreditBtn');
   if(btn) btn.style.display = creditSalesEnabled ? 'inline-block' : 'none';
+  // Same setting also decides whether the shop deals with customer credit at all — some
+  // shops flatly don't extend credit, so the quick-action button and the whole back-office
+  // ledger tab should disappear along with the checkout payment option, not just the button.
+  const quickBtn = $('quickDebtBtn');
+  if(quickBtn) quickBtn.style.display = creditSalesEnabled ? '' : 'none';
+  const navBtn = $('navCustomerCreditBtn');
+  if(navBtn) navBtn.style.display = creditSalesEnabled ? '' : 'none';
 }
 $('saveVatBtn').addEventListener('click', ()=> saveVatSettings(true));
 $('saveReceiptBtn').addEventListener('click', async ()=>{
@@ -5064,6 +5283,10 @@ const ADMIN_ONLY_VIEWS = ['staff','audit']; // account management & the audit tr
 function switchBackofficeView(viewName){
   if(ADMIN_ONLY_VIEWS.includes(viewName) && !(currentUser && currentUser.role==='admin')){
     toast('Only an Admin account can open this — sign in as Admin, not a manager override');
+    viewName = 'business';
+  }
+  if(viewName==='debts' && !creditSalesEnabled){
+    toast('Customer credit is turned off for this shop — an Admin can enable it in Sync & Setup');
     viewName = 'business';
   }
   document.querySelectorAll('.backoffice-nav button[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===viewName));
