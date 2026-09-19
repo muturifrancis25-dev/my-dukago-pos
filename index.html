@@ -424,7 +424,7 @@
 <nav class="backoffice-nav" id="backofficeNav">
   <div class="backoffice-tabs">
     <button class="active" data-view="business">Business</button>
-    <button data-view="stock">Stock</button>
+    <button data-view="stock">Stock<span id="stockLowBadge" style="display:none; background:var(--clay); color:#fff; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:999px; margin-left:5px;">0</span></button>
     <button data-view="payables">Payables</button>
     <button data-view="debts">Customer Credit</button>
     <button data-view="removals">Removals</button>
@@ -605,6 +605,11 @@
       <p class="hint">Anything below its reorder point, grouped by supplier. Products with no supplier set can't be turned into a PO until one is added above.</p>
       <div id="reorderList"></div>
     </div>
+    <div class="panel">
+      <h3>Purchase orders</h3>
+      <p class="hint">Every PO created from Reorder needed. When the supplier delivers, open it, enter their invoice number, optionally attach a photo of the invoice, and mark it received — stock updates automatically.</p>
+      <div id="poList"></div>
+    </div>
   </section>
 
   <!-- ============ PAYABLES — what the shop owes its suppliers ============ -->
@@ -635,8 +640,11 @@
       <label>Notes (optional)</label>
       <input id="payableNotes" placeholder="e.g. Invoice #4521, weekly stock delivery" style="margin-bottom:10px;">
       <label>Photo of invoice (optional)</label>
+      <div id="payablePhotoSection">
       <input id="payablePhotoInput" type="file" accept="image/*" capture="environment" style="margin-bottom:10px; width:100%;">
       <div id="payablePhotoPreview" style="display:none; margin-bottom:10px;"><img id="payablePhotoImg" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--line);"></div>
+      </div>
+      <p id="payablePhotoLockedNotice" class="hint" style="display:none;">Photo upload is limited to Admin and Supervisor accounts.</p>
       <button class="primary-btn" id="addPayableBtn" style="width:100%;">Save invoice</button>
     </div>
     <div class="panel">
@@ -784,6 +792,18 @@
       </tbody></table></div>
       <p id="pmReconcile" style="font-family:var(--mono); font-size:12px; color:var(--muted); margin:10px 0 0;"></p>
       <p id="pmVatNote" style="font-size:11.5px; color:var(--muted); margin:4px 0 0;"></p>
+    </div>
+
+    <div class="panel">
+      <h3>Profit &amp; Loss — <span id="plPeriodLabel">today</span></h3>
+      <p class="hint">Built from the same sales, stock and credit records as the stats above — not a separate ledger, so it always matches.</p>
+      <div class="table-scroll"><table><tbody id="plTable"></tbody></table></div>
+    </div>
+
+    <div class="panel">
+      <h3>Balance Sheet — as of now</h3>
+      <p class="hint">A simplified snapshot, not full double-entry accounting: stock is valued at cost, and there's no separate cash-on-hand ledger, so "Cash & M-Pesa" below is everything collected since records began, not a real till count. Good for a directional picture, not a statutory filing.</p>
+      <div class="table-scroll"><table><tbody id="bsTable"></tbody></table></div>
     </div>
 
     <div class="panel" id="stockCompareWrap">
@@ -1107,8 +1127,11 @@
     <label>Notes (optional)</label>
     <input id="qpNotes" placeholder="e.g. Invoice #4521" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
     <label>Photo of invoice (optional)</label>
+    <div id="qpPhotoSection">
     <input id="qpPhotoInput" type="file" accept="image/*" capture="environment" style="width:100%; margin:4px 0 10px;">
     <div id="qpPhotoPreview" style="display:none; margin-bottom:10px;"><img id="qpPhotoImg" style="max-width:100%; max-height:160px; border-radius:8px; border:1px solid var(--line);"></div>
+    </div>
+    <p id="qpPhotoLockedNotice" class="hint" style="display:none;">Photo upload is limited to Admin and Supervisor accounts.</p>
     <div class="modal-actions">
       <button class="modal-cancel" id="qpCancelBtn">Cancel</button>
       <button class="modal-confirm" id="qpSaveBtn">Save invoice</button>
@@ -1266,6 +1289,47 @@
     <div class="modal-actions" style="margin-top:12px;">
       <button class="modal-cancel" id="bizCancelBtn">Cancel</button>
       <button class="modal-confirm" id="bizConfirmBtn">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Receive a purchase order — supplier's invoice number links to this PO, stock updates -->
+<div class="modal-overlay" id="receivePoModal">
+  <div class="modal-box" style="width:min(90vw,360px); text-align:left;">
+    <h3>Receive purchase order</h3>
+    <p class="hint" id="receivePoInfo" style="margin:0 0 12px;">—</p>
+    <label>Supplier's invoice number</label>
+    <input id="receivePoInvoiceNumber" placeholder="e.g. INV-8842" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Photo of invoice (optional)</label>
+    <input id="receivePoPhotoInput" type="file" accept="image/*,application/pdf" capture="environment" style="width:100%; margin:4px 0 10px;">
+    <div id="receivePoPhotoPreview" style="display:none; margin-bottom:10px;"><img id="receivePoPhotoImg" style="max-width:100%; max-height:160px; border-radius:8px; border:1px solid var(--line);"></div>
+    <div id="receivePoItemsList" style="margin-bottom:10px;"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="receivePoCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="receivePoConfirmBtn">Mark received &amp; update stock</button>
+    </div>
+  </div>
+</div>
+
+<!-- Invoice auto-read review — admin/supervisor only. The AI reads the photo; a human
+     always confirms before anything touches stock, since OCR on a real supplier invoice
+     won't be perfect. -->
+<div class="modal-overlay" id="invoiceOcrModal">
+  <div class="modal-box" style="width:min(94vw,420px); text-align:left; max-height:80vh; overflow-y:auto;">
+    <h3>Review auto-read invoice</h3>
+    <p class="hint" id="ocrSourceInfo" style="margin:0 0 10px;">—</p>
+    <div id="ocrStatusArea" style="text-align:center; padding:20px 0;">
+      <div class="mpesa-spinner" style="margin:0 auto 10px;"></div>
+      <p style="font-size:12.5px; color:var(--muted);">Reading the invoice…</p>
+    </div>
+    <div id="ocrReviewArea" style="display:none;">
+      <p class="hint">Check each line against the physical invoice before confirming — quantities and matched products are editable.</p>
+      <div id="ocrItemsList"></div>
+      <p id="ocrUnmatchedNote" class="hint" style="color:var(--clay); display:none;"></p>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="modal-cancel" id="ocrCancelBtn">Cancel</button>
+        <button class="modal-confirm" id="ocrConfirmBtn">Confirm &amp; update stock</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1701,7 +1765,7 @@ async function renderProductGrid(){
   }
   filtered.forEach(p=>{
     const isService = p.stock===null || p.stock===undefined;
-    const low = !isService && p.stock<=5, out = !isService && p.stock<=0;
+    const low = !isService && p.stock<=(p.reorderThreshold||10), out = !isService && p.stock<=0;
     const tile = document.createElement('button');
     tile.className = 'tile' + (out?' disabled':'');
     tile.disabled = out;
@@ -2272,7 +2336,7 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
   log(`Sale recorded locally — ${fmtKsh(total)} (${method}), ${lines.length} line(s). Queued for sync.`,'warn');
   const itemSummary = lines.map(l=>`${l.qty}× ${l.name}`).join(', ');
   logAudit('Sale completed', `${fmtKsh(total)} via ${method} — ${itemSummary}`);
-  cart=[]; renderCart(); renderProductGrid(); updatePendingBadge();
+  cart=[]; renderCart(); renderProductGrid(); updatePendingBadge(); updateStockLowBadge();
   showSaleComplete(sale);
 }
 
@@ -2341,7 +2405,7 @@ $('csConfirmBtn').addEventListener('click', async ()=>{
   await queuePush('debt_upsert', debt);
   const itemSummary = lineItems.map(l=>`${l.qty}× ${l.name}`).join(', ');
   logAudit('Credit sale recorded', `${customerName} — ${fmtKsh(total)} — due ${dueDate} — ${itemSummary}`);
-  cart=[]; renderCart(); renderProductGrid(); updatePendingBadge();
+  cart=[]; renderCart(); renderProductGrid(); updatePendingBadge(); updateStockLowBadge();
   $('creditSaleModal').classList.remove('show');
   creditSalePending = null;
   toast(`Recorded on credit — due ${dueDate}`);
@@ -2414,7 +2478,7 @@ async function addStock(){
   editingSku = null;
   $('addStockBtn').textContent = 'Add to stock';
   $('editingNotice').textContent = '';
-  renderStockTable(); renderProductGrid(); updatePendingBadge();
+  renderStockTable(); renderProductGrid(); updatePendingBadge(); updateStockLowBadge();
   toast(isNew ? 'Product added' : 'Product updated');
 }
 
@@ -2476,7 +2540,7 @@ async function renderStockTable(){
   }
   products.forEach(p=>{
     const isService = p.stock===null || p.stock===undefined;
-    const low = !isService && p.stock<=5;
+    const low = !isService && p.stock<=(p.reorderThreshold||10);
     const cost = p.cost || 0;
     const margin = cost>0 ? (((p.price-cost)/p.price)*100).toFixed(0)+'%' : '—';
     const tr = document.createElement('tr');
@@ -2496,13 +2560,32 @@ async function renderStockTable(){
 }
 
 // ---------- Low-stock reorder + Purchase Orders ----------
+// Runs whenever stock changes anywhere in the app (sale, feed stock, PO received, invoice
+// auto-read) so the Stock tab visibly flags a problem the moment it exists — not only when
+// the admin happens to click into Stock and look.
+async function updateStockLowBadge(){
+  const badge = $('stockLowBadge');
+  if(!badge) return;
+  const products = (await getAll('products')).filter(p =>
+    currentBusinessTypes.includes(p.btype||'duka') &&
+    p.stock !== null && p.stock !== undefined &&
+    p.stock <= (p.reorderThreshold || 10)
+  );
+  if(products.length > 0){
+    badge.textContent = products.length;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
 async function renderReorderPanel(){
   const box = $('reorderList');
   if(!box) return;
   const products = (await getAll('products')).filter(p =>
     currentBusinessTypes.includes(p.btype||'duka') &&
     p.stock !== null && p.stock !== undefined &&
-    p.stock < (p.reorderThreshold || 10)
+    p.stock <= (p.reorderThreshold || 10)
   );
   if(products.length===0){
     box.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing below its reorder point right now.</p>`;
@@ -2544,7 +2627,7 @@ async function generateAndPrintPO(supplierName){
     currentBusinessTypes.includes(p.btype||'duka') &&
     p.supplierName === supplierName &&
     p.stock !== null && p.stock !== undefined &&
-    p.stock < (p.reorderThreshold || 10)
+    p.stock <= (p.reorderThreshold || 10)
   );
   if(products.length===0){ toast('Nothing to order for '+supplierName); return; }
 
@@ -2562,7 +2645,7 @@ async function generateAndPrintPO(supplierName){
   const items = products.map(p => ({sku:p.sku, name:p.name, qty:(p.reorderQty||20), cost:p.cost||0}));
   const po = {
     id: 'po_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
-    poNumber, supplierName, items, status:'draft',
+    poNumber, supplierName, items, status:'pending_supply',
     createdBy: currentUser ? currentUser.name : 'Unknown',
     createdAt: new Date().toISOString(),
     invoiceNumber: null, invoicePhoto: null, receivedAt: null,
@@ -2573,6 +2656,7 @@ async function generateAndPrintPO(supplierName){
   toast(`${poNumber} created for ${supplierName}`);
   printPurchaseOrder(po);
   renderReorderPanel();
+  renderPoList();
 }
 
 function buildPOPrintHTML(po){
@@ -2601,6 +2685,109 @@ function printPurchaseOrder(po){
   window.print();
   setTimeout(cleanup, 6000);
 }
+
+// ---------- Purchase order list + receiving (invoice number links to PO, updates stock) ----------
+async function renderPoList(){
+  const box = $('poList');
+  if(!box) return;
+  const all = (await getAll('purchase_orders')).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(all.length===0){
+    box.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">No purchase orders yet — created automatically from Reorder needed.</p>`;
+    return;
+  }
+  const canReceive = currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor');
+  box.innerHTML = all.slice(0,50).map(po=>{
+    const statusColor = po.status==='received' ? 'var(--sage-dark)' : 'var(--marigold-dark)';
+    const statusLabel = po.status==='received' ? 'RECEIVED' : 'PENDING SUPPLY';
+    const itemSummary = po.items.map(i=>`${i.qty}× ${i.name}`).join(', ');
+    return `<div style="border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:start; gap:10px;">
+        <div>
+          <b>${po.poNumber}</b> — ${po.supplierName}<br>
+          <span style="font-size:12px; color:var(--muted);">${itemSummary}</span><br>
+          <span style="font-size:11.5px; color:${statusColor}; font-weight:700; text-transform:uppercase;">${statusLabel}</span>
+          ${po.invoiceNumber ? ` <span style="font-size:11px; color:var(--muted); font-family:var(--mono);">· invoice ${po.invoiceNumber}</span>` : ''}
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; flex:none;">
+          <button class="modal-cancel" data-print-po="${po.id}" style="font-size:10.5px; padding:5px 9px;">Print</button>
+          ${(po.status!=='received' && canReceive) ? `<button class="primary-btn" data-receive-po="${po.id}" style="font-size:10.5px; padding:5px 9px;">Receive</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('button[data-print-po]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const all2 = await getAll('purchase_orders');
+      const po = all2.find(p=>p.id===btn.dataset.printPo);
+      if(po) printPurchaseOrder(po);
+    });
+  });
+  box.querySelectorAll('button[data-receive-po]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openReceivePoModal(btn.dataset.receivePo));
+  });
+}
+
+let receivingPo = null;
+let receivePoPhotoData = null;
+async function openReceivePoModal(poId){
+  const all = await getAll('purchase_orders');
+  const po = all.find(p=>p.id===poId);
+  if(!po){ toast('Could not find that PO'); return; }
+  receivingPo = po;
+  receivePoPhotoData = null;
+  $('receivePoInvoiceNumber').value = '';
+  $('receivePoPhotoInput').value = '';
+  $('receivePoPhotoPreview').style.display = 'none';
+  $('receivePoInfo').textContent = `${po.poNumber} — ${po.supplierName}`;
+  $('receivePoItemsList').innerHTML = po.items.map(i=>`<div style="font-size:12.5px; padding:3px 0;">${i.qty}× ${i.name}</div>`).join('');
+  $('receivePoModal').classList.add('show');
+}
+$('receivePoCancelBtn').addEventListener('click', ()=>{ $('receivePoModal').classList.remove('show'); receivingPo = null; });
+$('receivePoPhotoInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  if(file.type === 'application/pdf'){
+    // Images get compressed to a small dataURL for preview + storage; a PDF is kept as-is
+    // (base64), same size-tradeoff acknowledgment as the rest of the app's photo uploads.
+    const reader = new FileReader();
+    reader.onload = ()=>{ receivePoPhotoData = reader.result; $('receivePoPhotoPreview').style.display = 'none'; toast('PDF attached'); };
+    reader.readAsDataURL(file);
+    return;
+  }
+  receivePoPhotoData = await compressImageToDataUrl(file, 1400, 0.78);
+  $('receivePoPhotoImg').src = receivePoPhotoData;
+  $('receivePoPhotoPreview').style.display = 'block';
+});
+$('receivePoConfirmBtn').addEventListener('click', async ()=>{
+  if(!receivingPo) return;
+  const invoiceNumber = $('receivePoInvoiceNumber').value.trim();
+  if(!invoiceNumber){ toast('Enter the supplier\'s invoice number'); return; }
+  const po = receivingPo;
+  // Stock update — same movement-logging pattern as Feed Stock, so it shows up in
+  // Reports' "Stock received" numbers exactly like a manual feed would.
+  const products = await getAll('products');
+  for(const item of po.items){
+    const p = products.find(x=>x.sku===item.sku);
+    if(!p) continue;
+    p.stock = (p.stock===null||p.stock===undefined?0:p.stock) + item.qty;
+    await put('products', p);
+    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10});
+    const movement = {sku:p.sku, name:p.name, qty:item.qty, cost:item.cost||p.cost||0, btype:p.btype||'duka', ts:new Date().toISOString()};
+    await put('stock_movements', movement);
+    await queuePush('stock_movement', movement);
+  }
+  po.status = 'received';
+  po.invoiceNumber = invoiceNumber;
+  po.invoicePhoto = receivePoPhotoData || po.invoicePhoto || null;
+  po.receivedAt = new Date().toISOString();
+  await put('purchase_orders', po);
+  await queuePush('po_upsert', po);
+  logAudit('Purchase order received', `${po.poNumber} — invoice ${invoiceNumber} — ${po.items.length} item(s) added to stock`);
+  toast(`${po.poNumber} received — stock updated`);
+  $('receivePoModal').classList.remove('show');
+  receivingPo = null;
+  renderPoList(); renderReorderPanel(); renderStockTable(); renderProductGrid(); updateStockLowBadge();
+});
 
 // ---------- Payables — what the shop owes its suppliers ----------
 // Any signed-in role can add one (a cashier scanning an invoice as it arrives is exactly the
@@ -2643,6 +2830,19 @@ function prefillPayableDates(){
   $('payableTerms').value = '30';
   $('payableCustomDaysRow').style.display = 'none';
   recomputePayableDue();
+  applyPhotoUploadPermission();
+}
+// Invoice photo upload — the thing that feeds auto-read-to-stock — is restricted to
+// Admin/Supervisor, so a cashier can log an invoice's amount/terms but can't be the one
+// deciding what a photo says the stock should become.
+function applyPhotoUploadPermission(){
+  const canUpload = currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor');
+  const fullSection = $('payablePhotoSection'), fullNotice = $('payablePhotoLockedNotice');
+  if(fullSection){ fullSection.style.display = canUpload ? 'block' : 'none'; }
+  if(fullNotice){ fullNotice.style.display = canUpload ? 'none' : 'block'; }
+  const qpSection = $('qpPhotoSection'), qpNotice = $('qpPhotoLockedNotice');
+  if(qpSection){ qpSection.style.display = canUpload ? 'block' : 'none'; }
+  if(qpNotice){ qpNotice.style.display = canUpload ? 'none' : 'block'; }
 }
 let payablePhotoData = null;
 $('payablePhotoInput').addEventListener('change', async (e)=>{
@@ -2738,6 +2938,8 @@ async function renderPayablesLists(){
           ${p.photo ? `<button class="modal-cancel" data-view-photo="${p.id}" style="font-size:10.5px; padding:4px 8px; margin-top:4px;">View photo</button>` : ''}
         </div>
       </div>
+      ${(p.photo && canMarkPaid && p.stockUpdateStatus!=='processed') ? `<button class="primary-btn" data-ocr-read="${p.id}" style="width:100%; margin-top:8px; padding:8px; background:var(--sage);">Auto-read invoice &amp; update stock</button>` : ''}
+      ${p.stockUpdateStatus==='processed' ? `<p class="hint" style="margin:6px 0 0; color:var(--sage-dark);">✓ Stock already updated from this invoice</p>` : ''}
       ${canMarkPaid ? `<button class="primary-btn" data-mark-paid="${p.id}" style="width:100%; margin-top:10px; padding:8px;">Mark as paid</button>` : ''}
     `;
     unpaidBox.appendChild(row);
@@ -2762,6 +2964,12 @@ async function renderPayablesLists(){
       if(p && p.photo) window.open(p.photo, '_blank');
     });
   });
+  unpaidBox.querySelectorAll('button[data-ocr-read]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const p = unpaid.find(x=>x.id===btn.dataset.ocrRead);
+      if(p) openInvoiceOcrReview(p);
+    });
+  });
 
   const paidBox = $('payablesPaidList'); paidBox.innerHTML='';
   if(paid.length===0){
@@ -2774,6 +2982,105 @@ async function renderPayablesLists(){
     paidBox.appendChild(row);
   });
 }
+
+// ---------- Invoice auto-read — admin/supervisor only, human always confirms before stock changes ----------
+// Calls a Supabase Edge Function (invoice-ocr) that holds the actual AI API key server-side —
+// same pattern as mpesa-initiate. The function returns best-guess line items; nothing here
+// ever touches stock until a human reviews and confirms in the modal below.
+let ocrPendingPayable = null;
+let ocrParsedItems = [];
+async function openInvoiceOcrReview(payable){
+  if(!(currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor'))){
+    toast('Only an Admin or Supervisor can auto-read invoices');
+    return;
+  }
+  if(!payable.photo){ toast('This invoice has no photo attached'); return; }
+  ocrPendingPayable = payable;
+  ocrParsedItems = [];
+  $('ocrSourceInfo').textContent = `${payable.supplierName} — ${fmtKsh(payable.amount)}`;
+  $('ocrStatusArea').style.display = 'block';
+  $('ocrReviewArea').style.display = 'none';
+  $('invoiceOcrModal').classList.add('show');
+  try{
+    const products = await getAll('products');
+    const catalogForMatching = products.map(p=>({sku:p.sku, name:p.name}));
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/invoice-ocr`, {
+      method:'POST', headers: mpesaFunctionHeaders(),
+      body: JSON.stringify({ imageDataUrl: payable.photo, catalog: catalogForMatching }),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok || data.error) throw new Error(data.error || 'Could not read the invoice');
+    // Expected shape: { items: [{ matchedSku, name, qty, cost }], unmatchedCount }
+    ocrParsedItems = (data.items || []).map(i => ({...i, include: !!i.matchedSku}));
+    renderOcrReviewItems(products, data.unmatchedCount || 0);
+  }catch(e){
+    $('ocrStatusArea').innerHTML = `<p style="color:var(--clay); font-size:12.5px; text-align:center;">Could not auto-read this invoice: ${e.message}<br><br>This needs the invoice-ocr Edge Function deployed on your Supabase project — see the setup notes.</p>`;
+  }
+}
+function renderOcrReviewItems(products, unmatchedCount){
+  $('ocrStatusArea').style.display = 'none';
+  $('ocrReviewArea').style.display = 'block';
+  const list = $('ocrItemsList');
+  if(ocrParsedItems.length===0){
+    list.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing readable on this invoice — try a clearer photo, or add stock manually instead.</p>`;
+  } else {
+    list.innerHTML = ocrParsedItems.map((it, idx)=>{
+      const options = products.map(p=>`<option value="${p.sku}" ${p.sku===it.matchedSku?'selected':''}>${p.name}</option>`).join('');
+      return `<div style="border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:8px;">
+        <label style="font-size:10.5px; color:var(--muted); text-transform:uppercase;">Read as: "${it.name || '—'}"</label>
+        <select data-ocr-idx="${idx}" data-role="sku" style="width:100%; padding:8px; border-radius:6px; border:1.5px solid var(--line); margin:4px 0 8px; font-size:12.5px;">
+          <option value="">— not on shelf / skip —</option>
+          ${options}
+        </select>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="number" data-ocr-idx="${idx}" data-role="qty" value="${it.qty||1}" min="0" style="width:70px; padding:6px; border-radius:6px; border:1.5px solid var(--line);">
+          <span style="font-size:11.5px; color:var(--muted);">units</span>
+          <label style="margin-left:auto; display:flex; align-items:center; gap:5px; font-size:11.5px;">
+            <input type="checkbox" data-ocr-idx="${idx}" data-role="include" ${it.include?'checked':''}> Include
+          </label>
+        </div>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('select[data-role="sku"]').forEach(el=>{
+      el.addEventListener('change', ()=>{ ocrParsedItems[el.dataset.ocrIdx].matchedSku = el.value; });
+    });
+    list.querySelectorAll('input[data-role="qty"]').forEach(el=>{
+      el.addEventListener('input', ()=>{ ocrParsedItems[el.dataset.ocrIdx].qty = parseInt(el.value,10) || 0; });
+    });
+    list.querySelectorAll('input[data-role="include"]').forEach(el=>{
+      el.addEventListener('change', ()=>{ ocrParsedItems[el.dataset.ocrIdx].include = el.checked; });
+    });
+  }
+  $('ocrUnmatchedNote').style.display = unmatchedCount>0 ? 'block' : 'none';
+  $('ocrUnmatchedNote').textContent = unmatchedCount>0 ? `${unmatchedCount} line(s) on the invoice didn't match anything in Stock — add those products first if they're new.` : '';
+}
+$('ocrCancelBtn').addEventListener('click', ()=>{ $('invoiceOcrModal').classList.remove('show'); ocrPendingPayable = null; });
+$('ocrConfirmBtn').addEventListener('click', async ()=>{
+  if(!ocrPendingPayable) return;
+  const toApply = ocrParsedItems.filter(i => i.include && i.matchedSku && i.qty>0);
+  if(toApply.length===0){ toast('Nothing selected to apply'); return; }
+  const products = await getAll('products');
+  for(const item of toApply){
+    const p = products.find(x=>x.sku===item.matchedSku);
+    if(!p) continue;
+    p.stock = (p.stock===null||p.stock===undefined?0:p.stock) + item.qty;
+    await put('products', p);
+    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10});
+    const movement = {sku:p.sku, name:p.name, qty:item.qty, cost:item.cost||p.cost||0, btype:p.btype||'duka', ts:new Date().toISOString()};
+    await put('stock_movements', movement);
+    await queuePush('stock_movement', movement);
+  }
+  ocrPendingPayable.stockUpdateStatus = 'processed';
+  ocrPendingPayable.stockUpdateBy = currentUser.name;
+  ocrPendingPayable.stockUpdateAt = new Date().toISOString();
+  await put('payables', ocrPendingPayable);
+  await queuePush('payable_upsert', ocrPendingPayable);
+  logAudit('Invoice auto-read, stock updated', `${ocrPendingPayable.supplierName} — ${toApply.length} item(s), reviewed by ${currentUser.name}`);
+  toast(`Stock updated from ${ocrPendingPayable.supplierName}'s invoice`);
+  $('invoiceOcrModal').classList.remove('show');
+  ocrPendingPayable = null;
+  renderPayablesLists(); renderStockTable(); renderProductGrid(); updateStockLowBadge();
+});
 
 // ---------- Customer credit — what customers owe the shop ----------
 // Any signed-in role can add or settle one — a cashier extending credit to a regular, and
@@ -2881,6 +3188,7 @@ $('quickPayableBtn').addEventListener('click', ()=>{
   $('qpTerms').value = '30'; $('qpCustomDaysRow').style.display = 'none';
   $('qpInvoiceDateHidden').value = todayIso();
   recomputeQpDue();
+  applyPhotoUploadPermission();
   $('quickPayableModal').classList.add('show');
 });
 $('qpCancelBtn').addEventListener('click', ()=> $('quickPayableModal').classList.remove('show'));
@@ -2976,7 +3284,7 @@ async function renderReports(){
   const itemCount = sales.reduce((s,x)=>s+x.lines.reduce((a,l)=>a+l.qty,0),0);
   const cogs = sales.reduce((s,x)=>s + x.lines.reduce((a,l)=>a+(l.qty*(l.cost||0)),0), 0);
   const purchasesCost = movements.reduce((s,m)=>s+(m.qty*(m.cost||0)),0);
-  const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=5).length;
+  const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=(p.reorderThreshold||10)).length;
 
   // Payables/Customer credit — outstanding is a point-in-time balance (not period-filtered,
   // since "what you owe right now" doesn't mean anything scoped to "this week"); paid-this-
@@ -3028,6 +3336,61 @@ async function renderReports(){
   $('pmMpesaTotal').textContent = fmtKsh(mpesaTotal);
   $('pmReconcile').textContent = `${fmtKsh(cashTotal)} + ${fmtKsh(mpesaTotal)} = ${fmtKsh(cashTotal+mpesaTotal)} total revenue`;
   $('pmVatNote').textContent = vatEnabled ? `Includes ${fmtKsh(vatCollected)} VAT collected (held for KRA, not counted in Profit above).` : '';
+
+  // ---- Profit & Loss statement — same period as the stats above, laid out as a P&L ----
+  $('plPeriodLabel').textContent = periodLabel.toLowerCase();
+  const plRows = [
+    ['Sales revenue (net of refunds)', grossRevenue - refundTotal],
+    ['Customer credit collected this period', debtsPaidThisPeriod],
+    ['Gross revenue', (grossRevenue - refundTotal) + debtsPaidThisPeriod],
+    ['Less: VAT collected (held for KRA, not income)', -vatCollected],
+    ['Less: Cost of goods sold', -cogs],
+    ['Net Profit', profit],
+  ];
+  $('plTable').innerHTML = plRows.map(([label, val], idx)=>{
+    const isTotal = idx===plRows.length-1;
+    const color = val<0 ? 'var(--clay)' : (isTotal ? 'var(--sage-dark)' : 'var(--ink)');
+    return `<tr style="${isTotal?'border-top:2px solid var(--line); font-weight:800;':''}">
+      <td class="name">${label}</td>
+      <td style="text-align:right; color:${color}; font-weight:${isTotal?800:600};">${fmtKsh(val)}</td>
+    </tr>`;
+  }).join('');
+
+  // ---- Balance Sheet — point-in-time snapshot, not period-scoped ----
+  const allProductsForBS = await getAll('products'); // every business type — a shop's balance sheet isn't scoped to one till's active type
+  const stockValue = allProductsForBS.reduce((s,p)=> s + ((p.stock||0) * (p.cost||0)), 0);
+  const allSalesAllTime = await getAll('sales');
+  const cashCollectedAllTime = allSalesAllTime.filter(s=>s.method==='cash').reduce((s,x)=>s+x.total,0);
+  const mpesaCollectedAllTime = allSalesAllTime.filter(s=>s.method==='mpesa').reduce((s,x)=>s+x.total,0);
+  const allRefundsAllTime = await getAll('refunds');
+  const refundsAllTime = allRefundsAllTime.reduce((s,r)=>s+r.amount,0);
+  const cashAndMpesa = cashCollectedAllTime + mpesaCollectedAllTime - refundsAllTime;
+  const debtorsBS = debtsOutstanding; // customers who still owe — an asset (money coming in)
+  const payablesBS = payablesOutstanding; // suppliers owed — a liability (money going out)
+  const totalAssets = cashAndMpesa + stockValue + debtorsBS;
+  const totalLiabilities = payablesBS;
+  const equity = totalAssets - totalLiabilities;
+  const bsRows = [
+    ['Assets', null],
+    ['Cash & M-Pesa collected (all-time, net of refunds)', cashAndMpesa],
+    ['Stock on hand (at cost)', stockValue],
+    ['Customers owe you (debtors)', debtorsBS],
+    ['Total Assets', totalAssets],
+    ['Liabilities', null],
+    ['You owe suppliers (payables)', -payablesBS],
+    ['Total Liabilities', -totalLiabilities],
+    ["Owner's Equity (Assets − Liabilities)", equity],
+  ];
+  $('bsTable').innerHTML = bsRows.map(([label, val])=>{
+    if(val===null) return `<tr><td colspan="2" style="font-weight:800; padding-top:12px; border-bottom:1px solid var(--line);">${label}</td></tr>`;
+    const isTotal = label.startsWith('Total') || label.includes('Equity');
+    const color = val<0 ? 'var(--clay)' : (isTotal ? 'var(--sage-dark)' : 'var(--ink)');
+    return `<tr style="${isTotal?'border-top:1px solid var(--line); font-weight:800;':''}">
+      <td class="name" style="padding-left:12px;">${label}</td>
+      <td style="text-align:right; color:${color}; font-weight:${isTotal?800:600};">${fmtKsh(Math.abs(val))}</td>
+    </tr>`;
+  }).join('');
+
 
   // Per-business-type breakdown — only meaningful (and only shown) when this till is
   // combining more than one business, so a losing line can't hide behind a winning one.
@@ -3400,6 +3763,7 @@ async function pushToSupabase(item){
       id:p.id, shop_id:shopId, supplier_name:p.supplierName, amount:p.amount,
       invoice_date:p.invoiceDate, due_date:p.dueDate, photo:p.photo, notes:p.notes,
       status:p.status, added_by:p.addedBy, paid_date:p.paidDate, paid_by:p.paidBy,
+      stock_update_status:p.stockUpdateStatus||null, stock_update_by:p.stockUpdateBy||null, stock_update_at:p.stockUpdateAt||null,
       updated_at:p.updated_at || new Date().toISOString(),
     };
   }
@@ -3467,7 +3831,7 @@ async function runSyncLoop(){
       }
       await del('sync_queue', item.id);
       log(`✓ Synced ${item.type} (${item.type==='sale'?fmtKsh(item.payload.total):item.payload.name})`,'ok');
-    }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); break; }
+    }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); }
   }
   updatePendingBadge(); renderReports();
   if(live) await pullShopData();
@@ -3639,7 +4003,7 @@ async function pullShopData(fullPull, force){
       for(const rp of remotePayables){
         const lp = localPayables.find(p=>p.id===rp.id);
         if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
-          await put('payables', {id:rp.id, supplierName:rp.supplier_name, amount:rp.amount, invoiceDate:rp.invoice_date, dueDate:rp.due_date, photo:rp.photo, notes:rp.notes, status:rp.status, addedBy:rp.added_by, paidDate:rp.paid_date, paidBy:rp.paid_by, updated_at:rp.updated_at});
+          await put('payables', {id:rp.id, supplierName:rp.supplier_name, amount:rp.amount, invoiceDate:rp.invoice_date, dueDate:rp.due_date, photo:rp.photo, notes:rp.notes, status:rp.status, addedBy:rp.added_by, paidDate:rp.paid_date, paidBy:rp.paid_by, stockUpdateStatus:rp.stock_update_status||null, stockUpdateBy:rp.stock_update_by||null, stockUpdateAt:rp.stock_update_at||null, updated_at:rp.updated_at});
         }
       }
     }
@@ -4552,7 +4916,7 @@ async function verifyPinModal(){
   const entered = $('pinInput').value;
   const users = await getAll('users');
   let match;
-  if(pinModalMode==='admin_override') match = users.find(u=>u.role==='admin' && u.pin===entered && u.active!==false);
+  if(pinModalMode==='admin_override') match = users.find(u=>(u.role==='admin'||u.role==='supervisor') && u.pin===entered && u.active!==false);
   else if(pinModalMode==='approval') match = users.find(u=>(u.role==='supervisor'||u.role==='admin') && u.pin===entered && u.active!==false);
   if(match){
     $('pinModal').classList.remove('show');
@@ -4706,7 +5070,7 @@ function switchBackofficeView(viewName){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-'+viewName).classList.add('active');
   if(viewName==='business'){ renderBizGrid(); populateProfileForm(); updateDeviceDiagnostics(); }
-  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); renderReorderPanel(); }
+  if(viewName==='stock'){ renderStockTable(); renderStockTakePanel(); renderReorderPanel(); renderPoList(); }
   if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
   if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
   if(viewName==='removals') renderRemovalsList();
@@ -4725,12 +5089,17 @@ function openBackoffice(){
   const isRealAdmin = currentUser && currentUser.role==='admin';
   document.querySelectorAll('.admin-only-tab').forEach(b => b.style.display = isRealAdmin ? '' : 'none');
   switchBackofficeView('business');
+  updateStockLowBadge();
 }
 $('adminGearBtn').addEventListener('click', ()=>{
-  if(currentUser && currentUser.role==='admin'){ logAudit('Opened admin back office'); openBackoffice(); return; }
+  if(currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor')){
+    logAudit('Opened back office');
+    openBackoffice();
+    return;
+  }
   openPinModal({
     title:'Manager override',
-    sub:'Enter an admin PIN for temporary access to Business, Stock, Reports and Sync setup. Staff management and the Audit Log stay Admin-only.',
+    sub:'Enter an admin or supervisor PIN for temporary access to Business, Stock, Reports and Sync setup. Staff management and the Audit Log stay Admin-only.',
     mode:'admin_override',
     onVerified: ()=>{ logAudit('Manager override used', `by ${currentUser?currentUser.name:'unknown'} (${currentUser?currentUser.role:'-'})`); openBackoffice(); }
   });
@@ -4999,6 +5368,7 @@ async function completeSignIn(u, opts={}){
     setTimeout(()=>toast("Set up your business profile under Admin → Business"), opts.isNewSetup ? 3600 : 2200);
   }
   await updateStockTakeBanner();
+  await updateStockLowBadge();
   scanInput.focus();
 }
 async function updateStockTakeBanner(){
