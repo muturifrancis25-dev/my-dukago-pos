@@ -5625,7 +5625,7 @@ async function handleSetPinDigit(k){
   }
   $('setPinError').textContent = 'Checking this PIN is available…';
   if(!shopId) await registerNewShop(); // creates the shop record itself, first time only
-  const uniqueCheck = await isPinGloballyUnique(setPinFirstEntry, 'u_admin');
+  const uniqueCheck = await isPinGloballyUnique(setPinFirstEntry, 'u_admin_'+shopId);
   if(!uniqueCheck.unique){
     $('setPinError').textContent = `That PIN is already in use — choose a different one.`;
     shakeSetPinDots();
@@ -5634,7 +5634,7 @@ async function handleSetPinDigit(k){
   }
   $('setPinError').textContent = '';
   const adminEmail = $('setPinEmailInput').value.trim();
-  const adminUser = {id:'u_admin', name:'Admin', role:'admin', pin:setPinFirstEntry, active:true, email: adminEmail || null};
+  const adminUser = {id:'u_admin_'+shopId, name:'Admin', role:'admin', pin:setPinFirstEntry, active:true, email: adminEmail || null};
   await put('users', adminUser);
   await queuePush('staff_upsert', adminUser);
   setPinBuffer=''; setPinFirstEntry='';
