@@ -231,7 +231,10 @@
      not on one input at a time. */
   .panel label, .modal-box label{display:block; font-size:12.5px; font-weight:600; color:var(--ink); margin:10px 0 4px;}
   .panel label:first-child, .modal-box label:first-child{margin-top:0;}
-  .panel > input:not(.form-row input), .panel > select:not(.form-row select){
+  .panel input:not(.form-row input):not([type="file"]):not([type="checkbox"]):not([type="hidden"]),
+  .panel select:not(.form-row select),
+  .modal-box input:not([type="file"]):not([type="checkbox"]):not([type="hidden"]),
+  .modal-box select{
     width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); font-size:13px; font-family:var(--sans);
   }
 
@@ -2669,11 +2672,11 @@ async function renderStockTable(){
     const margin = cost>0 ? (((p.price-cost)/p.price)*100).toFixed(0)+'%' : '—';
     const tr = document.createElement('tr');
     tr.innerHTML = `<td class="name">${p.name}${low?'<span class="low-badge">LOW</span>':''}</td><td>${p.cat}</td><td>${p.sku}</td><td>${isService?'Unlimited':p.stock}</td><td>${cost>0?fmtKsh(cost):'—'}</td><td>${fmtKsh(p.price)}</td><td>${margin}</td>
-      <td style="white-space:nowrap; display:flex; gap:6px;">
+      <td style="white-space:nowrap;"><span style="display:flex; gap:6px;">
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="edit" data-sku="${p.sku}">Edit</button>
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="rename" data-sku="${p.sku}">SKU</button>
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;color:var(--clay);" data-act="delete" data-sku="${p.sku}">Delete</button>
-      </td>`;
+      </span></td>`;
     body.appendChild(tr);
   });
   body.querySelectorAll('button[data-act]').forEach(b=>{
@@ -4222,20 +4225,37 @@ async function lookupPinGlobally(pinValue){
 }
 // Pulls one specific shop's data down by shop_id — used once a global PIN lookup reveals
 // which shop a person belongs to.
-async function pullSpecificShop(targetShopId){
-  const prevShopId = shopId;
-  shopId = targetShopId;
-  await put('settings', {key:'shop_id', value:shopId});
-  // This device is adopting a shop identity it's never had before (or switching to a
-  // different one) — any locally-saved business type/VAT/profile/receipt settings belong
-  // to whatever this device was doing previously and are meaningless now. Clear them before
-  // pulling, so the real shop's data always wins cleanly instead of possibly losing a stale
-  // "which was updated more recently" comparison against leftovers that don't even belong
-  // to this shop.
-  for(const key of ['active_business_types','vat','business_profile','receipt']){
+// Wipes every shop-scoped local store before this device adopts a different shop's
+// identity. Previously only 4 settings keys were cleared here — products, sales, staff,
+// payables, customer credit, purchase orders and stock movements were left sitting from
+// whatever shop this device touched before, silently accumulating across shop switches.
+// That's what let one shop's login end up showing another shop's data on a shared device.
+// till_label is deliberately left alone — it's a per-device counter label, not shop data.
+async function clearLocalShopData(){
+  const storesToClear = [
+    'products','users','sales','stock_movements','daily_snapshots','stock_takes',
+    'refunds','payables','customer_debts','removal_requests','purchase_orders','audit_log'
+  ];
+  for(const store of storesToClear){
+    await new Promise(res=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>res(); });
+  }
+  for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_business_types','credit_sales_enabled','last_stock_take_at']){
     try{ await del('settings', key); }catch(e){ /* fine if it never existed locally */ }
   }
-  await pullShopData(true);
+}
+async function pullSpecificShop(targetShopId){
+  const prevShopId = shopId;
+  // If this device still has changes that haven't reached the backend, they belong to
+  // whichever shop is currently loaded — wiping local stores now would lose them forever.
+  // Refuse the switch rather than silently destroying unsynced sales/stock data.
+  const pendingQueue = await getAll('sync_queue');
+  if(pendingQueue.length > 0){
+    throw new Error(`This device has ${pendingQueue.length} unsynced change(s) from its current shop — connect to the internet and let it sync before switching to a different shop's PIN.`);
+  }
+  shopId = targetShopId;
+  await put('settings', {key:'shop_id', value:shopId});
+  await clearLocalShopData();
+  await pullShopData(true, true); // force=true — a shop switch must always trust the server completely, never a stale local timestamp comparison
   logAudit('Auto-joined shop via PIN lookup', prevShopId ? `was ${prevShopId}` : 'first shop on this device');
 }
 // Checked before saving ANY new or changed PIN — local first (works offline), then the whole
@@ -5191,11 +5211,11 @@ async function renderStaffTable(){
       <td>${roleCell}</td>
       <td>${u.pin}</td>
       <td>${revoked ? '<span style="color:var(--clay);font-weight:700;">Revoked</span>' : '<span style="color:var(--sage-dark);font-weight:700;">Active</span>'}</td>
-      <td style="display:flex; gap:6px;">
+      <td style="white-space:nowrap;"><span style="display:flex; gap:6px;">
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="pin" data-id="${u.id}">Change PIN</button>
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="${revoked?'reactivate':'revoke'}" data-id="${u.id}">${revoked?'Reactivate':'Revoke'}</button>
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;color:var(--clay);" data-act="remove" data-id="${u.id}">Remove</button>
-      </td>`;
+      </span></td>`;
     body.appendChild(tr);
   });
   body.querySelectorAll('.role-select').forEach(sel=>{
@@ -5556,8 +5576,14 @@ async function tryPinCheckpoint(){
   if(isOnline && backendLive()){
     const remoteMatch = await lookupPinGlobally(pinBuffer);
     if(remoteMatch){
-      await pullSpecificShop(remoteMatch.shop_id);
-      attemptLogin(); // local data now has this person in it — try again
+      try{
+        await pullSpecificShop(remoteMatch.shop_id);
+        attemptLogin(); // local data now has this person in it — try again
+      }catch(e){
+        toast(e.message || 'Could not switch to that shop on this device');
+        shakePinDots();
+        pinBuffer=''; setTimeout(updatePinDots, 200);
+      }
       return;
     }
   }
