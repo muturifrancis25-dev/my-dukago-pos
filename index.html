@@ -223,6 +223,18 @@
   .form-row input:focus, .form-row select:focus{outline:2px solid var(--blue); border-color:var(--blue);}
   .primary-btn{background:var(--teal-dark); color:#fff; border:none; padding:10px 16px; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer; font-family:var(--display);}
 
+  /* A bare <label> outside .form-row had no display rule at all, so it defaulted to
+     inline — sitting flush against whatever followed it (an input collapsed to its tiny
+     browser-default width, then the next label right after on the same line). This is
+     what made Payables' Notes/Photo fields look cramped together. Every field below a
+     panel's first .form-row grid uses this same bare pattern, so the fix belongs here,
+     not on one input at a time. */
+  .panel label, .modal-box label{display:block; font-size:12.5px; font-weight:600; color:var(--ink); margin:10px 0 4px;}
+  .panel label:first-child, .modal-box label:first-child{margin-top:0;}
+  .panel > input:not(.form-row input), .panel > select:not(.form-row select){
+    width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); font-size:13px; font-family:var(--sans);
+  }
+
   table{width:100%; border-collapse:collapse; font-size:12.5px;}
   .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -2px;}
   .table-scroll table{min-width:520px;}
@@ -707,7 +719,7 @@
         <div><label>Due date</label><input id="payableDueDate" type="date"></div>
       </div>
       <label>Notes (optional)</label>
-      <input id="payableNotes" placeholder="e.g. Invoice #4521, weekly stock delivery" style="margin-bottom:10px;">
+      <input id="payableNotes" placeholder="e.g. Invoice #4521, weekly stock delivery" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-bottom:10px;">
       <label>Photo of invoice (optional)</label>
       <div id="payablePhotoSection">
       <input id="payablePhotoInput" type="file" accept="image/*" capture="environment" style="margin-bottom:10px; width:100%;">
