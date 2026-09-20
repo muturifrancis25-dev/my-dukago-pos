@@ -421,6 +421,19 @@
     .stmt-table tr.stmt-subtotal td{border-top:1px solid #000; font-weight:700; padding-top:8px;}
     .stmt-table tr.stmt-total td{border-top:3px double #000; font-weight:800; font-size:14px; padding-top:10px;}
     .stmt-footer{margin-top:26px; padding-top:10px; border-top:1px solid #ccc; font-size:10px; color:#555; line-height:1.5;}
+
+    /* ---- Kitchen ticket — large, no prices, meant to be read fast from across a
+       kitchen, not itemized for a customer. Uses the receipt paper width setting
+       since it's printed on the same till printer as receipts/POs. ---- */
+    body.printing-kitchen > *{ display:none !important; }
+    body.printing-kitchen #receiptPrintArea{
+      display:block !important; font-family:'Courier New',monospace; color:#000; margin:0 auto; width:100%;
+    }
+    .kt-header{font-weight:800; text-align:center; font-size:1.6em; margin-bottom:2px; text-transform:uppercase;}
+    .kt-meta{text-align:center; font-size:0.85em; margin-bottom:6px;}
+    .kt-divider{border-top:2px dashed #000; margin:6px 0;}
+    .kt-line{display:flex; gap:10px; padding:5px 0; font-size:1.3em; font-weight:700;}
+    .kt-qty{flex:none; min-width:1.6em;}
     .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
     .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
     .rcpt-divider{border-top:1px dashed #000; margin:6px 0;}
@@ -515,10 +528,20 @@
       <span id="stockTakeBannerText" style="font-weight:600;"></span>
       <button class="primary-btn" id="stockTakeBannerBtn" style="padding:6px 14px; font-size:11.5px; display:none;">Start stock take</button>
     </div>
+    <!-- Table Service — only shown when Restaurant is an active business type on this till.
+         A table is an "open order" that exists independently of a completed sale: items
+         accumulate across rounds, each round sent to the kitchen prints immediately, and
+         the table only becomes a real recorded sale once the bill is settled. -->
+    <div id="tablesBarWrap" style="display:none; padding:10px 18px 4px;">
+      <div style="display:flex; align-items:center; gap:8px; overflow-x:auto; padding-bottom:6px;">
+        <button class="primary-btn" id="newTableBtn" style="flex:none; padding:9px 16px; font-size:12.5px;">+ New table</button>
+        <div id="tablesBarChips" style="display:flex; gap:8px;"></div>
+      </div>
+    </div>
     <div class="till-grid">
 
       <!-- Receipt panel -->
-      <div class="receipt-panel">
+      <div class="receipt-panel" id="walkInReceiptPanel">
         <div class="customer-strip">
           <div class="avatar">W</div>
           <div><div class="cname">Walk-in customer</div><div class="csub">No loyalty account</div></div>
@@ -549,6 +572,29 @@
           <button class="btn-clear" id="clearCartBtn">Clear</button>
           <button class="btn-pay" id="checkoutBtn" disabled>PAY</button>
         </div>
+      </div>
+
+      <!-- Table Order panel — swaps in for the walk-in receipt panel while a table is
+           selected. Shown/hidden by JS, never both at once. -->
+      <div class="receipt-panel" id="tableOrderPanel" style="display:none;">
+        <div class="customer-strip">
+          <div class="avatar" id="tableOrderAvatar">T</div>
+          <div><div class="cname" id="tableOrderLabel">Table</div><div class="csub" id="tableOrderSub">Open order</div></div>
+          <button class="icon-btn" id="tableOrderExitBtn" style="margin-left:auto; color:var(--muted);" title="Back to walk-in sale">✕</button>
+        </div>
+        <div class="receipt-lines">
+          <div class="rline-head"><span>Item</span><span>Qty</span><span>Price</span><span></span></div>
+          <div id="tableOrderList"><div class="receipt-empty">No items yet — tap a product to add it to this table</div></div>
+        </div>
+        <div class="totals-block">
+          <div class="trow"><span>Subtotal</span><span id="tableOrderSubTotal">KSh 0</span></div>
+          <div class="trow grand"><span>Bill so far</span><span id="tableOrderGrandTotal">KSh 0</span></div>
+        </div>
+        <div class="action-row" style="grid-template-columns:1fr 1fr;">
+          <button class="btn-clear" id="sendToKitchenBtn">🍳 Send to kitchen</button>
+          <button class="btn-pay" id="settleTableBtn" disabled>Settle bill</button>
+        </div>
+        <p class="hint" id="tableOrderKitchenStatus" style="margin:0 14px 14px; font-size:11px;"></p>
       </div>
 
       <!-- Product tiles -->
@@ -618,6 +664,7 @@
         <div><b style="font-size:13px; font-family:var(--display);">Combine multiple types</b><br><span class="hint" style="margin:0;">Running more than one business from this counter? Turn this on to pick several — e.g. Duka + Carwash — in one go.</span></div>
         <button class="primary-btn" id="combineModeBtn">Turn on</button>
       </div>
+      <p class="hint" id="combineLockedNotice" style="display:none; margin:8px 0 0;">Running more than one business type on this counter is enabled by your platform administrator — contact them if you need this turned on.</p>
       <div class="biz-grid" id="bizGrid"></div>
       <button class="btn-pay" id="applyCombineBtn" style="display:none; margin-top:14px; width:100%;">Apply combination</button>
     </div>
@@ -1399,6 +1446,31 @@
   </div>
 </div>
 
+<!-- Manage Shop — Super Admin only. Lets the platform administrator set a shop's active
+     business types remotely (self-service combining is locked to Super Admin now — see
+     the combine-mode gate), and reset a locked-out admin's PIN when a shop is stuck. -->
+<div class="modal-overlay" id="manageShopModal">
+  <div class="modal-box" style="width:min(92vw,420px); text-align:left; max-height:80vh; overflow-y:auto;">
+    <h3 style="text-align:center;">Manage shop</h3>
+    <p class="hint" id="manageShopName" style="text-align:center; margin:0 0 14px;">—</p>
+
+    <h3 style="font-size:13.5px;">Business types</h3>
+    <p class="hint">Check every type this shop should be able to sell under. Unchecked types become unavailable on their counter until you enable them here again.</p>
+    <div id="manageShopBizTypes" style="margin-bottom:10px;">Loading…</div>
+    <button class="primary-btn" id="manageShopSaveBizBtn" style="width:100%; margin-bottom:18px;">Save business types</button>
+
+    <h3 style="font-size:13.5px;">Reset admin PIN</h3>
+    <p class="hint">For a shop that's locked out — sets a new PIN for their Admin account directly. Tell them the new PIN through a separate channel; this doesn't notify them automatically.</p>
+    <div id="manageShopAdminInfo" style="margin-bottom:8px; font-size:12.5px; color:var(--muted);">Loading…</div>
+    <input id="manageShopNewPin" placeholder="New 6-digit PIN" maxlength="6" inputmode="numeric" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-bottom:10px;">
+    <button class="primary-btn" id="manageShopResetPinBtn" style="width:100%; background:var(--clay);">Reset admin PIN</button>
+
+    <div class="modal-actions" style="margin-top:18px;">
+      <button class="modal-cancel" id="manageShopCloseBtn" style="width:100%;">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Receive a purchase order — supplier's invoice number links to this PO, stock updates -->
 <div class="modal-overlay" id="receivePoModal">
   <div class="modal-box" style="width:min(90vw,360px); text-align:left;">
@@ -1654,6 +1726,39 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'SP-SEATCOVER', name:'Seat Cover Set', price:3500, stock:8, cat:'Accessories'},
       {sku:'SP-AIRFRESHENER', name:'Car Air Freshener', price:200, stock:35, cat:'Accessories'},
     ]
+  },
+  restaurant: {
+    label:'Restaurant', emoji:'🍽️',
+    desc:'Menu items sold as services — no table or kitchen-ticket management yet, just a sellable menu.',
+    subtitle:'Restaurant', unitLabel:'per order',
+    cats:['Starters','Main Course','Drinks','Desserts','Other'],
+    colors:{Starters:'#e2a034', 'Main Course':'#b33f2e', Drinks:'#2f7a8c', Desserts:'#6a4c93', Other:'#5c6670'},
+    starter:[
+      {sku:'REST-SAMOSA', name:'Samosa (3pc)', price:150, stock:null, cat:'Starters'},
+      {sku:'REST-SOUP', name:'Soup of the Day', price:250, stock:null, cat:'Starters'},
+      {sku:'REST-UGALI-BEEF', name:'Ugali with Beef Stew', price:400, stock:null, cat:'Main Course'},
+      {sku:'REST-PILAU', name:'Pilau with Chicken', price:450, stock:null, cat:'Main Course'},
+      {sku:'REST-FISH', name:'Grilled Tilapia', price:600, stock:null, cat:'Main Course'},
+      {sku:'REST-CHAPATI', name:'Chapati (each)', price:30, stock:null, cat:'Main Course'},
+      {sku:'REST-SODA', name:'Soda 500ml', price:100, stock:null, cat:'Drinks'},
+      {sku:'REST-JUICE', name:'Fresh Juice', price:200, stock:null, cat:'Drinks'},
+      {sku:'REST-ICECREAM', name:'Ice Cream Scoop', price:150, stock:null, cat:'Desserts'},
+    ]
+  },
+  hotel: {
+    label:'Hotel / Lodge', emoji:'🏨',
+    desc:'Room rates sold as services — no real booking calendar or check-in/out dates yet, just a sellable rate list.',
+    subtitle:'Hotel', unitLabel:'per night',
+    cats:['Rooms','Conferencing','Food & Beverage','Other'],
+    colors:{Rooms:'#2f7a8c', Conferencing:'#6a4c93', 'Food & Beverage':'#e2a034', Other:'#5c6670'},
+    starter:[
+      {sku:'HTL-SINGLE', name:'Single Room (per night)', price:2500, stock:null, cat:'Rooms'},
+      {sku:'HTL-DOUBLE', name:'Double Room (per night)', price:3800, stock:null, cat:'Rooms'},
+      {sku:'HTL-SUITE', name:'Executive Suite (per night)', price:7500, stock:null, cat:'Rooms'},
+      {sku:'HTL-CONFERENCE', name:'Conference Room (half-day)', price:5000, stock:null, cat:'Conferencing'},
+      {sku:'HTL-BREAKFAST', name:'Breakfast (per guest)', price:600, stock:null, cat:'Food & Beverage'},
+      {sku:'HTL-DINNER', name:'Dinner (per guest)', price:1200, stock:null, cat:'Food & Beverage'},
+    ]
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
@@ -1703,7 +1808,7 @@ const $ = id => document.getElementById(id);
 // ---------- IndexedDB ----------
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('soko_pos_db_v1', 9);
+    const req = indexedDB.open('soko_pos_db_v1', 10);
     req.onupgradeneeded = e=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains('products')) d.createObjectStore('products',{keyPath:'sku'});
@@ -1720,6 +1825,7 @@ function openDB(){
       if(!d.objectStoreNames.contains('customer_debts')) d.createObjectStore('customer_debts',{keyPath:'id'});
       if(!d.objectStoreNames.contains('removal_requests')) d.createObjectStore('removal_requests',{keyPath:'id'});
       if(!d.objectStoreNames.contains('purchase_orders')) d.createObjectStore('purchase_orders',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('open_orders')) d.createObjectStore('open_orders',{keyPath:'id'});
     };
     req.onsuccess = e=>resolve(e.target.result);
     req.onerror = e=>reject(e);
@@ -1819,6 +1925,7 @@ async function applyBusinessTypes(typeIds, {announce=true, pushToBackend=true} =
   }
   renderCatRow();
   await renderProductGrid();
+  updateTableServiceVisibility();
   if(announce){
     const label = selected.length>1 ? selected.map(t=>t.label).join(' + ') : selected[0].label;
     toast(added ? `Now on ${label} — ${added} starter item(s) loaded` : `Now on ${label}`);
@@ -1893,6 +2000,7 @@ async function renderProductGrid(){
 
 // ---------- Cart ----------
 async function addToCart(sku){
+  if(activeTableId){ return addItemToTable(sku); }
   const products = await getAll('products');
   const p = products.find(x=>x.sku===sku);
   if(!p){ toast('Unknown barcode: '+sku); return; }
@@ -2176,10 +2284,16 @@ async function loadAllShopsList(){
             <span style="color:var(--muted); font-family:var(--mono); font-size:10.5px;">${s.id}</span><br>
             <span style="color:var(--muted);">Set up ${created}</span>
           </div>
-          <button class="${isActive ? 'modal-cancel' : 'primary-btn'}" data-toggle-shop="${s.id}" data-currently-active="${isActive}" style="font-size:11px; padding:6px 10px; flex:none;">${isActive ? 'Deactivate' : 'Reactivate'}</button>
+          <div style="display:flex; flex-direction:column; gap:6px; flex:none;">
+            <button class="${isActive ? 'modal-cancel' : 'primary-btn'}" data-toggle-shop="${s.id}" data-currently-active="${isActive}" style="font-size:11px; padding:6px 10px;">${isActive ? 'Deactivate' : 'Reactivate'}</button>
+            <button class="modal-cancel" data-manage-shop="${s.id}" data-shop-name="${(s.name||'Unnamed shop').replace(/"/g,'&quot;')}" style="font-size:11px; padding:6px 10px;">Manage</button>
+          </div>
         </div>
       `;
       box.appendChild(row);
+    });
+    box.querySelectorAll('button[data-manage-shop]').forEach(btn=>{
+      btn.addEventListener('click', ()=> openManageShopModal(btn.dataset.manageShop, btn.dataset.shopName));
     });
     box.querySelectorAll('button[data-toggle-shop]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
@@ -2206,6 +2320,92 @@ async function loadAllShopsList(){
   }
 }
 $('saRefreshShopsBtn').addEventListener('click', loadAllShopsList);
+
+// ---------- Manage Shop — Super Admin remote controls ----------
+let manageShopTargetId = null;
+async function openManageShopModal(shopId, shopName){
+  manageShopTargetId = shopId;
+  $('manageShopName').textContent = shopName;
+  $('manageShopNewPin').value = '';
+  $('manageShopModal').classList.add('show');
+  await renderManageShopBizTypes(shopId);
+  await renderManageShopAdminInfo(shopId);
+}
+$('manageShopCloseBtn').addEventListener('click', ()=> $('manageShopModal').classList.remove('show'));
+
+async function renderManageShopBizTypes(targetShopId){
+  const box = $('manageShopBizTypes');
+  box.innerHTML = 'Loading…';
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.active_business_types&select=value`, {headers: mpesaFunctionHeaders()});
+    const rows = res.ok ? await res.json() : [];
+    const current = rows.length ? rows[0].value : ['duka'];
+    const types = allBusinessTypes(); // built-in + platform types — a shop's own custom types aren't visible platform-wide, so aren't offered here
+    box.innerHTML = Object.keys(types).map(id=>{
+      const t = types[id];
+      return `<label style="display:flex; align-items:center; gap:8px; padding:6px 0; margin:0; font-weight:400; font-size:12.5px;">
+        <input type="checkbox" data-biz-id="${id}" ${current.includes(id)?'checked':''}> ${t.emoji} ${t.label}
+      </label>`;
+    }).join('');
+  }catch(e){
+    box.innerHTML = '<p class="hint" style="color:var(--clay);">Could not load — check the connection.</p>';
+  }
+}
+$('manageShopSaveBizBtn').addEventListener('click', async ()=>{
+  if(!manageShopTargetId) return;
+  const checked = [...$('manageShopBizTypes').querySelectorAll('input[data-biz-id]:checked')].map(el=>el.dataset.bizId);
+  if(checked.length===0){ toast('Select at least one business type'); return; }
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
+      method:'POST', headers: mpesaFunctionHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify({shop_id:manageShopTargetId, key:'active_business_types', value:checked, updated_at:new Date().toISOString()}),
+    });
+    if(!res.ok){ toast('Could not save — check the connection'); return; }
+    logAudit('Set business types remotely (Platform Administrator)', `${$('manageShopName').textContent} → ${checked.join(', ')}`);
+    toast('Business types updated — that shop will pick it up next time it syncs');
+  }catch(e){
+    toast('Could not save — check the connection');
+  }
+});
+
+async function renderManageShopAdminInfo(targetShopId){
+  const box = $('manageShopAdminInfo');
+  box.textContent = 'Loading…';
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${targetShopId}&role=eq.admin&active=eq.true&select=id,name,pin`, {headers: mpesaFunctionHeaders()});
+    const rows = res.ok ? await res.json() : [];
+    if(rows.length===0){ box.textContent = 'No active admin account found for this shop.'; return; }
+    box.innerHTML = rows.map(a=>`${a.name} — current PIN ${a.pin}`).join('<br>');
+  }catch(e){
+    box.textContent = 'Could not load — check the connection.';
+  }
+}
+$('manageShopResetPinBtn').addEventListener('click', async ()=>{
+  if(!manageShopTargetId) return;
+  const newPin = $('manageShopNewPin').value.trim();
+  if(!/^\d{6}$/.test(newPin)){ toast('Enter a 6-digit PIN'); return; }
+  if(!confirm(`Reset this shop's admin PIN to ${newPin}? Make sure to tell them the new PIN yourself — this doesn't send it to them.`)) return;
+  try{
+    // Same platform-wide safety check as any other PIN change — even a Super Admin reset
+    // must not create a collision with some other shop's staff.
+    const uniqueCheck = await isPinGloballyUnique(newPin, null);
+    if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
+    const staffRes = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${manageShopTargetId}&role=eq.admin&active=eq.true&select=id`, {headers: mpesaFunctionHeaders()});
+    const rows = staffRes.ok ? await staffRes.json() : [];
+    if(rows.length===0){ toast('No active admin account found for this shop'); return; }
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?id=eq.${rows[0].id}`, {
+      method:'PATCH', headers: mpesaFunctionHeaders({'Prefer':'return=minimal'}),
+      body: JSON.stringify({pin:newPin, updated_at:new Date().toISOString()}),
+    });
+    if(!res.ok){ toast('Could not reset — check the connection'); return; }
+    logAudit('Reset a shop admin PIN (Platform Administrator)', $('manageShopName').textContent);
+    toast('Admin PIN reset — tell them the new PIN directly');
+    $('manageShopNewPin').value = '';
+    renderManageShopAdminInfo(manageShopTargetId);
+  }catch(e){
+    toast('Could not reset — check the connection');
+  }
+});
 
 function renderPlatformBizTypesList(){
   const box = $('saBizTypesList');
@@ -2239,8 +2439,8 @@ $('saAddBizTypeBtn').addEventListener('click', async ()=>{
   }
 });
 
-function mpesaFunctionHeaders(){
-  return {'Content-Type':'application/json', 'Authorization':'Bearer '+PLATFORM_SUPABASE_KEY, 'apikey':PLATFORM_SUPABASE_KEY};
+function mpesaFunctionHeaders(extra){
+  return Object.assign({'Content-Type':'application/json', 'Authorization':'Bearer '+PLATFORM_SUPABASE_KEY, 'apikey':PLATFORM_SUPABASE_KEY}, extra||{});
 }
 async function triggerStkPush(phone, amount){
   const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/mpesa-initiate`, {
@@ -2444,6 +2644,20 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
   const itemSummary = lines.map(l=>`${l.qty}× ${l.name}`).join(', ');
   logAudit('Sale completed', `${fmtKsh(total)} via ${method} — ${itemSummary}`);
   cart=[]; renderCart(); renderProductGrid(); updatePendingBadge(); updateStockLowBadge();
+  if(settlingTableId){
+    const tables = await getAll('open_orders');
+    const table = tables.find(t=>t.id===settlingTableId);
+    if(table){
+      table.status = 'settled';
+      table.settledAt = new Date().toISOString();
+      table.settledSaleId = sale.id;
+      await put('open_orders', table);
+      await queuePush('table_order_upsert', table);
+      logAudit('Table settled', `${table.label} — ${fmtKsh(total)}`);
+    }
+    settlingTableId = null;
+    exitTableMode();
+  }
   showSaleComplete(sale);
 }
 
@@ -3004,6 +3218,209 @@ $('downloadBSBtn').addEventListener('click', async ()=>{
   const d = await computeBSStatementData();
   logAudit('Printed/saved Balance Sheet');
   printStatementDocument(buildBSStatementHTML(d));
+});
+
+// ======================================================================
+// TABLE SERVICE (Option B) — open tables that exist independently of a completed
+// sale. Items accumulate across rounds; each round sent to the kitchen prints
+// immediately with no prices; the bill only becomes a real `sales` record — the
+// same kind Reports/P&L already understand — once it's settled. Settlement reuses
+// the existing cash/M-Pesa checkout flow unchanged (see the settlingTableId hook
+// at the end of finalizeSale) rather than duplicating payment logic.
+// ======================================================================
+let activeTableId = null;
+let settlingTableId = null;
+
+function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant'); }
+function updateTableServiceVisibility(){
+  const enabled = tableServiceEnabled();
+  $('tablesBarWrap').style.display = enabled ? 'block' : 'none';
+  if(enabled) renderTablesBar();
+  if(!enabled && activeTableId) exitTableMode();
+}
+
+async function renderTablesBar(){
+  const box = $('tablesBarChips');
+  if(!box) return;
+  const tables = (await getAll('open_orders')).filter(t=>t.status==='open').sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
+  box.innerHTML = tables.map(t=>{
+    const total = t.lines.reduce((s,l)=>s+l.price*l.qty,0);
+    const unsent = t.lines.filter(l=>!l.sentToKitchen).length;
+    const isActive = t.id===activeTableId;
+    return `<button class="cat-chip${isActive?' active':''}" data-table-chip="${t.id}" style="white-space:nowrap; position:relative;">
+      ${t.label} · ${fmtKsh(total)}${unsent>0?`<span style="background:var(--clay); color:#fff; font-size:9px; font-weight:800; padding:1px 5px; border-radius:999px; margin-left:5px;">${unsent}</span>`:''}
+    </button>`;
+  }).join('');
+  box.querySelectorAll('button[data-table-chip]').forEach(b=>{
+    b.addEventListener('click', ()=> selectTable(b.dataset.tableChip));
+  });
+}
+
+$('newTableBtn').addEventListener('click', async ()=>{
+  const label = prompt('Table label (e.g. Table 4, Booth 2):');
+  if(!label || !label.trim()) return;
+  const table = {
+    id: 'tbl_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    label: label.trim(), status: 'open', lines: [],
+    openedBy: currentUser ? currentUser.name : 'Unknown', openedAt: new Date().toISOString(),
+    settledAt: null, settledSaleId: null,
+  };
+  await put('open_orders', table);
+  await queuePush('table_order_upsert', table);
+  logAudit('Table opened', table.label);
+  renderTablesBar();
+  selectTable(table.id);
+});
+
+function selectTable(id){
+  activeTableId = id;
+  $('walkInReceiptPanel').style.display = 'none';
+  $('tableOrderPanel').style.display = 'flex';
+  renderTableOrderView();
+  renderTablesBar();
+}
+function exitTableMode(){
+  activeTableId = null;
+  $('tableOrderPanel').style.display = 'none';
+  $('walkInReceiptPanel').style.display = '';
+  renderTablesBar();
+  scanInput.focus();
+}
+$('tableOrderExitBtn').addEventListener('click', exitTableMode);
+
+async function addItemToTable(sku){
+  const products = await getAll('products');
+  const p = products.find(x=>x.sku===sku);
+  if(!p){ toast('Unknown barcode: '+sku); return; }
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table){ toast('Table not found'); activeTableId=null; return; }
+  // A new tap adds to the newest not-yet-sent line for that item, never merges into a
+  // line that's already gone to the kitchen — the kitchen's copy must stay exactly what
+  // was actually sent, never silently revised after the fact.
+  const existing = table.lines.find(l=>l.sku===sku && !l.sentToKitchen);
+  if(existing) existing.qty += 1;
+  else table.lines.push({sku:p.sku, name:p.name, price:p.price, cost:p.cost||0, qty:1, sentToKitchen:false});
+  await put('open_orders', table);
+  await queuePush('table_order_upsert', table);
+  renderTableOrderView();
+  renderTablesBar();
+}
+
+async function adjustTableLineQty(idx, delta){
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table) return;
+  const line = table.lines[idx];
+  if(!line) return;
+  if(line.sentToKitchen){ toast('Already sent to the kitchen — can\'t be quietly changed here'); return; }
+  line.qty += delta;
+  if(line.qty<=0) table.lines.splice(idx,1);
+  await put('open_orders', table);
+  await queuePush('table_order_upsert', table);
+  renderTableOrderView();
+  renderTablesBar();
+}
+async function removeTableLine(idx){
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table) return;
+  const line = table.lines[idx];
+  if(!line) return;
+  if(line.sentToKitchen){ toast('Already sent to the kitchen — can\'t be quietly removed here'); return; }
+  table.lines.splice(idx,1);
+  await put('open_orders', table);
+  await queuePush('table_order_upsert', table);
+  renderTableOrderView();
+  renderTablesBar();
+}
+
+async function renderTableOrderView(){
+  if(!activeTableId) return;
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table){ exitTableMode(); return; }
+  $('tableOrderLabel').textContent = table.label;
+  $('tableOrderAvatar').textContent = (table.label||'T').charAt(0).toUpperCase();
+  const unsent = table.lines.filter(l=>!l.sentToKitchen).length;
+  $('tableOrderSub').textContent = table.lines.length===0 ? 'Open order' : (unsent>0 ? `${unsent} item(s) not yet sent to kitchen` : 'All items sent to kitchen');
+  const list = $('tableOrderList');
+  if(table.lines.length===0){
+    list.innerHTML = '<div class="receipt-empty">No items yet — tap a product to add it to this table</div>';
+  } else {
+    list.innerHTML = table.lines.map((l,idx)=>`
+      <div class="rline">
+        <span class="rname">${l.name}${!l.sentToKitchen?' <span style="color:var(--marigold-dark); font-size:10px; font-weight:700;">NEW</span>':''}</span>
+        <span class="rqty-stepper">
+          <button class="tbl-qty-dec" data-idx="${idx}">−</button>${l.qty}<button class="tbl-qty-inc" data-idx="${idx}">+</button>
+        </span>
+        <span class="rprice">${fmtKsh(l.price*l.qty)}</span>
+        <button class="rdel tbl-del" data-idx="${idx}">×</button>
+      </div>`).join('');
+    list.querySelectorAll('.tbl-qty-inc').forEach(b=>b.addEventListener('click', ()=> adjustTableLineQty(parseInt(b.dataset.idx,10), 1)));
+    list.querySelectorAll('.tbl-qty-dec').forEach(b=>b.addEventListener('click', ()=> adjustTableLineQty(parseInt(b.dataset.idx,10), -1)));
+    list.querySelectorAll('.tbl-del').forEach(b=>b.addEventListener('click', ()=> removeTableLine(parseInt(b.dataset.idx,10))));
+  }
+  const subtotal = table.lines.reduce((s,l)=>s+l.price*l.qty,0);
+  $('tableOrderSubTotal').textContent = fmtKsh(subtotal);
+  $('tableOrderGrandTotal').textContent = fmtKsh(subtotal);
+  $('settleTableBtn').disabled = table.lines.length===0;
+  $('sendToKitchenBtn').disabled = unsent===0;
+  $('tableOrderKitchenStatus').textContent = table.lines.length===0 ? '' : (unsent===0 ? '✓ Kitchen has everything on this bill' : `${unsent} item(s) waiting to be sent`);
+}
+
+$('sendToKitchenBtn').addEventListener('click', async ()=>{
+  if(!activeTableId) return;
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table) return;
+  const newLines = table.lines.filter(l=>!l.sentToKitchen);
+  if(newLines.length===0){ toast('Nothing new to send'); return; }
+  printKitchenTicket(table, newLines);
+  table.lines.forEach(l=>{ if(!l.sentToKitchen) l.sentToKitchen = true; });
+  table.lastSentAt = new Date().toISOString();
+  await put('open_orders', table);
+  await queuePush('table_order_upsert', table);
+  logAudit('Sent to kitchen', `${table.label} — ${newLines.length} item(s)`);
+  toast('Sent to kitchen');
+  renderTableOrderView();
+});
+
+function buildKitchenTicketHTML(table, lines){
+  const time = new Date().toLocaleTimeString('en-KE',{hour12:false});
+  const itemsHtml = lines.map(l=>`<div class="kt-line"><span class="kt-qty">${l.qty}×</span><span class="kt-name">${l.name}</span></div>`).join('');
+  return `
+    <div class="kt-header">${table.label}</div>
+    <div class="kt-meta">${time} · ${currentUser?currentUser.name:'—'}</div>
+    <div class="kt-divider"></div>
+    ${itemsHtml}
+  `;
+}
+// Deliberately a separate print path from receipts/POs — no prices, larger type, meant
+// to be read fast from across a kitchen, not itemized for a customer.
+function printKitchenTicket(table, lines){
+  $('receiptPrintArea').innerHTML = buildKitchenTicketHTML(table, lines);
+  $('receiptPrintArea').className = '';
+  document.body.classList.add('printing-kitchen');
+  let cleaned = false;
+  const cleanup = ()=>{ if(cleaned) return; cleaned=true; document.body.classList.remove('printing-kitchen'); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 6000);
+}
+
+$('settleTableBtn').addEventListener('click', async ()=>{
+  if(!activeTableId) return;
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table || table.lines.length===0) return;
+  if(table.lines.some(l=>!l.sentToKitchen) && !confirm('Some items haven\'t been sent to the kitchen yet — settle the bill anyway?')) return;
+  // Hands off to the exact same cash/M-Pesa flow a normal walk-in sale already uses —
+  // see the settlingTableId check at the end of finalizeSale() for how this closes out.
+  cart = table.lines.map(l=>({sku:l.sku, name:l.name, price:l.price, qty:l.qty}));
+  settlingTableId = activeTableId;
+  renderCart();
+  checkout();
 });
 
 // ---------- Purchase order list + receiving (invoice number links to PO, updates stock) ----------
@@ -4135,6 +4552,15 @@ async function pushToSupabase(item){
       updated_at:p.updated_at || new Date().toISOString(),
     };
   }
+  else if(item.type==='table_order_upsert'){
+    table='table_orders'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, label:p.label, status:p.status, lines:p.lines,
+      opened_by:p.openedBy, opened_at:p.openedAt, settled_at:p.settledAt, settled_sale_id:p.settledSaleId,
+      updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
   else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
   const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
     method:'POST', headers: sbHeaders({'Prefer':prefer}),
@@ -4234,7 +4660,7 @@ async function lookupPinGlobally(pinValue){
 async function clearLocalShopData(){
   const storesToClear = [
     'products','users','sales','stock_movements','daily_snapshots','stock_takes',
-    'refunds','payables','customer_debts','removal_requests','purchase_orders','audit_log'
+    'refunds','payables','customer_debts','removal_requests','purchase_orders','audit_log','open_orders'
   ];
   for(const store of storesToClear){
     await new Promise(res=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>res(); });
@@ -4434,6 +4860,24 @@ async function pullShopData(fullPull, force){
           });
         }
       }
+    }
+    // Table orders — a waiter on one device opens a table, another device (or the same
+    // one after a reload) needs to see it and its kitchen-sent status stay in sync.
+    const toRes = await fetch(`${supaUrl}/rest/v1/table_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(toRes.ok){
+      const remoteTables = await toRes.json();
+      const localTables = await getAll('open_orders');
+      for(const rt of remoteTables){
+        const lt = localTables.find(t=>t.id===rt.id);
+        if(!lt || !lt.updated_at || new Date(rt.updated_at) > new Date(lt.updated_at)){
+          await put('open_orders', {
+            id:rt.id, label:rt.label, status:rt.status, lines:rt.lines,
+            openedBy:rt.opened_by, openedAt:rt.opened_at, settledAt:rt.settled_at, settledSaleId:rt.settled_sale_id,
+            updated_at:rt.updated_at,
+          });
+        }
+      }
+      if(tableServiceEnabled()){ renderTablesBar(); if(activeTableId) renderTableOrderView(); }
     }
     lastPullSync = new Date().toISOString();
     await put('settings', {key:'last_pull_sync', value:lastPullSync});
@@ -5055,6 +5499,8 @@ async function renderBizGrid(){
   const setting = await getSetting('active_business_types');
   currentBusinessTypes = setting ? setting.value : ['duka'];
   if(combineMode && combineSelection.length===0) combineSelection = [...currentBusinessTypes];
+  $('combineModeBtn').style.display = superAdminUnlocked ? '' : 'none';
+  $('combineLockedNotice').style.display = superAdminUnlocked ? 'none' : 'block';
   const types = allBusinessTypes();
   const grid = $('bizGrid'); grid.innerHTML='';
   Object.keys(types).forEach(id=>{
@@ -5101,6 +5547,7 @@ async function renderBizGrid(){
   $('applyCombineBtn').textContent = `Apply combination (${combineSelection.length} selected)`;
 }
 $('combineModeBtn').addEventListener('click', ()=>{
+  if(!superAdminUnlocked){ toast('Running more than one business type is enabled by your platform administrator'); return; }
   combineMode = !combineMode;
   combineSelection = combineMode ? [...currentBusinessTypes] : [];
   $('combineModeBtn').textContent = combineMode ? 'Turn off' : 'Turn on';
@@ -5778,6 +6225,7 @@ async function completeSignIn(u, opts={}){
   }
   await updateStockTakeBanner();
   await updateStockLowBadge();
+  updateTableServiceVisibility();
   scanInput.focus();
 }
 async function updateStockTakeBanner(){
@@ -6013,6 +6461,7 @@ async function tryRestoreSession(){
   $('view-till').classList.add('active');
   cart = await loadLiveCart(u.id); // recover an in-progress sale even after an unplanned reload
   renderCart();
+  updateTableServiceVisibility();
   scanInput.focus();
   return true;
 }
