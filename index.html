@@ -214,7 +214,13 @@
   .tile.disabled{opacity:.35; cursor:not-allowed;}
 
   /* ================= BACK OFFICE VIEWS ================= */
-  .panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; max-width:1100px; margin-left:auto; margin-right:auto;}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; max-width:1440px; margin-left:auto; margin-right:auto;}
+  /* Two related panels (Outstanding/Paid, Awaiting/Reviewed) sitting side by side on a
+     real screen, instead of each centering itself independently and leaving them looking
+     like two disconnected floating cards stacked in empty space. */
+  .panel-pair{display:grid; grid-template-columns:1fr; gap:14px; max-width:1440px; margin:0 auto 14px;}
+  @media (min-width:820px){ .panel-pair{grid-template-columns:1fr 1fr;} }
+  .panel-pair .panel{max-width:none; margin:0;}
   .panel h3{margin:0 0 4px; font-size:15px; font-family:var(--brand); font-weight:600;}
   .panel p.hint{margin:0 0 14px; font-size:12px; color:var(--muted);}
   .form-row{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px;}
@@ -248,14 +254,14 @@
   html[data-theme="dark"] tbody tr:nth-child(even){background:rgba(255,255,255,.03);}
   .low-badge{background:#f3ddd6; color:var(--clay); padding:2px 7px; border-radius:5px; font-size:10px; font-weight:700; margin-left:6px;}
 
-  .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; max-width:1100px; margin-left:auto; margin-right:auto;}
+  .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; max-width:1440px; margin-left:auto; margin-right:auto;}
   .stat-card{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px;}
   .stat-card .slabel{font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted);}
   .stat-card .sval{font-family:var(--mono); font-size:22px; font-weight:800; color:var(--navy); margin-top:4px;}
 
   /* ---- Reports headline pair — the two numbers a shop owner actually checks first,
      set large in the brand serif rather than boxed up identically with everything else. ---- */
-  .reports-headline{display:flex; align-items:flex-end; gap:clamp(20px,4vw,36px); margin:2px auto 20px; max-width:1100px; flex-wrap:wrap;}
+  .reports-headline{display:flex; align-items:flex-end; gap:clamp(20px,4vw,36px); margin:2px auto 20px; max-width:1440px; flex-wrap:wrap;}
   .hm-block{flex:1 1 180px; min-width:0;}
   .hm-label{font-size:12.5px; color:var(--muted); margin-bottom:3px;}
   .hm-value{font-family:var(--brand); font-weight:600; font-size:clamp(26px,4vw,38px); color:var(--accent-text); line-height:1.08; overflow-wrap:break-word;}
@@ -263,7 +269,7 @@
   @media (max-width:520px){ .hm-divider{display:none;} }
 
   /* ---- Everything else — a single quiet ledger, not a wall of identical cards. ---- */
-  .stat-list{max-width:1100px; margin:0 auto 14px;}
+  .stat-list{max-width:1440px; margin:0 auto 14px;}
   .stat-list .stat-row{display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:9px 0; border-bottom:1px solid var(--bg); font-size:13.5px;}
   .stat-list .stat-row:last-child{border-bottom:none;}
   .stat-list .stat-row > span{color:var(--ink); min-width:0;}
@@ -731,15 +737,17 @@
       <button class="primary-btn" id="addSupplierBtn">Add supplier</button>
       <div id="suppliersList" style="margin-top:12px;"></div>
     </div>
-    <div class="panel">
-      <h3>Reorder needed</h3>
-      <p class="hint">Anything below its reorder point, grouped by supplier. Products with no supplier set can't be turned into a PO until one is added above.</p>
-      <div id="reorderList"></div>
-    </div>
-    <div class="panel">
-      <h3>Purchase orders</h3>
-      <p class="hint">Every PO created from Reorder needed. When the supplier delivers, open it, enter their invoice number, optionally attach a photo of the invoice, and mark it received — stock updates automatically.</p>
-      <div id="poList"></div>
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Reorder needed</h3>
+        <p class="hint">Anything below its reorder point, grouped by supplier. Products with no supplier set can't be turned into a PO until one is added above.</p>
+        <div id="reorderList"></div>
+      </div>
+      <div class="panel">
+        <h3>Purchase orders</h3>
+        <p class="hint">Every PO created from Reorder needed. When the supplier delivers, open it, enter their invoice number, optionally attach a photo of the invoice, and mark it received — stock updates automatically.</p>
+        <div id="poList"></div>
+      </div>
     </div>
   </section>
 
@@ -778,14 +786,16 @@
       <p id="payablePhotoLockedNotice" class="hint" style="display:none;">Photo upload is limited to Admin and Supervisor accounts.</p>
       <button class="primary-btn" id="addPayableBtn" style="width:100%;">Save invoice</button>
     </div>
-    <div class="panel">
-      <h3>Outstanding — you owe suppliers</h3>
-      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total outstanding</div><div class="sval" id="payablesOutstandingTotal">KSh 0</div></div>
-      <div id="payablesUnpaidList"></div>
-    </div>
-    <div class="panel">
-      <h3>Paid — history</h3>
-      <div id="payablesPaidList"></div>
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Outstanding — you owe suppliers</h3>
+        <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total outstanding</div><div class="sval" id="payablesOutstandingTotal">KSh 0</div></div>
+        <div id="payablesUnpaidList"></div>
+      </div>
+      <div class="panel">
+        <h3>Paid — history</h3>
+        <div id="payablesPaidList"></div>
+      </div>
     </div>
   </section>
 
@@ -811,29 +821,33 @@
       <input id="debtNotes" placeholder="e.g. 2kg sugar, 1L cooking oil" style="margin-bottom:10px;">
       <button class="primary-btn" id="addDebtBtn" style="width:100%;">Save credit</button>
     </div>
-    <div class="panel">
-      <h3>Owing — customers who haven't paid yet</h3>
-      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total owed to you</div><div class="sval" id="debtsOutstandingTotal">KSh 0</div></div>
-      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Overdue right now</div><div class="sval" id="debtsOverdueTotal" style="color:var(--clay);">KSh 0</div></div>
-      <div id="debtsUnpaidList"></div>
-    </div>
-    <div class="panel">
-      <h3>Paid — history</h3>
-      <div id="debtsPaidList"></div>
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Owing — customers who haven't paid yet</h3>
+        <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total owed to you</div><div class="sval" id="debtsOutstandingTotal">KSh 0</div></div>
+        <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Overdue right now</div><div class="sval" id="debtsOverdueTotal" style="color:var(--clay);">KSh 0</div></div>
+        <div id="debtsUnpaidList"></div>
+      </div>
+      <div class="panel">
+        <h3>Paid — history</h3>
+        <div id="debtsPaidList"></div>
+      </div>
     </div>
   </section>
 
   <!-- ============ REMOVALS — cashier item/cart removals awaiting review ============ -->
   <section class="view" id="view-removals">
-    <div class="panel">
-      <h3>Awaiting review</h3>
-      <p class="hint">When a cashier removes something, the sale keeps moving — this is where it lands afterward so an admin or supervisor can see the reason and clear it, with a proper trail either way.</p>
-      <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Pending review</div><div class="sval" id="removalsPendingCount">0</div></div>
-      <div id="removalsPendingList"></div>
-    </div>
-    <div class="panel">
-      <h3>Reviewed — history</h3>
-      <div id="removalsReviewedList"></div>
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Awaiting review</h3>
+        <p class="hint">When a cashier removes something, the sale keeps moving — this is where it lands afterward so an admin or supervisor can see the reason and clear it, with a proper trail either way.</p>
+        <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Pending review</div><div class="sval" id="removalsPendingCount">0</div></div>
+        <div id="removalsPendingList"></div>
+      </div>
+      <div class="panel">
+        <h3>Reviewed — history</h3>
+        <div id="removalsReviewedList"></div>
+      </div>
     </div>
   </section>
 
@@ -935,18 +949,20 @@
       <p id="pmVatNote" style="font-size:11.5px; color:var(--muted); margin:4px 0 0;"></p>
     </div>
 
-    <div class="panel">
-      <h3>Profit &amp; Loss — <span id="plPeriodLabel">today</span></h3>
-      <p class="hint">Built from the same sales, stock and credit records as the stats above — not a separate ledger, so it always matches.</p>
-      <div class="table-scroll"><table><tbody id="plTable"></tbody></table></div>
-      <button class="primary-btn" id="downloadPLBtn" style="margin-top:12px;">Print / Save as PDF</button>
-    </div>
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Profit &amp; Loss — <span id="plPeriodLabel">today</span></h3>
+        <p class="hint">Built from the same sales, stock and credit records as the stats above — not a separate ledger, so it always matches.</p>
+        <div class="table-scroll"><table><tbody id="plTable"></tbody></table></div>
+        <button class="primary-btn" id="downloadPLBtn" style="margin-top:12px;">Print / Save as PDF</button>
+      </div>
 
-    <div class="panel">
-      <h3>Balance Sheet — as of now</h3>
-      <p class="hint">A simplified snapshot, not full double-entry accounting: stock is valued at cost, and there's no separate cash-on-hand ledger, so "Cash & M-Pesa" below is everything collected since records began, not a real till count. Good for a directional picture, not a statutory filing.</p>
-      <div class="table-scroll"><table><tbody id="bsTable"></tbody></table></div>
-      <button class="primary-btn" id="downloadBSBtn" style="margin-top:12px;">Print / Save as PDF</button>
+      <div class="panel">
+        <h3>Balance Sheet — as of now</h3>
+        <p class="hint">A simplified snapshot, not full double-entry accounting: stock is valued at cost, and there's no separate cash-on-hand ledger, so "Cash & M-Pesa" below is everything collected since records began, not a real till count. Good for a directional picture, not a statutory filing.</p>
+        <div class="table-scroll"><table><tbody id="bsTable"></tbody></table></div>
+        <button class="primary-btn" id="downloadBSBtn" style="margin-top:12px;">Print / Save as PDF</button>
+      </div>
     </div>
 
     <div class="panel" id="stockCompareWrap">
@@ -3415,6 +3431,15 @@ $('settleTableBtn').addEventListener('click', async ()=>{
   const table = tables.find(t=>t.id===activeTableId);
   if(!table || table.lines.length===0) return;
   if(table.lines.some(l=>!l.sentToKitchen) && !confirm('Some items haven\'t been sent to the kitchen yet — settle the bill anyway?')) return;
+  // payMethod is a single global set by buttons that live in the walk-in panel — hidden
+  // while a table's selected, so it could be silently stuck on 'credit' from an earlier
+  // walk-in sale. Customer credit isn't wired into table settlement yet (it never marks
+  // settlingTableId), so a table would be left stuck open forever with no error shown.
+  // Force a safe path rather than let that happen invisibly.
+  if(payMethod === 'credit'){
+    payMethod = 'cash';
+    toast('Customer credit isn\'t supported for table bills yet — settling as cash. Use cash or M-Pesa for this table.');
+  }
   // Hands off to the exact same cash/M-Pesa flow a normal walk-in sale already uses —
   // see the settlingTableId check at the end of finalizeSale() for how this closes out.
   cart = table.lines.map(l=>({sku:l.sku, name:l.name, price:l.price, qty:l.qty}));
