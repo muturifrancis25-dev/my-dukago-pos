@@ -499,6 +499,11 @@
   .paymethod-row button:active{ transform:scale(.96); }
   .paymethod-row button svg{width:19px; height:19px; flex:none;}
   .paymethod-row button.active{border-color:var(--teal-dark); background:var(--teal-dark); color:#fff; box-shadow:0 3px 10px rgba(11,33,27,.25);}
+  @media (min-width:901px){
+    .paymethod-row{gap:12px; padding:0 18px 14px;}
+    .paymethod-row button{padding:16px 8px; font-size:14px; border-radius:14px; gap:7px;}
+    .paymethod-row button svg{width:26px; height:26px;}
+  }
 
   /* ---- M-Pesa payment picker — three real option cards, each with its own icon, title,
      description and a colored accent stripe, instead of three identical grey buttons. ---- */
