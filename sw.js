@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v1';
+const CACHE_NAME = 'my-duka-pos-shell-v2';
 const SHELL_FILES = [
   './index.html',
   './manifest.json'
@@ -28,11 +28,15 @@ self.addEventListener('activate', (event) => {
 
 // Network-first for the shell so an online cashier always gets the latest
 // build; falls back to the cached copy the moment the network fails.
+// cache:'no-store' matters here — without it, `fetch()` can still be silently
+// answered by the browser's own HTTP cache (or a CDN's) instead of actually
+// hitting the network, which is how a real deploy can sit invisible even
+// though this network-first logic looks correct.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: 'no-store' })
       .then((response) => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
