@@ -453,23 +453,31 @@
   /* ---- Table Service floor plan — a proper color-coded grid, the way real
      restaurant POS systems (Square/Toast/Lightspeed) show table status at a glance. ---- */
   .floor-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle;}
-  .floor-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:14px; padding:8px 18px 28px;}
+  .floor-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(136px,1fr)); gap:14px; padding:8px 18px 28px;}
   .floor-card{
-    background:var(--panel); border:2px solid var(--line); border-radius:14px; padding:16px 14px;
-    cursor:pointer; text-align:left; position:relative; min-height:112px;
-    display:flex; flex-direction:column; justify-content:space-between;
+    background:var(--panel); border:2px solid var(--line); border-radius:16px; padding:14px 10px 12px;
+    cursor:pointer; text-align:center; position:relative; min-height:160px;
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:1px;
     transition:transform .1s, box-shadow .15s; font-family:var(--sans);
   }
   .floor-card:hover{ box-shadow:0 4px 14px rgba(42,33,24,.1); }
   .floor-card:active{ transform:scale(.97); }
-  .floor-card .fc-label{font-family:var(--display); font-weight:700; font-size:15px; color:var(--ink);}
+  .floor-card .fc-icon{width:46px; height:46px; margin:0 auto 6px; display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--line);}
+  .floor-card .fc-icon svg{width:100%; height:100%; display:block;}
+  .floor-card .fc-label{font-family:var(--display); font-weight:700; font-size:14px; color:var(--ink); line-height:1.2;}
   .floor-card .fc-sub{font-size:11px; color:var(--muted); margin-top:2px;}
-  .floor-card .fc-total{font-family:var(--mono); font-weight:800; font-size:16px; margin-top:10px; color:var(--accent-text);}
-  .floor-card .fc-badge{position:absolute; top:10px; right:10px; font-size:9px; font-weight:800; padding:2px 7px; border-radius:999px; color:#fff; letter-spacing:.3px;}
-  .floor-card.status-empty{border-style:dashed; opacity:.65;}
+  .floor-card .fc-total{font-family:var(--mono); font-weight:800; font-size:15px; margin-top:auto; padding-top:10px; color:var(--accent-text); min-height:1.1em;}
+  .floor-card .fc-badge{position:absolute; top:8px; right:8px; font-size:9px; font-weight:800; padding:2px 7px; border-radius:999px; color:#fff; letter-spacing:.3px;}
+  .floor-card.status-empty{border-style:dashed; opacity:.72;}
   .floor-card.status-open{border-color:var(--marigold);}
+  .floor-card.status-open .fc-icon{color:var(--marigold);}
+  .floor-card.status-open{background:color-mix(in srgb, var(--marigold) 7%, var(--panel));}
   .floor-card.status-waiting{border-color:var(--clay); box-shadow:0 0 0 1px var(--clay);}
+  .floor-card.status-waiting .fc-icon{color:var(--clay);}
+  .floor-card.status-waiting{background:color-mix(in srgb, var(--clay) 9%, var(--panel));}
   .floor-card.status-ready{border-color:var(--sage); box-shadow:0 0 0 1px var(--sage);}
+  .floor-card.status-ready .fc-icon{color:var(--sage);}
+  .floor-card.status-ready{background:color-mix(in srgb, var(--sage) 9%, var(--panel));}
   .floor-card.new-table-card{align-items:center; justify-content:center; text-align:center; border-style:dashed; color:var(--muted);}
     .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
     .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
@@ -3419,6 +3427,33 @@ let settlingTableId = null;
 let tableViewMode = 'floor'; // 'floor' | 'order' | 'walkin' — only meaningful when tableFloorModeActive()
 let tableViewEnabled = true; // default on for restaurant/hotel; Super Admin can turn it off per shop
 
+// Table definitions — a fixed floor plan (default: 20 tables) that always shows on the
+// grid, whether or not a table currently has an open order. Distinct from `open_orders`,
+// which only holds tables that are actively in service. Stored under settings key
+// 'table_defs' so it persists locally and syncs like any other setting.
+let tableDefs = [];
+async function ensureTableDefs(){
+  if(tableDefs.length) return;
+  const s = await getSetting('table_defs');
+  if(s && Array.isArray(s.value) && s.value.length){ tableDefs = s.value; return; }
+  const defs = [];
+  for(let i=1;i<=20;i++) defs.push({id:'tdef_'+i, label:'Table '+i, seats:4});
+  await put('settings', {key:'table_defs', value:defs});
+  tableDefs = defs;
+}
+function tableIconSVG(){
+  // A round table with six chairs, drawn in currentColor so CSS can tint it per status.
+  return `<svg viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+    <rect x="6" y="1" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
+    <rect x="29" y="1" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
+    <rect x="6" y="38" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
+    <rect x="29" y="38" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
+    <rect x="1" y="15" width="5" height="9" rx="2.2" fill="currentColor" opacity=".55"/>
+    <rect x="38" y="15" width="5" height="9" rx="2.2" fill="currentColor" opacity=".55"/>
+    <circle cx="22" cy="22" r="15" fill="currentColor" opacity=".16" stroke="currentColor" stroke-width="2"/>
+  </svg>`;
+}
+
 function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant') || currentBusinessTypes.includes('hotel'); }
 function tableFloorModeActive(){ return tableServiceEnabled() && tableViewEnabled; }
 
@@ -3451,38 +3486,64 @@ function refreshFloorIfActive(){ if(tableFloorModeActive()) renderFloorGrid(); }
 async function renderFloorGrid(){
   const box = $('floorGrid');
   if(!box) return;
-  const tables = (await getAll('open_orders')).filter(t=>t.status==='open').sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
+  await ensureTableDefs();
+  const openById = {};
+  (await getAll('open_orders')).forEach(t=>{ if(t.status==='open') openById[t.id] = t; });
+
   let html = `<button class="floor-card new-table-card" data-walkin="1">
-    <div style="font-size:24px;">🧾</div>
-    <div class="fc-label" style="margin-top:6px;">Walk-in / Takeaway</div>
+    <div class="fc-icon">🧾</div>
+    <div class="fc-label">Walk-in / Takeaway</div>
     <div class="fc-sub">Quick counter sale</div>
   </button>`;
-  html += tables.map(t=>{
-    const total = t.lines.reduce((s,l)=>s+l.price*l.qty,0);
-    const itemCount = t.lines.reduce((s,l)=>s+l.qty,0);
-    const unsent = t.lines.filter(l=>!l.sentToKitchen).length;
-    let statusClass = 'status-open', badge = '';
-    if(t.lines.length===0){ statusClass = 'status-empty'; }
-    else if(unsent>0){ statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">${unsent} NEW</span>`; }
-    else if(t.billPrinted){ statusClass = 'status-ready'; badge = `<span class="fc-badge" style="background:var(--sage);">READY</span>`; }
-    const mins = Math.max(0, Math.round((Date.now()-new Date(t.openedAt).getTime())/60000));
-    const timeLabel = mins<60 ? `${mins} min` : `${Math.floor(mins/60)}h ${mins%60}m`;
-    return `<button class="floor-card ${statusClass}" data-table-card="${t.id}">
+
+  html += tableDefs.map(def=>{
+    const t = openById[def.id];
+    let statusClass = 'status-empty', badge = '', sub = `${def.seats||4} seats`, total = '';
+    if(t && t.lines.length){
+      const totalAmt = t.lines.reduce((s,l)=>s+l.price*l.qty,0);
+      const itemCount = t.lines.reduce((s,l)=>s+l.qty,0);
+      const unsent = t.lines.filter(l=>!l.sentToKitchen).length;
+      const mins = Math.max(0, Math.round((Date.now()-new Date(t.openedAt).getTime())/60000));
+      const timeLabel = mins<60 ? `${mins} min` : `${Math.floor(mins/60)}h ${mins%60}m`;
+      statusClass = 'status-open'; sub = `${itemCount} item(s) · ${timeLabel}`; total = fmtKsh(totalAmt);
+      if(unsent>0){ statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">${unsent} NEW</span>`; }
+      else if(t.billPrinted){ statusClass = 'status-ready'; badge = `<span class="fc-badge" style="background:var(--sage);">READY</span>`; }
+    } else if(t){
+      statusClass = 'status-open'; sub = 'No items yet';
+    }
+    return `<button class="floor-card ${statusClass}" data-table-card="${def.id}">
       ${badge}
-      <div>
-        <div class="fc-label">${t.label}</div>
-        <div class="fc-sub">${t.lines.length===0?'No items yet':itemCount+' item(s)'} · ${timeLabel}</div>
-      </div>
-      <div class="fc-total">${fmtKsh(total)}</div>
+      <div class="fc-icon">${tableIconSVG()}</div>
+      <div class="fc-label">${def.label}</div>
+      <div class="fc-sub">${sub}</div>
+      <div class="fc-total">${total||'&nbsp;'}</div>
     </button>`;
   }).join('');
+
   box.innerHTML = html;
   box.querySelectorAll('button[data-table-card]').forEach(b=>{
-    b.addEventListener('click', ()=> selectTable(b.dataset.tableCard));
+    b.addEventListener('click', ()=> openFloorTable(b.dataset.tableCard));
   });
   box.querySelectorAll('button[data-walkin]').forEach(b=>{
     b.addEventListener('click', enterWalkInMode);
   });
+}
+async function openFloorTable(defId){
+  const def = tableDefs.find(d=>d.id===defId);
+  const existing = (await getAll('open_orders')).find(t=>t.id===defId && t.status==='open');
+  let table = existing;
+  if(!table){
+    table = {
+      id: defId, label: def ? def.label : defId, status: 'open', lines: [],
+      openedBy: currentUser ? currentUser.name : 'Unknown', openedAt: new Date().toISOString(),
+      settledAt: null, settledSaleId: null,
+    };
+    await put('open_orders', table);
+    await queuePush('table_order_upsert', table);
+    logAudit('Table opened', table.label);
+    refreshFloorIfActive();
+  }
+  selectTable(table.id);
 }
 function enterWalkInMode(){
   tableViewMode = 'walkin';
@@ -3495,19 +3556,15 @@ function enterWalkInMode(){
 $('backToFloorBtn').addEventListener('click', ()=>{ activeTableId = null; showFloorView(); });
 
 $('newTableBtn').addEventListener('click', async ()=>{
-  const label = prompt('Table label (e.g. Table 4, Booth 2):');
+  const label = prompt('New table label (e.g. Booth 2, Patio 3):');
   if(!label || !label.trim()) return;
-  const table = {
-    id: 'tbl_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
-    label: label.trim(), status: 'open', lines: [],
-    openedBy: currentUser ? currentUser.name : 'Unknown', openedAt: new Date().toISOString(),
-    settledAt: null, settledSaleId: null,
-  };
-  await put('open_orders', table);
-  await queuePush('table_order_upsert', table);
-  logAudit('Table opened', table.label);
+  await ensureTableDefs();
+  const def = {id: 'tdef_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), label: label.trim(), seats: 4};
+  tableDefs.push(def);
+  await put('settings', {key:'table_defs', value:tableDefs});
+  logAudit('Table added to floor plan', def.label);
   refreshFloorIfActive();
-  selectTable(table.id);
+  openFloorTable(def.id);
 });
 
 function selectTable(id){
