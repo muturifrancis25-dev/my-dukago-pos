@@ -440,6 +440,37 @@
     .kt-divider{border-top:2px dashed #000; margin:6px 0;}
     .kt-line{display:flex; gap:10px; padding:5px 0; font-size:1.3em; font-weight:700;}
     .kt-qty{flex:none; min-width:1.6em;}
+
+    /* ---- Kitchen Order Ticket — rebuilt to actually look like a real KOT: big order
+       number a cook can read from across a pass, a clear cut line, station-ready spacing. ---- */
+    .kt-ordernum{text-align:center; font-size:2.2em; font-weight:900; letter-spacing:1px; margin-bottom:2px;}
+    .kt-round{text-align:center; font-size:0.85em; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#000; background:#eee; padding:3px 0; margin:4px 0 8px; border:1px solid #000;}
+    .kt-line{border-bottom:1px dashed #000; padding:7px 0;}
+    .kt-line:last-child{border-bottom:none;}
+    .kt-cutline{text-align:center; font-size:10px; letter-spacing:3px; margin-top:14px; color:#666;}
+  </style>
+  <style>
+  /* ---- Table Service floor plan — a proper color-coded grid, the way real
+     restaurant POS systems (Square/Toast/Lightspeed) show table status at a glance. ---- */
+  .floor-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle;}
+  .floor-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:14px; padding:8px 18px 28px;}
+  .floor-card{
+    background:var(--panel); border:2px solid var(--line); border-radius:14px; padding:16px 14px;
+    cursor:pointer; text-align:left; position:relative; min-height:112px;
+    display:flex; flex-direction:column; justify-content:space-between;
+    transition:transform .1s, box-shadow .15s; font-family:var(--sans);
+  }
+  .floor-card:hover{ box-shadow:0 4px 14px rgba(42,33,24,.1); }
+  .floor-card:active{ transform:scale(.97); }
+  .floor-card .fc-label{font-family:var(--display); font-weight:700; font-size:15px; color:var(--ink);}
+  .floor-card .fc-sub{font-size:11px; color:var(--muted); margin-top:2px;}
+  .floor-card .fc-total{font-family:var(--mono); font-weight:800; font-size:16px; margin-top:10px; color:var(--accent-text);}
+  .floor-card .fc-badge{position:absolute; top:10px; right:10px; font-size:9px; font-weight:800; padding:2px 7px; border-radius:999px; color:#fff; letter-spacing:.3px;}
+  .floor-card.status-empty{border-style:dashed; opacity:.65;}
+  .floor-card.status-open{border-color:var(--marigold);}
+  .floor-card.status-waiting{border-color:var(--clay); box-shadow:0 0 0 1px var(--clay);}
+  .floor-card.status-ready{border-color:var(--sage); box-shadow:0 0 0 1px var(--sage);}
+  .floor-card.new-table-card{align-items:center; justify-content:center; text-align:center; border-style:dashed; color:var(--muted);}
     .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
     .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
     .rcpt-divider{border-top:1px dashed #000; margin:6px 0;}
@@ -534,15 +565,28 @@
       <span id="stockTakeBannerText" style="font-weight:600;"></span>
       <button class="primary-btn" id="stockTakeBannerBtn" style="padding:6px 14px; font-size:11.5px; display:none;">Start stock take</button>
     </div>
-    <!-- Table Service — only shown when Restaurant is an active business type on this till.
-         A table is an "open order" that exists independently of a completed sale: items
-         accumulate across rounds, each round sent to the kitchen prints immediately, and
-         the table only becomes a real recorded sale once the bill is settled. -->
-    <div id="tablesBarWrap" style="display:none; padding:10px 18px 4px;">
-      <div style="display:flex; align-items:center; gap:8px; overflow-x:auto; padding-bottom:6px;">
-        <button class="primary-btn" id="newTableBtn" style="flex:none; padding:9px 16px; font-size:12.5px;">+ New table</button>
-        <div id="tablesBarChips" style="display:flex; gap:8px;"></div>
+    <!-- Table Service — only shown when Restaurant/Hotel is active AND Table View is turned
+         on for this shop (Super Admin controls this — see Manage Shop). A table is an "open
+         order" that exists independently of a completed sale: items accumulate across rounds,
+         each round sent to the kitchen prints immediately, and the table only becomes a real
+         recorded sale once the bill is settled and the receipt is printed. -->
+    <div id="tableFloorView" style="display:none;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 18px 4px; flex-wrap:wrap; gap:10px;">
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <h2 style="font-family:var(--brand); font-size:19px; margin:0;">Floor</h2>
+          <div style="display:flex; gap:14px; font-size:11px; color:var(--muted);">
+            <span><span class="floor-dot" style="background:var(--line);"></span> Empty</span>
+            <span><span class="floor-dot" style="background:var(--marigold);"></span> Open</span>
+            <span><span class="floor-dot" style="background:var(--clay);"></span> Kitchen waiting</span>
+            <span><span class="floor-dot" style="background:var(--sage);"></span> Ready to pay</span>
+          </div>
+        </div>
+        <button class="primary-btn" id="newTableBtn">+ New table</button>
       </div>
+      <div class="floor-grid" id="floorGrid"></div>
+    </div>
+    <div id="tableOrderTopBar" style="display:none; padding:10px 18px 0;">
+      <button class="modal-cancel" id="backToFloorBtn" style="font-size:12px; padding:7px 14px;">← Floor</button>
     </div>
     <div class="till-grid">
 
@@ -596,8 +640,9 @@
           <div class="trow"><span>Subtotal</span><span id="tableOrderSubTotal">KSh 0</span></div>
           <div class="trow grand"><span>Bill so far</span><span id="tableOrderGrandTotal">KSh 0</span></div>
         </div>
-        <div class="action-row" style="grid-template-columns:1fr 1fr;">
-          <button class="btn-clear" id="sendToKitchenBtn">🍳 Send to kitchen</button>
+        <div class="action-row" style="grid-template-columns:1fr 1fr 1fr;">
+          <button class="btn-clear" id="sendToKitchenBtn">🍳 Kitchen</button>
+          <button class="btn-clear" id="printBillBtn">🧾 Print bill</button>
           <button class="btn-pay" id="settleTableBtn" disabled>Settle bill</button>
         </div>
         <p class="hint" id="tableOrderKitchenStatus" style="margin:0 14px 14px; font-size:11px;"></p>
@@ -699,6 +744,11 @@
         </select>
         <input id="packUnitsInput" type="number" placeholder="Pieces per pack (e.g. 24)" min="1" style="display:none;">
       </div>
+      <div style="margin-bottom:10px;">
+        <button class="modal-cancel" id="scanProductBtn" style="padding:9px 16px; font-size:12.5px;">📷 Scan product with camera</button>
+        <input id="scanProductInput" type="file" accept="image/*" capture="environment" style="display:none;">
+        <span id="scanProductStatus" style="font-size:11.5px; color:var(--muted); margin-left:8px;"></span>
+      </div>
       <div class="form-row">
         <input id="newSku" placeholder="SKU / barcode">
         <input id="newName" placeholder="Product name">
@@ -717,6 +767,12 @@
           <option value="">No supplier</option>
         </select>
         <input id="newReorderAt" type="number" placeholder="Reorder below (default 10)" min="0">
+      </div>
+      <div class="form-row" style="grid-template-columns:1fr 1fr;">
+        <div><label style="font-size:11.5px; color:var(--muted); display:block; margin-bottom:3px;">Expiry date (optional)</label><input id="newExpiryDate" type="date"></div>
+        <label style="display:flex; align-items:center; gap:7px; font-size:12.5px; margin-top:18px;">
+          <input type="checkbox" id="newIsRx"> Prescription only (Rx)
+        </label>
       </div>
       <p id="perPieceCostPreview" class="hint" style="margin:-4px 0 10px; display:none;"></p>
       <button class="primary-btn" id="addStockBtn">Add to stock</button>
@@ -757,9 +813,14 @@
       <h3>Add a supplier invoice</h3>
       <p class="hint">Pick the payment terms agreed with this supplier — the due date sets itself from there, though you can still adjust it by hand.</p>
       <div class="form-row">
-        <div><label>Supplier name</label><input id="payableSupplier" placeholder="e.g. Bidco Distributors"></div>
+        <div><label>Supplier name</label><input id="payableSupplier" placeholder="e.g. Bidco Distributors" list="payableSupplierList" autocomplete="off"></div>
         <div><label>Amount (KSh)</label><input id="payableAmount" type="number" placeholder="0"></div>
       </div>
+      <datalist id="payableSupplierList"></datalist>
+      <label>PO number (optional)</label>
+      <input id="payablePoNumber" placeholder="Start typing to find an open PO…" list="payablePoList" autocomplete="off" style="margin-bottom:10px;">
+      <datalist id="payablePoList"></datalist>
+      <p class="hint" id="payablePoMatchNote" style="display:none; margin:-6px 0 10px; color:var(--sage-dark);"></p>
       <label>Payment terms</label>
       <select id="payableTerms" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--sans); font-size:13px; background:var(--panel); color:var(--ink);">
         <option value="0">Cash — due immediately</option>
@@ -1266,7 +1327,10 @@
   <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
     <h3>Log a supplier invoice</h3>
     <label>Supplier name</label>
-    <input id="qpSupplier" placeholder="e.g. Bidco Distributors" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <input id="qpSupplier" placeholder="e.g. Bidco Distributors" list="payableSupplierList" autocomplete="off" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>PO number (optional)</label>
+    <input id="qpPoNumber" placeholder="Start typing to find an open PO…" list="payablePoList" autocomplete="off" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 4px;">
+    <p class="hint" id="qpPoMatchNote" style="display:none; margin:0 0 10px; color:var(--sage-dark);"></p>
     <label>Amount (KSh)</label>
     <input id="qpAmount" type="number" placeholder="0" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
     <label>Payment terms</label>
@@ -1371,8 +1435,8 @@
     </div>
 
     <div id="mpesaManualStep" style="display:none;">
-      <input id="mpesaCodeInput" type="text" placeholder="M-Pesa code (optional)" style="width:100%; text-align:center; letter-spacing:1px; font-size:14px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px; text-transform:uppercase;">
-      <p style="font-size:11px; color:var(--muted); margin:0 0 14px;">If the customer's confirmation SMS is handy, jot the code down for your own record — or just confirm they've paid.</p>
+      <input id="mpesaCodeInput" type="text" placeholder="M-Pesa code" style="width:100%; text-align:center; letter-spacing:1px; font-size:14px; font-family:var(--mono); padding:12px; border-radius:9px; border:1.5px solid var(--line); margin:10px 0 4px; text-transform:uppercase;">
+      <p id="mpesaCodeHint" style="font-size:11px; color:var(--muted); margin:0 0 14px;">Enter at least the last 3 digits from the customer's confirmation SMS to confirm payment.</p>
       <div class="modal-actions">
         <button class="modal-cancel" id="mpesaManualBackBtn">Back</button>
         <button class="modal-confirm" id="mpesaSendBtn">Confirm payment received</button>
@@ -1474,6 +1538,13 @@
     <p class="hint">Check every type this shop should be able to sell under. Unchecked types become unavailable on their counter until you enable them here again.</p>
     <div id="manageShopBizTypes" style="margin-bottom:10px;">Loading…</div>
     <button class="primary-btn" id="manageShopSaveBizBtn" style="width:100%; margin-bottom:18px;">Save business types</button>
+
+    <h3 style="font-size:13.5px;">Table View</h3>
+    <p class="hint">Only relevant for Restaurant/Hotel. When on, their till leads with a floor-plan of tables (like Toast/Square) instead of a plain walk-in checkout. A shop admin can't turn this on themselves.</p>
+    <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:10px;">
+      <input type="checkbox" id="manageShopTableViewCheckbox"> Enable Table View for this shop
+    </label>
+    <button class="primary-btn" id="manageShopSaveTableViewBtn" style="width:100%; margin-bottom:18px;">Save Table View setting</button>
 
     <h3 style="font-size:13.5px;">Reset admin PIN</h3>
     <p class="hint">For a shop that's locked out — sets a new PIN for their Admin account directly. Tell them the new PIN through a separate channel; this doesn't notify them automatically.</p>
@@ -2159,11 +2230,30 @@ function closeMpesaModal(){
 $('mpesaCancelBtn').addEventListener('click', closeMpesaModal);
 
 // ---------- Path 1: manual code entry — unchanged from before, always available ----------
-$('mpesaManualChoiceBtn').addEventListener('click', ()=>{ showMpesaStep('mpesaManualStep'); $('mpesaCodeInput').focus(); });
+$('mpesaManualChoiceBtn').addEventListener('click', ()=>{
+  showMpesaStep('mpesaManualStep');
+  const isRestaurant = currentBusinessTypes.includes('restaurant');
+  $('mpesaCodeInput').placeholder = isRestaurant ? 'M-Pesa code (optional)' : 'M-Pesa code (last 3 digits required)';
+  $('mpesaCodeHint').textContent = isRestaurant
+    ? 'If the customer\'s confirmation SMS is handy, jot the code down for your own record — or just confirm they\'ve paid.'
+    : 'Enter at least the last 3 digits from the customer\'s confirmation SMS to confirm payment.';
+  $('mpesaCodeInput').focus();
+});
 $('mpesaManualBackBtn').addEventListener('click', ()=> showMpesaStep('mpesaChoiceStep'));
 $('mpesaSendBtn').addEventListener('click', async ()=>{
   if(!mpesaPending) return;
   const code = $('mpesaCodeInput').value.trim().toUpperCase();
+  // Manual entry has no automatic confirmation behind it — unlike the STK push or
+  // "already paid" match paths, there's nothing proving this payment actually happened
+  // except whatever the cashier types. Requiring at least the last 3 characters of the
+  // real code is the minimum friction that makes someone actually look at the customer's
+  // SMS rather than tap through blind. Restaurants are the one exception — tables often
+  // settle by phone/away from the counter where checking a code isn't always practical.
+  if(!currentBusinessTypes.includes('restaurant') && code.length < 3){
+    toast('Enter at least the last 3 digits of the M-Pesa code');
+    $('mpesaCodeInput').focus();
+    return;
+  }
   const {subtotal, tax, total} = mpesaPending;
   logAudit('M-Pesa payment recorded', code ? `${fmtKsh(total)} — code ${code}` : `${fmtKsh(total)} — no code given`);
   mpesaPending = null;
@@ -2346,8 +2436,34 @@ async function openManageShopModal(shopId, shopName){
   $('manageShopModal').classList.add('show');
   await renderManageShopBizTypes(shopId);
   await renderManageShopAdminInfo(shopId);
+  await renderManageShopTableView(shopId);
 }
 $('manageShopCloseBtn').addEventListener('click', ()=> $('manageShopModal').classList.remove('show'));
+
+async function renderManageShopTableView(targetShopId){
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.table_view_enabled&select=value`, {headers: mpesaFunctionHeaders()});
+    const rows = res.ok ? await res.json() : [];
+    // Defaults to on — matches the local default so a shop that's never had this
+    // setting saved yet shows the same behavior it would actually get.
+    $('manageShopTableViewCheckbox').checked = rows.length ? !!rows[0].value : true;
+  }catch(e){ $('manageShopTableViewCheckbox').checked = true; }
+}
+$('manageShopSaveTableViewBtn').addEventListener('click', async ()=>{
+  if(!manageShopTargetId) return;
+  const enabled = $('manageShopTableViewCheckbox').checked;
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
+      method:'POST', headers: mpesaFunctionHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),
+      body: JSON.stringify({shop_id:manageShopTargetId, key:'table_view_enabled', value:enabled, updated_at:new Date().toISOString()}),
+    });
+    if(!res.ok){ toast('Could not save — check the connection'); return; }
+    logAudit('Set Table View remotely (Platform Administrator)', `${$('manageShopName').textContent} → ${enabled?'on':'off'}`);
+    toast('Table View updated — that shop will pick it up next time it syncs');
+  }catch(e){
+    toast('Could not save — check the connection');
+  }
+});
 
 async function renderManageShopBizTypes(targetShopId){
   const box = $('manageShopBizTypes');
@@ -2759,6 +2875,39 @@ function resolveTypeForCategory(cat){
 }
 let editingSku = null; // set when the Feed Stock form is pre-filled for editing an existing product
 
+// ---------- Scan a product pack with the camera — auto-fills Feed Stock ----------
+// Reuses the Feed Stock form itself as the review step (unlike invoice auto-read, which
+// needed a dedicated review modal because it touches stock directly) — nothing here is
+// saved until the admin actually clicks "Add to stock", so a wrong guess just means
+// editing a field before saving, not undoing a stock change after the fact.
+$('scanProductBtn').addEventListener('click', ()=> $('scanProductInput').click());
+$('scanProductInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const status = $('scanProductStatus');
+  status.textContent = 'Reading the pack…';
+  try{
+    const imageDataUrl = await compressImageToDataUrl(file, 1400, 0.8);
+    const catList = CATS.filter(c=>c!=='All');
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/product-scan`, {
+      method:'POST', headers: mpesaFunctionHeaders(),
+      body: JSON.stringify({imageDataUrl, categories: catList}),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok || data.error) throw new Error(data.error || 'Could not read the pack');
+    if(data.name) $('newName').value = data.name;
+    if(data.category && catList.includes(data.category)){ populateCatSelect(); $('newCat').value = data.category; }
+    if(data.price) $('newPrice').value = data.price;
+    if(data.expiryDate) $('newExpiryDate').value = data.expiryDate;
+    if(data.isRx) $('newIsRx').checked = true;
+    status.textContent = '✓ Filled in — check everything before saving';
+    $('newQty').focus();
+  }catch(err){
+    status.textContent = 'Could not read the pack: ' + err.message + ' — this needs the product-scan Edge Function deployed on Supabase.';
+  }
+  $('scanProductInput').value = '';
+});
+
 async function addStock(){
   const sku=$('newSku').value.trim(), name=$('newName').value.trim(), cat=$('newCat').value;
   const qtyRaw = $('newQty').value.trim();
@@ -2786,6 +2935,8 @@ async function addStock(){
   const supplierNameInput = $('newSupplier').value.trim();
   const reorderAtRaw = $('newReorderAt').value.trim();
   const reorderThresholdInput = reorderAtRaw==='' ? null : parseInt(reorderAtRaw, 10);
+  const expiryDateInput = $('newExpiryDate').value || null;
+  const isRxInput = $('newIsRx').checked;
   if(p){
     // Editing an existing product: blank quantity means "don't touch the stock count" —
     // it must never silently convert a tracked item into an unlimited service item.
@@ -2793,14 +2944,17 @@ async function addStock(){
     p.price=price; p.name=name; p.cat=cat; p.cost=cost||0;
     if(supplierNameInput) p.supplierName = supplierNameInput;
     if(reorderThresholdInput!==null && !isNaN(reorderThresholdInput)) p.reorderThreshold = reorderThresholdInput;
+    if(expiryDateInput) p.expiryDate = expiryDateInput;
+    p.isRx = isRxInput;
   } else {
     // Brand-new product: blank quantity is the intentional way to mark it a service/unlimited item.
     p={sku,name,price,stock:qty,cat,cost:cost||0,btype:resolveTypeForCategory(cat),
        supplierName: supplierNameInput || null,
-       reorderThreshold: (reorderThresholdInput!==null && !isNaN(reorderThresholdInput)) ? reorderThresholdInput : 10};
+       reorderThreshold: (reorderThresholdInput!==null && !isNaN(reorderThresholdInput)) ? reorderThresholdInput : 10,
+       expiryDate: expiryDateInput, isRx: isRxInput};
   }
   await put('products', p);
-  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10});
+  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10, expiryDate:p.expiryDate||null, isRx:p.isRx||false});
   // Log it as a purchase for the Reports "stock received" numbers — only when actual units came in
   if(qtyProvided && qty>0){
     const movement = {sku, name, qty, cost: cost||0, btype: resolveTypeForCategory(cat), ts:new Date().toISOString()};
@@ -2811,6 +2965,7 @@ async function addStock(){
   logAudit(isNew ? 'Added new product' : 'Updated product', `${name} (${sku})`);
   $('newSku').value=''; $('newName').value=''; $('newQty').value=''; $('newCost').value=''; $('newPrice').value='';
   $('newSupplier').value=''; $('newReorderAt').value=''; populateSupplierSelect('');
+  $('newExpiryDate').value=''; $('newIsRx').checked=false; $('scanProductStatus').textContent='';
   $('costModeSelect').value='piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
   editingSku = null;
   $('addStockBtn').textContent = 'Add to stock';
@@ -2833,6 +2988,8 @@ function editProduct(sku){
     $('newSupplier').value = p.supplierName || '';
     populateSupplierSelect(p.supplierName || '');
     $('newReorderAt').value = (p.reorderThreshold!==undefined && p.reorderThreshold!==null) ? p.reorderThreshold : '';
+    $('newExpiryDate').value = p.expiryDate || '';
+    $('newIsRx').checked = !!p.isRx;
     $('newQty').value = ''; // blank = leave stock count untouched, per the fix above
     $('costModeSelect').value = 'piece'; $('packUnitsInput').value=''; $('packUnitsInput').style.display='none'; $('perPieceCostPreview').style.display='none';
     $('addStockBtn').textContent = 'Save changes';
@@ -2900,8 +3057,15 @@ async function renderStockTable(){
     const low = !isService && p.stock<=(p.reorderThreshold||10);
     const cost = p.cost || 0;
     const margin = cost>0 ? (((p.price-cost)/p.price)*100).toFixed(0)+'%' : '—';
+    let expiryBadge = '';
+    if(p.expiryDate){
+      const daysLeft = Math.ceil((new Date(p.expiryDate) - new Date(todayIso())) / 86400000);
+      if(daysLeft < 0) expiryBadge = `<span class="low-badge" style="background:#f3ddd6; color:var(--clay);">EXPIRED</span>`;
+      else if(daysLeft <= 30) expiryBadge = `<span class="low-badge" style="background:var(--marigold-pale); color:var(--marigold-dark);">${daysLeft}d left</span>`;
+    }
+    const rxBadge = p.isRx ? `<span class="low-badge" style="background:var(--marigold-pale); color:var(--marigold-dark);">Rx</span>` : '';
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="name">${p.name}${low?'<span class="low-badge">LOW</span>':''}</td><td>${p.cat}</td><td>${p.sku}</td><td>${isService?'Unlimited':p.stock}</td><td>${cost>0?fmtKsh(cost):'—'}</td><td>${fmtKsh(p.price)}</td><td>${margin}</td>
+    tr.innerHTML = `<td class="name">${p.name}${low?'<span class="low-badge">LOW</span>':''}${expiryBadge}${rxBadge}</td><td>${p.cat}</td><td>${p.sku}</td><td>${isService?'Unlimited':p.stock}</td><td>${cost>0?fmtKsh(cost):'—'}</td><td>${fmtKsh(p.price)}</td><td>${margin}</td>
       <td style="white-space:nowrap;"><span style="display:flex; gap:6px;">
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="edit" data-sku="${p.sku}">Edit</button>
         <button class="modal-cancel" style="padding:5px 9px;border-radius:6px;border:none;cursor:pointer;font-size:11px;" data-act="rename" data-sku="${p.sku}">SKU</button>
@@ -3243,34 +3407,92 @@ $('downloadBSBtn').addEventListener('click', async ()=>{
 // same kind Reports/P&L already understand — once it's settled. Settlement reuses
 // the existing cash/M-Pesa checkout flow unchanged (see the settlingTableId hook
 // at the end of finalizeSale) rather than duplicating payment logic.
+//
+// Table View (the floor-plan grid) is a separate, Super-Admin-controlled setting
+// on top of business type — Restaurant/Hotel makes table service available at
+// all, Table View decides whether the till leads with a floor plan (like Toast/
+// Square/Lightspeed) or stays a plain walk-in till with a simple table switcher.
+// A regular shop admin can't turn this on themselves — see Manage Shop.
 // ======================================================================
 let activeTableId = null;
 let settlingTableId = null;
+let tableViewMode = 'floor'; // 'floor' | 'order' | 'walkin' — only meaningful when tableFloorModeActive()
+let tableViewEnabled = true; // default on for restaurant/hotel; Super Admin can turn it off per shop
 
-function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant'); }
+function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant') || currentBusinessTypes.includes('hotel'); }
+function tableFloorModeActive(){ return tableServiceEnabled() && tableViewEnabled; }
+
 function updateTableServiceVisibility(){
-  const enabled = tableServiceEnabled();
-  $('tablesBarWrap').style.display = enabled ? 'block' : 'none';
-  if(enabled) renderTablesBar();
-  if(!enabled && activeTableId) exitTableMode();
+  if(tableFloorModeActive()){
+    if(tableViewMode==='floor' || !activeTableId && tableViewMode!=='walkin') showFloorView();
+    else showTillGridView();
+  } else {
+    $('tableFloorView').style.display = 'none';
+    $('tableOrderTopBar').style.display = 'none';
+    document.querySelector('.till-grid').style.display = '';
+    if(activeTableId) exitTableMode();
+  }
 }
+function showFloorView(){
+  tableViewMode = 'floor';
+  activeTableId = null;
+  $('tableFloorView').style.display = 'block';
+  $('tableOrderTopBar').style.display = 'none';
+  document.querySelector('.till-grid').style.display = 'none';
+  renderFloorGrid();
+}
+function showTillGridView(){
+  $('tableFloorView').style.display = 'none';
+  $('tableOrderTopBar').style.display = 'block';
+  document.querySelector('.till-grid').style.display = '';
+}
+function refreshFloorIfActive(){ if(tableFloorModeActive()) renderFloorGrid(); }
 
-async function renderTablesBar(){
-  const box = $('tablesBarChips');
+async function renderFloorGrid(){
+  const box = $('floorGrid');
   if(!box) return;
   const tables = (await getAll('open_orders')).filter(t=>t.status==='open').sort((a,b)=>new Date(a.openedAt)-new Date(b.openedAt));
-  box.innerHTML = tables.map(t=>{
+  let html = `<button class="floor-card new-table-card" data-walkin="1">
+    <div style="font-size:24px;">🧾</div>
+    <div class="fc-label" style="margin-top:6px;">Walk-in / Takeaway</div>
+    <div class="fc-sub">Quick counter sale</div>
+  </button>`;
+  html += tables.map(t=>{
     const total = t.lines.reduce((s,l)=>s+l.price*l.qty,0);
+    const itemCount = t.lines.reduce((s,l)=>s+l.qty,0);
     const unsent = t.lines.filter(l=>!l.sentToKitchen).length;
-    const isActive = t.id===activeTableId;
-    return `<button class="cat-chip${isActive?' active':''}" data-table-chip="${t.id}" style="white-space:nowrap; position:relative;">
-      ${t.label} · ${fmtKsh(total)}${unsent>0?`<span style="background:var(--clay); color:#fff; font-size:9px; font-weight:800; padding:1px 5px; border-radius:999px; margin-left:5px;">${unsent}</span>`:''}
+    let statusClass = 'status-open', badge = '';
+    if(t.lines.length===0){ statusClass = 'status-empty'; }
+    else if(unsent>0){ statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">${unsent} NEW</span>`; }
+    else if(t.billPrinted){ statusClass = 'status-ready'; badge = `<span class="fc-badge" style="background:var(--sage);">READY</span>`; }
+    const mins = Math.max(0, Math.round((Date.now()-new Date(t.openedAt).getTime())/60000));
+    const timeLabel = mins<60 ? `${mins} min` : `${Math.floor(mins/60)}h ${mins%60}m`;
+    return `<button class="floor-card ${statusClass}" data-table-card="${t.id}">
+      ${badge}
+      <div>
+        <div class="fc-label">${t.label}</div>
+        <div class="fc-sub">${t.lines.length===0?'No items yet':itemCount+' item(s)'} · ${timeLabel}</div>
+      </div>
+      <div class="fc-total">${fmtKsh(total)}</div>
     </button>`;
   }).join('');
-  box.querySelectorAll('button[data-table-chip]').forEach(b=>{
-    b.addEventListener('click', ()=> selectTable(b.dataset.tableChip));
+  box.innerHTML = html;
+  box.querySelectorAll('button[data-table-card]').forEach(b=>{
+    b.addEventListener('click', ()=> selectTable(b.dataset.tableCard));
+  });
+  box.querySelectorAll('button[data-walkin]').forEach(b=>{
+    b.addEventListener('click', enterWalkInMode);
   });
 }
+function enterWalkInMode(){
+  tableViewMode = 'walkin';
+  activeTableId = null;
+  $('walkInReceiptPanel').style.display = '';
+  $('tableOrderPanel').style.display = 'none';
+  showTillGridView();
+  scanInput.focus();
+}
+$('backToFloorBtn').addEventListener('click', ()=>{ activeTableId = null; showFloorView(); });
 
 $('newTableBtn').addEventListener('click', async ()=>{
   const label = prompt('Table label (e.g. Table 4, Booth 2):');
@@ -3284,23 +3506,26 @@ $('newTableBtn').addEventListener('click', async ()=>{
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   logAudit('Table opened', table.label);
-  renderTablesBar();
+  refreshFloorIfActive();
   selectTable(table.id);
 });
 
 function selectTable(id){
   activeTableId = id;
+  tableViewMode = 'order';
   $('walkInReceiptPanel').style.display = 'none';
   $('tableOrderPanel').style.display = 'flex';
+  showTillGridView();
   renderTableOrderView();
-  renderTablesBar();
 }
 function exitTableMode(){
   activeTableId = null;
-  $('tableOrderPanel').style.display = 'none';
-  $('walkInReceiptPanel').style.display = '';
-  renderTablesBar();
-  scanInput.focus();
+  if(tableFloorModeActive()) showFloorView();
+  else {
+    $('tableOrderPanel').style.display = 'none';
+    $('walkInReceiptPanel').style.display = '';
+    scanInput.focus();
+  }
 }
 $('tableOrderExitBtn').addEventListener('click', exitTableMode);
 
@@ -3317,10 +3542,10 @@ async function addItemToTable(sku){
   const existing = table.lines.find(l=>l.sku===sku && !l.sentToKitchen);
   if(existing) existing.qty += 1;
   else table.lines.push({sku:p.sku, name:p.name, price:p.price, cost:p.cost||0, qty:1, sentToKitchen:false});
+  table.billPrinted = false; // any change to the order makes the last printed bill stale
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   renderTableOrderView();
-  renderTablesBar();
 }
 
 async function adjustTableLineQty(idx, delta){
@@ -3332,10 +3557,10 @@ async function adjustTableLineQty(idx, delta){
   if(line.sentToKitchen){ toast('Already sent to the kitchen — can\'t be quietly changed here'); return; }
   line.qty += delta;
   if(line.qty<=0) table.lines.splice(idx,1);
+  table.billPrinted = false;
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   renderTableOrderView();
-  renderTablesBar();
 }
 async function removeTableLine(idx){
   const tables = await getAll('open_orders');
@@ -3345,10 +3570,10 @@ async function removeTableLine(idx){
   if(!line) return;
   if(line.sentToKitchen){ toast('Already sent to the kitchen — can\'t be quietly removed here'); return; }
   table.lines.splice(idx,1);
+  table.billPrinted = false;
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   renderTableOrderView();
-  renderTablesBar();
 }
 
 async function renderTableOrderView(){
@@ -3380,9 +3605,16 @@ async function renderTableOrderView(){
   const subtotal = table.lines.reduce((s,l)=>s+l.price*l.qty,0);
   $('tableOrderSubTotal').textContent = fmtKsh(subtotal);
   $('tableOrderGrandTotal').textContent = fmtKsh(subtotal);
-  $('settleTableBtn').disabled = table.lines.length===0;
   $('sendToKitchenBtn').disabled = unsent===0;
-  $('tableOrderKitchenStatus').textContent = table.lines.length===0 ? '' : (unsent===0 ? '✓ Kitchen has everything on this bill' : `${unsent} item(s) waiting to be sent`);
+  const canSettle = table.lines.length>0 && table.billPrinted===true;
+  $('settleTableBtn').disabled = !canSettle;
+  $('settleTableBtn').title = canSettle ? '' : 'Print the bill first — the customer sees it before paying';
+  let statusMsg = '';
+  if(table.lines.length>0){
+    if(unsent>0) statusMsg = `${unsent} item(s) waiting to be sent to the kitchen. `;
+    statusMsg += table.billPrinted ? '✓ Bill printed — ready to settle.' : 'Print the bill before settling — the customer should see it first.';
+  }
+  $('tableOrderKitchenStatus').textContent = statusMsg;
 }
 
 $('sendToKitchenBtn').addEventListener('click', async ()=>{
@@ -3392,7 +3624,8 @@ $('sendToKitchenBtn').addEventListener('click', async ()=>{
   if(!table) return;
   const newLines = table.lines.filter(l=>!l.sentToKitchen);
   if(newLines.length===0){ toast('Nothing new to send'); return; }
-  printKitchenTicket(table, newLines);
+  table.kitchenRoundCount = (table.kitchenRoundCount||0) + 1;
+  printKitchenTicket(table, newLines, table.kitchenRoundCount);
   table.lines.forEach(l=>{ if(!l.sentToKitchen) l.sentToKitchen = true; });
   table.lastSentAt = new Date().toISOString();
   await put('open_orders', table);
@@ -3402,20 +3635,70 @@ $('sendToKitchenBtn').addEventListener('click', async ()=>{
   renderTableOrderView();
 });
 
-function buildKitchenTicketHTML(table, lines){
+// The bill — itemized WITH prices, printed for the customer to review before any payment
+// is taken. Deliberately reuses the same .rcpt-* print classes/mechanism as a completed
+// sale's receipt (not the kitchen ticket's styling), since this is customer-facing, not
+// kitchen-facing — just without a payment method/amount-tendered section, because none
+// of that exists yet at this point.
+function buildTableBillHTML(table){
+  const storeName = businessProfile.storeName || 'My DukaGO POS';
+  const addrLine = [businessProfile.address, businessProfile.location].filter(Boolean).join(', ');
+  const dt = new Date().toLocaleString('en-KE',{hour12:false});
+  const subtotal = table.lines.reduce((s,l)=>s+l.price*l.qty,0);
+  const itemsHtml = table.lines.map(l=>`<div class="rcpt-line"><span>${l.qty}× ${l.name}</span><span>${fmtKsh(l.qty*l.price)}</span></div>`).join('');
+  return `
+    <div class="rcpt-store">${storeName}</div>
+    <div class="rcpt-meta">${table.label} — Bill</div>
+    ${addrLine ? `<div class="rcpt-meta">${addrLine}</div>` : ''}
+    ${businessProfile.phone ? `<div class="rcpt-meta">${businessProfile.phone}</div>` : ''}
+    <div class="rcpt-meta">${dt}</div>
+    <div class="rcpt-meta">Served by: ${currentUser?currentUser.name:'—'}</div>
+    <div class="rcpt-divider"></div>
+    ${itemsHtml}
+    <div class="rcpt-divider"></div>
+    <div class="rcpt-line rcpt-grand"><span>Total due</span><span>${fmtKsh(subtotal)}</span></div>
+    <div class="rcpt-footer">Please pay at the counter — thank you!</div>
+  `;
+}
+function printTableBillDoc(table){
+  $('receiptPrintArea').innerHTML = buildTableBillHTML(table);
+  $('receiptPrintArea').className = 'paper-'+receiptPaperWidth.replace('mm','');
+  document.body.classList.add('printing-receipt');
+  let cleaned = false;
+  const cleanup = ()=>{ if(cleaned) return; cleaned=true; document.body.classList.remove('printing-receipt'); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 6000);
+}
+$('printBillBtn').addEventListener('click', async ()=>{
+  if(!activeTableId) return;
+  const tables = await getAll('open_orders');
+  const table = tables.find(t=>t.id===activeTableId);
+  if(!table || table.lines.length===0){ toast('Nothing on this table yet'); return; }
+  printTableBillDoc(table);
+  table.billPrinted = true;
+  await put('open_orders', table);
+  await queuePush('table_order_upsert', table);
+  logAudit('Bill printed', table.label);
+  renderTableOrderView();
+});
+
+function buildKitchenTicketHTML(table, lines, round){
   const time = new Date().toLocaleTimeString('en-KE',{hour12:false});
   const itemsHtml = lines.map(l=>`<div class="kt-line"><span class="kt-qty">${l.qty}×</span><span class="kt-name">${l.name}</span></div>`).join('');
   return `
-    <div class="kt-header">${table.label}</div>
-    <div class="kt-meta">${time} · ${currentUser?currentUser.name:'—'}</div>
+    <div class="kt-ordernum">${table.label}</div>
+    <div class="kt-round">Round ${round}</div>
+    <div class="kt-meta">${time} · Server: ${currentUser?currentUser.name:'—'}</div>
     <div class="kt-divider"></div>
     ${itemsHtml}
+    <div class="kt-cutline">✂ - - - - - - - - - - - - - - - - - - - - -</div>
   `;
 }
 // Deliberately a separate print path from receipts/POs — no prices, larger type, meant
 // to be read fast from across a kitchen, not itemized for a customer.
-function printKitchenTicket(table, lines){
-  $('receiptPrintArea').innerHTML = buildKitchenTicketHTML(table, lines);
+function printKitchenTicket(table, lines, round){
+  $('receiptPrintArea').innerHTML = buildKitchenTicketHTML(table, lines, round);
   $('receiptPrintArea').className = '';
   document.body.classList.add('printing-kitchen');
   let cleaned = false;
@@ -3430,6 +3713,7 @@ $('settleTableBtn').addEventListener('click', async ()=>{
   const tables = await getAll('open_orders');
   const table = tables.find(t=>t.id===activeTableId);
   if(!table || table.lines.length===0) return;
+  if(!table.billPrinted){ toast('Print the bill first — the customer sees it before paying'); return; }
   if(table.lines.some(l=>!l.sentToKitchen) && !confirm('Some items haven\'t been sent to the kitchen yet — settle the bill anyway?')) return;
   // payMethod is a single global set by buttons that live in the walk-in panel — hidden
   // while a table's selected, so it could be silently stuck on 'credit' from an earlier
@@ -3593,7 +3877,39 @@ function prefillPayableDates(){
   $('payableCustomDaysRow').style.display = 'none';
   recomputePayableDue();
   applyPhotoUploadPermission();
+  populatePayableDatalists();
 }
+// Feeds both the Supplier and PO number autocomplete lists, shared between the full
+// Payables form and the quick "Log invoice" modal — one shared <datalist> each, so this
+// only needs populating once regardless of which form is open.
+async function populatePayableDatalists(){
+  const supplierBox = $('payableSupplierList');
+  if(supplierBox) supplierBox.innerHTML = SUPPLIERS.map(s=>`<option value="${s.name}">`).join('');
+  const poBox = $('payablePoList');
+  if(poBox){
+    const openPOs = (await getAll('purchase_orders')).filter(p=>p.status==='pending_supply');
+    poBox.innerHTML = openPOs.map(p=>`<option value="${p.poNumber}">${p.supplierName}</option>`).join('');
+  }
+}
+// Looks up whatever PO number was typed and, if it matches an open PO, shows which
+// supplier it belongs to — and fills the Supplier field automatically if it's still empty,
+// which is the actual "auto look up supplier" behavior being asked for.
+async function checkPayablePoMatch(poInputId, supplierInputId, noteId){
+  const poNumber = $(poInputId).value.trim();
+  const note = $(noteId);
+  if(!poNumber){ note.style.display = 'none'; return; }
+  const pos = await getAll('purchase_orders');
+  const match = pos.find(p=>p.poNumber.toLowerCase()===poNumber.toLowerCase());
+  if(match){
+    note.textContent = `✓ Matches an open PO for ${match.supplierName}`;
+    note.style.display = 'block';
+    if(!$(supplierInputId).value.trim()) $(supplierInputId).value = match.supplierName;
+  } else {
+    note.style.display = 'none';
+  }
+}
+$('payablePoNumber').addEventListener('input', ()=> checkPayablePoMatch('payablePoNumber','payableSupplier','payablePoMatchNote'));
+$('qpPoNumber').addEventListener('input', ()=> checkPayablePoMatch('qpPoNumber','qpSupplier','qpPoMatchNote'));
 // Invoice photo upload — the thing that feeds auto-read-to-stock — is restricted to
 // Admin/Supervisor, so a cashier can log an invoice's amount/terms but can't be the one
 // deciding what a photo says the stock should become.
@@ -3639,17 +3955,17 @@ function compressImageToDataUrl(file, maxDim, quality){
     reader.readAsDataURL(file);
   });
 }
-async function savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo}){
+async function savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo, poNumber}){
   const payable = {
     id: 'pay_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
-    supplierName, amount, invoiceDate, dueDate, notes,
+    supplierName, amount, invoiceDate, dueDate, notes, poNumber: poNumber || null,
     photo: photo||null, status:'unpaid',
     addedBy: currentUser ? currentUser.name : 'Unknown',
     paidDate: null, paidBy: null,
   };
   await put('payables', payable);
   await queuePush('payable_upsert', payable);
-  logAudit('Supplier invoice added', `${supplierName} — ${fmtKsh(amount)}, due ${dueDate}`);
+  logAudit('Supplier invoice added', `${supplierName} — ${fmtKsh(amount)}, due ${dueDate}${poNumber?' — '+poNumber:''}`);
   return payable;
 }
 $('addPayableBtn').addEventListener('click', async ()=>{
@@ -3658,11 +3974,13 @@ $('addPayableBtn').addEventListener('click', async ()=>{
   const invoiceDate = $('payableInvoiceDate').value || todayIso();
   const dueDate = $('payableDueDate').value || addDaysIso(invoiceDate, 30);
   const notes = $('payableNotes').value.trim();
+  const poNumber = $('payablePoNumber').value.trim();
   if(!supplierName){ toast('Enter the supplier\'s name'); return; }
   if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
-  await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:payablePhotoData});
-  toast('Invoice saved');
-  $('payableSupplier').value=''; $('payableAmount').value=''; $('payableNotes').value='';
+  await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:payablePhotoData, poNumber});
+  toast('Invoice saved'+(poNumber?' — linked to '+poNumber:''));
+  $('payableSupplier').value=''; $('payableAmount').value=''; $('payableNotes').value=''; $('payablePoNumber').value='';
+  $('payablePoMatchNote').style.display='none';
   $('payableInvoiceDate').value=''; $('payableDueDate').value=''; $('payableCustomDays').value='';
   $('payablePhotoInput').value=''; $('payablePhotoPreview').style.display='none'; payablePhotoData=null;
   prefillPayableDates();
@@ -3691,7 +4009,7 @@ async function renderPayablesLists(){
     row.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:start; gap:10px;">
         <div>
-          <b>${p.supplierName}</b> <span style="font-size:10.5px; color:var(--muted); font-family:var(--mono);">· ${termsLabel(Math.round((new Date(p.dueDate)-new Date(p.invoiceDate))/86400000))}</span><br>
+          <b>${p.supplierName}</b> <span style="font-size:10.5px; color:var(--muted); font-family:var(--mono);">· ${termsLabel(Math.round((new Date(p.dueDate)-new Date(p.invoiceDate))/86400000))}</span>${p.poNumber?` <span style="font-size:10.5px; color:var(--sage-dark); font-weight:700; font-family:var(--mono);">· ${p.poNumber}</span>`:''}<br>
           <span style="font-size:12px; color:var(--muted);">${p.notes || 'No notes'}</span><br>
           <span style="font-size:11.5px; color:${dueColor}; font-weight:600;">${dueText} (${p.dueDate})</span>
         </div>
@@ -3944,13 +4262,15 @@ async function renderDebtsLists(){
 
 // ---------- Quick-action modals — reachable straight from the till by any role ----------
 let qpPhotoData = null;
-$('quickPayableBtn').addEventListener('click', ()=>{
-  $('qpSupplier').value=''; $('qpAmount').value=''; $('qpNotes').value=''; $('qpCustomDays').value='';
+$('quickPayableBtn').addEventListener('click', async ()=>{
+  $('qpSupplier').value=''; $('qpAmount').value=''; $('qpNotes').value=''; $('qpCustomDays').value=''; $('qpPoNumber').value='';
+  $('qpPoMatchNote').style.display = 'none';
   $('qpPhotoInput').value=''; $('qpPhotoPreview').style.display='none'; qpPhotoData=null;
   $('qpTerms').value = '30'; $('qpCustomDaysRow').style.display = 'none';
   $('qpInvoiceDateHidden').value = todayIso();
   recomputeQpDue();
   applyPhotoUploadPermission();
+  await populatePayableDatalists();
   $('quickPayableModal').classList.add('show');
 });
 $('qpCancelBtn').addEventListener('click', ()=> $('quickPayableModal').classList.remove('show'));
@@ -3965,12 +4285,13 @@ $('qpSaveBtn').addEventListener('click', async ()=>{
   const supplierName = $('qpSupplier').value.trim();
   const amount = parseFloat($('qpAmount').value);
   const notes = $('qpNotes').value.trim();
+  const poNumber = $('qpPoNumber').value.trim();
   if(!supplierName){ toast('Enter the supplier\'s name'); return; }
   if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
   const invoiceDate = $('qpInvoiceDateHidden').value || todayIso();
   const dueDate = $('qpDueDateHidden').value || addDaysIso(invoiceDate, 30);
-  await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:qpPhotoData});
-  toast('Invoice saved — an admin can see it under Payables');
+  await savePayable({supplierName, amount, invoiceDate, dueDate, notes, photo:qpPhotoData, poNumber});
+  toast('Invoice saved'+(poNumber?' — linked to '+poNumber:''));
   $('quickPayableModal').classList.remove('show');
 });
 
@@ -4528,6 +4849,7 @@ async function pushToSupabase(item){
       shop_id:shopId, sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype,
       supplier_name: p.supplierName || null,
       reorder_threshold: p.reorderThreshold || 10,
+      expiry_date: p.expiryDate || null, is_rx: p.isRx || false,
       updated_at: p.updated_at || new Date().toISOString(),
     };
   }
@@ -4542,7 +4864,7 @@ async function pushToSupabase(item){
     const p = item.payload;
     body = {
       id:p.id, shop_id:shopId, supplier_name:p.supplierName, amount:p.amount,
-      invoice_date:p.invoiceDate, due_date:p.dueDate, photo:p.photo, notes:p.notes,
+      invoice_date:p.invoiceDate, due_date:p.dueDate, photo:p.photo, notes:p.notes, po_number:p.poNumber||null,
       status:p.status, added_by:p.addedBy, paid_date:p.paidDate, paid_by:p.paidBy,
       stock_update_status:p.stockUpdateStatus||null, stock_update_by:p.stockUpdateBy||null, stock_update_at:p.stockUpdateAt||null,
       updated_at:p.updated_at || new Date().toISOString(),
@@ -4581,7 +4903,8 @@ async function pushToSupabase(item){
     table='table_orders'; prefer='resolution=merge-duplicates,return=minimal';
     const p = item.payload;
     body = {
-      id:p.id, shop_id:shopId, label:p.label, status:p.status, lines:p.lines,
+      id:p.id, shop_id:shopId, label:p.label, status:p.status, lines:p.lines, bill_printed:p.billPrinted||false,
+      kitchen_round_count:p.kitchenRoundCount||0,
       opened_by:p.openedBy, opened_at:p.openedAt, settled_at:p.settledAt, settled_sale_id:p.settledSaleId,
       updated_at:p.updated_at || new Date().toISOString(),
     };
@@ -4690,7 +5013,7 @@ async function clearLocalShopData(){
   for(const store of storesToClear){
     await new Promise(res=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>res(); });
   }
-  for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_business_types','credit_sales_enabled','last_stock_take_at']){
+  for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_business_types','credit_sales_enabled','last_stock_take_at','table_view_enabled']){
     try{ await del('settings', key); }catch(e){ /* fine if it never existed locally */ }
   }
 }
@@ -4772,7 +5095,7 @@ async function pullShopData(fullPull, force){
       for(const rp of remoteProducts){
         const lp = localProducts.find(p=>p.sku===rp.sku);
         if(force || !lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
-          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, supplierName:rp.supplier_name||null, reorderThreshold:rp.reorder_threshold||10, updated_at:rp.updated_at});
+          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, supplierName:rp.supplier_name||null, reorderThreshold:rp.reorder_threshold||10, expiryDate:rp.expiry_date||null, isRx:rp.is_rx||false, updated_at:rp.updated_at});
         }
       }
       // A genuinely full pull is authoritative — a product deleted on another device
@@ -4837,7 +5160,7 @@ async function pullShopData(fullPull, force){
       for(const rp of remotePayables){
         const lp = localPayables.find(p=>p.id===rp.id);
         if(!lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
-          await put('payables', {id:rp.id, supplierName:rp.supplier_name, amount:rp.amount, invoiceDate:rp.invoice_date, dueDate:rp.due_date, photo:rp.photo, notes:rp.notes, status:rp.status, addedBy:rp.added_by, paidDate:rp.paid_date, paidBy:rp.paid_by, stockUpdateStatus:rp.stock_update_status||null, stockUpdateBy:rp.stock_update_by||null, stockUpdateAt:rp.stock_update_at||null, updated_at:rp.updated_at});
+          await put('payables', {id:rp.id, supplierName:rp.supplier_name, amount:rp.amount, invoiceDate:rp.invoice_date, dueDate:rp.due_date, photo:rp.photo, notes:rp.notes, poNumber:rp.po_number||null, status:rp.status, addedBy:rp.added_by, paidDate:rp.paid_date, paidBy:rp.paid_by, stockUpdateStatus:rp.stock_update_status||null, stockUpdateBy:rp.stock_update_by||null, stockUpdateAt:rp.stock_update_at||null, updated_at:rp.updated_at});
         }
       }
     }
@@ -4896,13 +5219,14 @@ async function pullShopData(fullPull, force){
         const lt = localTables.find(t=>t.id===rt.id);
         if(!lt || !lt.updated_at || new Date(rt.updated_at) > new Date(lt.updated_at)){
           await put('open_orders', {
-            id:rt.id, label:rt.label, status:rt.status, lines:rt.lines,
+            id:rt.id, label:rt.label, status:rt.status, lines:rt.lines, billPrinted:rt.bill_printed||false,
+            kitchenRoundCount:rt.kitchen_round_count||0,
             openedBy:rt.opened_by, openedAt:rt.opened_at, settledAt:rt.settled_at, settledSaleId:rt.settled_sale_id,
             updated_at:rt.updated_at,
           });
         }
       }
-      if(tableServiceEnabled()){ renderTablesBar(); if(activeTableId) renderTableOrderView(); }
+      if(tableServiceEnabled()){ refreshFloorIfActive(); if(activeTableId) renderTableOrderView(); }
     }
     lastPullSync = new Date().toISOString();
     await put('settings', {key:'last_pull_sync', value:lastPullSync});
@@ -4961,6 +5285,9 @@ async function loadSettingsPanelValues(){
   creditSalesEnabled = credit ? !!credit.value : false;
   $('creditToggleBtn').textContent = creditSalesEnabled ? 'Turn off' : 'Turn on';
   applyCreditPaymentButtonVisibility();
+  const tv = await getSetting('table_view_enabled');
+  tableViewEnabled = tv ? !!tv.value : true; // defaults on — only Super Admin can turn it off remotely
+  updateTableServiceVisibility();
   const receipt = await getSetting('receipt');
   if(receipt){ receiptAction = receipt.value.action; receiptPaperWidth = receipt.value.paper; }
   $('receiptActionSelect').value = receiptAction;
