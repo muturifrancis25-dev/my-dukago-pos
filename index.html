@@ -489,13 +489,13 @@
   }
 
   /* ---- Payment method row on till ---- */
-  .paymethod-row{display:flex; gap:8px; padding:0 14px 10px;}
+  .paymethod-row{display:flex; flex-wrap:nowrap; gap:8px; padding:0 14px 10px;}
   .paymethod-row button{
-    flex:1; padding:13px 0; border-radius:10px; border:1.5px solid var(--line); background:var(--panel);
-    font-family:var(--display); font-weight:700; font-size:14px; cursor:pointer; color:var(--muted);
-    display:flex; align-items:center; justify-content:center; gap:6px;
+    flex:1; min-width:0; padding:12px 4px; border-radius:10px; border:1.5px solid var(--line); background:var(--panel);
+    font-family:var(--display); font-weight:700; font-size:13px; cursor:pointer; color:var(--muted);
+    display:flex; align-items:center; justify-content:center; gap:5px; white-space:nowrap;
   }
-  .paymethod-row button svg{width:18px; height:18px; flex:none;}
+  .paymethod-row button svg{width:16px; height:16px; flex:none;}
   .paymethod-row button.active{border-color:var(--teal-dark); background:var(--teal-dark); color:#fff;}
 
   /* ---- M-Pesa payment picker — three real option cards, each with its own icon, title,
