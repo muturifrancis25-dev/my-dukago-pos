@@ -10,31 +10,32 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script>
-  // Applied before first paint so there's no light-mode flash on a dark-mode reload.
+  // Dark is now the app's default face; applied before first paint so there's no
+  // flash either way. Only an explicit, previously-saved 'light' choice opts out.
   try{
-    if(localStorage.getItem('my_duka_theme') === 'dark'){
+    if(localStorage.getItem('my_duka_theme') !== 'light'){
       document.documentElement.setAttribute('data-theme','dark');
     }
   }catch(e){}
 </script>
 <style>
   :root{
-    --ink:#2a2118;
-    --bg:#ffffff;
+    --ink:#1c1712;
+    --bg:#f6f2e8;
     --panel:#ffffff;
-    --line:#ddccA1;
-    --teal:#163b31;
-    --teal-dark:#0f2620;
-    --marigold:#e2a034;
-    --marigold-dark:#b97a1c;
-    --marigold-pale:#f7e6c4;
+    --line:#e3d9bd;
+    --teal:#123830;
+    --teal-dark:#0b211b;
+    --marigold:#df9724;
+    --marigold-dark:#a8680f;
+    --marigold-pale:#f6e3ba;
     --gold:#f0b429;
     --gold-dark:#c6890b;
-    --sage:#4c7a52;
-    --sage-dark:#35573a;
-    --clay:#b33f2e;
-    --muted:#8c7c5e;
-    --bg-glow:#ffffff; /* base is white now — no warm cream lift needed */
+    --sage:#3f6b46;
+    --sage-dark:#2c4f31;
+    --clay:#c23a26;
+    --muted:#87765a;
+    --bg-glow:#fffdf5; /* soft ivory lift under the header, cards stay crisp white on top of it */
     --accent-text:var(--teal-dark); /* foreground emphasis on a panel — flips in dark mode, chrome (--teal-dark itself) never does */
     /* Custom type system, not default system fonts — three purposes, not one font doing
        everything. Fraunces (a warm, characterful serif) is reserved for moments that carry
@@ -62,16 +63,16 @@
      colors that were tuned to sit on a pale panel and would go invisible on
      a dark one. */
   html[data-theme="dark"]{
-    --ink:#ece3d1;
-    --bg:#15110d;
-    --panel:#211b15;
-    --line:#3c3226;
-    --muted:#a89a82;
-    --sage-dark:#7fbf82;
-    --clay:#e2695a;
-    --marigold-pale:#3a2e18;
-    --accent-text:#f0c869;
-    --bg-glow:#1d1710;
+    --ink:#eef2f2;
+    --bg:#0b1512;
+    --panel:#13221c;
+    --line:#264336;
+    --muted:#8fa79a;
+    --sage-dark:#3ddc84;
+    --clay:#ff6b57;
+    --marigold-pale:#2a2312;
+    --accent-text:#3ddc84;
+    --bg-glow:#0f1e18;
   }
   html{ color-scheme: light; }
   html[data-theme="dark"]{ color-scheme: dark; }
@@ -455,20 +456,20 @@
   .floor-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle;}
   .floor-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(136px,1fr)); gap:14px; padding:8px 18px 28px;}
   .floor-card{
-    background:var(--panel); border:2px solid var(--line); border-radius:16px; padding:14px 10px 12px;
+    background:var(--panel); border:2px solid var(--muted); border-radius:16px; padding:14px 10px 12px;
     cursor:pointer; text-align:center; position:relative; min-height:160px;
     display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:1px;
     transition:transform .1s, box-shadow .15s; font-family:var(--sans);
   }
   .floor-card:hover{ box-shadow:0 4px 14px rgba(42,33,24,.1); }
   .floor-card:active{ transform:scale(.97); }
-  .floor-card .fc-icon{width:46px; height:46px; margin:0 auto 6px; display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--line);}
+  .floor-card .fc-icon{width:46px; height:46px; margin:0 auto 6px; display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--muted);}
   .floor-card .fc-icon svg{width:100%; height:100%; display:block;}
   .floor-card .fc-label{font-family:var(--display); font-weight:700; font-size:14px; color:var(--ink); line-height:1.2;}
   .floor-card .fc-sub{font-size:11px; color:var(--muted); margin-top:2px;}
   .floor-card .fc-total{font-family:var(--mono); font-weight:800; font-size:15px; margin-top:auto; padding-top:10px; color:var(--accent-text); min-height:1.1em;}
   .floor-card .fc-badge{position:absolute; top:8px; right:8px; font-size:9px; font-weight:800; padding:2px 7px; border-radius:999px; color:#fff; letter-spacing:.3px;}
-  .floor-card.status-empty{border-style:dashed; opacity:.72;}
+  .floor-card.status-empty{border-style:dashed;}
   .floor-card.status-open{border-color:var(--marigold);}
   .floor-card.status-open .fc-icon{color:var(--marigold);}
   .floor-card.status-open{background:color-mix(in srgb, var(--marigold) 7%, var(--panel));}
@@ -3444,13 +3445,13 @@ async function ensureTableDefs(){
 function tableIconSVG(){
   // A round table with six chairs, drawn in currentColor so CSS can tint it per status.
   return `<svg viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
-    <rect x="6" y="1" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
-    <rect x="29" y="1" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
-    <rect x="6" y="38" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
-    <rect x="29" y="38" width="9" height="5" rx="2.2" fill="currentColor" opacity=".55"/>
-    <rect x="1" y="15" width="5" height="9" rx="2.2" fill="currentColor" opacity=".55"/>
-    <rect x="38" y="15" width="5" height="9" rx="2.2" fill="currentColor" opacity=".55"/>
-    <circle cx="22" cy="22" r="15" fill="currentColor" opacity=".16" stroke="currentColor" stroke-width="2"/>
+    <rect x="6" y="1" width="9" height="5" rx="2.2" fill="currentColor" opacity=".8"/>
+    <rect x="29" y="1" width="9" height="5" rx="2.2" fill="currentColor" opacity=".8"/>
+    <rect x="6" y="38" width="9" height="5" rx="2.2" fill="currentColor" opacity=".8"/>
+    <rect x="29" y="38" width="9" height="5" rx="2.2" fill="currentColor" opacity=".8"/>
+    <rect x="1" y="15" width="5" height="9" rx="2.2" fill="currentColor" opacity=".8"/>
+    <rect x="38" y="15" width="5" height="9" rx="2.2" fill="currentColor" opacity=".8"/>
+    <circle cx="22" cy="22" r="15" fill="currentColor" opacity=".22" stroke="currentColor" stroke-width="2.5"/>
   </svg>`;
 }
 
