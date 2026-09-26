@@ -488,16 +488,25 @@
   .floor-card .fc-sub{font-size:11px; color:var(--muted); margin-top:2px;}
   .floor-card .fc-total{font-family:var(--mono); font-weight:800; font-size:15px; margin-top:auto; padding-top:10px; color:var(--accent-text); min-height:1.1em;}
   .floor-card .fc-badge{position:absolute; top:8px; right:8px; font-size:9px; font-weight:800; padding:2px 7px; border-radius:999px; color:#fff; letter-spacing:.3px;}
+  /* Small status dot, top-left of every card — the one thing on the card that always
+     tells you the table's state at a glance, independent of border/background contrast,
+     which can be hard to tell apart quickly across 20 tables. */
+  .floor-card .fc-status-dot{position:absolute; top:9px; left:9px; width:10px; height:10px; border-radius:50%; background:var(--line);}
   .floor-card.status-empty{border-style:dashed;}
+  .floor-card.status-empty .fc-status-dot{background:var(--line);}
   .floor-card.status-open{border-color:var(--marigold);}
   .floor-card.status-open .fc-icon{color:var(--marigold);}
   .floor-card.status-open{background:color-mix(in srgb, var(--marigold) 7%, var(--panel));}
+  .floor-card.status-open .fc-status-dot{background:var(--marigold);}
   .floor-card.status-waiting{border-color:var(--clay); box-shadow:0 0 0 1px var(--clay);}
   .floor-card.status-waiting .fc-icon{color:var(--clay);}
   .floor-card.status-waiting{background:color-mix(in srgb, var(--clay) 9%, var(--panel));}
+  .floor-card.status-waiting .fc-status-dot{background:var(--clay); animation:fc-dot-pulse 1.6s ease-in-out infinite;}
   .floor-card.status-ready{border-color:var(--sage); box-shadow:0 0 0 1px var(--sage);}
   .floor-card.status-ready .fc-icon{color:var(--sage);}
   .floor-card.status-ready{background:color-mix(in srgb, var(--sage) 9%, var(--panel));}
+  .floor-card.status-ready .fc-status-dot{background:var(--sage);}
+  @keyframes fc-dot-pulse{ 0%,100%{ box-shadow:0 0 0 0 color-mix(in srgb, var(--clay) 55%, transparent); } 50%{ box-shadow:0 0 0 5px color-mix(in srgb, var(--clay) 0%, transparent); } }
   .floor-card.new-table-card{align-items:center; justify-content:center; text-align:center; border-style:dashed; color:var(--muted);}
 
   /* ---- Payment method row on till ---- */
@@ -3559,6 +3568,11 @@ async function renderFloorGrid(){
 
   html += tableDefs.map(def=>{
     const t = openById[def.id];
+    // Four states, in the order a table actually moves through:
+    //  empty        — no order open on this table at all
+    //  open         — order being built at the table; still has line(s) not yet fired to the kitchen
+    //  waiting      — every line has been sent to the kitchen — order is in prep, nothing left to add right now
+    //  ready         — bill has been printed — the table is ready to pay and settle
     let statusClass = 'status-empty', badge = '', sub = `${def.seats||4} seats`, total = '';
     if(t && t.lines.length){
       const totalAmt = t.lines.reduce((s,l)=>s+l.price*l.qty,0);
@@ -3566,13 +3580,15 @@ async function renderFloorGrid(){
       const unsent = t.lines.filter(l=>!l.sentToKitchen).length;
       const mins = Math.max(0, Math.round((Date.now()-new Date(t.openedAt).getTime())/60000));
       const timeLabel = mins<60 ? `${mins} min` : `${Math.floor(mins/60)}h ${mins%60}m`;
-      statusClass = 'status-open'; sub = `${itemCount} item(s) · ${timeLabel}`; total = fmtKsh(totalAmt);
-      if(unsent>0){ statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">${unsent} NEW</span>`; }
-      else if(t.billPrinted){ statusClass = 'status-ready'; badge = `<span class="fc-badge" style="background:var(--sage);">READY</span>`; }
+      sub = `${itemCount} item(s) · ${timeLabel}`; total = fmtKsh(totalAmt);
+      if(t.billPrinted){ statusClass = 'status-ready'; badge = `<span class="fc-badge" style="background:var(--sage);">READY</span>`; }
+      else if(unsent>0){ statusClass = 'status-open'; badge = `<span class="fc-badge" style="background:var(--marigold-dark, var(--marigold));">${unsent} NEW</span>`; }
+      else { statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">KITCHEN</span>`; }
     } else if(t){
       statusClass = 'status-open'; sub = 'No items yet';
     }
     return `<button class="floor-card ${statusClass}" data-table-card="${def.id}">
+      <span class="fc-status-dot"></span>
       ${badge}
       <div class="fc-icon">${tableIconSVG()}</div>
       <div class="fc-label">${def.label}</div>
