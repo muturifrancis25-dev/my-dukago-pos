@@ -2157,7 +2157,7 @@ async function renderProductGrid(){
   }
   filtered.forEach(p=>{
     const isService = p.stock===null || p.stock===undefined;
-    const low = !isService && p.stock<=(p.reorderThreshold||10), out = !isService && p.stock<=0;
+    const low = !isService && p.stock<=(p.reorderThreshold===0?0:(p.reorderThreshold||10)), out = !isService && p.stock<=0;
     const tile = document.createElement('button');
     tile.className = 'tile' + (out?' disabled':'');
     tile.disabled = out;
@@ -2849,7 +2849,16 @@ $('tenderConfirmBtn').addEventListener('click', ()=>{
   finalizeSale('cash', subtotal, tax, total, tendered);
 });
 
+let saleInFlight = false; // re-entrancy guard — see finalizeSale
 async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
+  // finalizeSale's first line is an `await`, so a double-tap on Pay/Confirm (or two rapid
+  // payment confirmations) could previously fire this twice before the first call's stock
+  // deduction had even been written — both calls would read the SAME pre-deduction stock
+  // snapshot, both pass the check below, and both proceed to deduct and save, oversell ing
+  // stock or double-charging a table's bill. One flag blocks any second call outright.
+  if(saleInFlight){ toast('Already processing this sale — one moment'); return; }
+  saleInFlight = true;
+  try{
   const products = await getAll('products');
   const lines=[];
   for(const item of cart){
@@ -2864,7 +2873,7 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
     if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
     lines.push({sku:item.sku,name:item.name,qty:item.qty,price:item.price,cost:(p.cost||0),btype:(p.btype||'duka')});
     await put('products', p);
-    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+    await pushProductUpsert(p);
   }
   const change = tendered - total;
   const sale = {
@@ -2875,7 +2884,7 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
     ts:new Date().toISOString(), synced:false
   };
   await put('sales', sale);
-  await put('sync_queue', {type:'sale', payload:sale, ts:Date.now()});
+  await queuePush('sale', sale); // was a raw sync_queue write before — missed the immediate-push kick every other queued write gets, so a sale sat waiting up to one 6s tick instead of syncing right away
   log(`Sale recorded locally — ${fmtKsh(total)} (${method}), ${lines.length} line(s). Queued for sync.`,'warn');
   const itemSummary = lines.map(l=>`${l.qty}× ${l.name}`).join(', ');
   logAudit('Sale completed', `${fmtKsh(total)} via ${method} — ${itemSummary}`);
@@ -2895,6 +2904,7 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
     exitTableMode();
   }
   showSaleComplete(sale);
+  } finally { saleInFlight = false; }
 }
 
 // ---------- Credit sale — tied to a real cart, real stock, real cost data ----------
@@ -2948,7 +2958,7 @@ $('csConfirmBtn').addEventListener('click', async ()=>{
     if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
     lineItems.push({sku:item.sku, name:item.name, qty:item.qty, price:item.price, cost:(p.cost||0)});
     await put('products', p);
-    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+    await pushProductUpsert(p);
   }
   const totalCost = lineItems.reduce((s,l)=>s+(l.qty*l.cost),0);
   const {total} = creditSalePending;
@@ -3058,7 +3068,7 @@ async function addStock(){
        expiryDate: expiryDateInput, isRx: isRxInput};
   }
   await put('products', p);
-  await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10, expiryDate:p.expiryDate||null, isRx:p.isRx||false});
+  await pushProductUpsert(p);
   // Log it as a purchase for the Reports "stock received" numbers — only when actual units came in
   if(qtyProvided && qty>0){
     const movement = {sku, name, qty, cost: cost||0, btype: resolveTypeForCategory(cat), ts:new Date().toISOString()};
@@ -3124,6 +3134,10 @@ async function renameProductSku(oldSku){
   const updated = {...p, sku:trimmed};
   await put('products', updated);
   await del('products', oldSku);
+  // Was missing entirely — a renamed SKU never left this device. Every other device (and
+  // Supabase itself) kept the old SKU forever, with no way to tell the rename had happened.
+  await pushProductUpsert(updated);
+  await queuePush('product_delete', {sku:oldSku});
   logAudit('Changed product SKU', `${p.name}: ${oldSku} → ${trimmed}`);
   toast('SKU updated — past sales/receipts keep the old SKU, which is normal');
   renderStockTable(); renderProductGrid();
@@ -3158,7 +3172,7 @@ async function renderStockTable(){
   }
   products.forEach(p=>{
     const isService = p.stock===null || p.stock===undefined;
-    const low = !isService && p.stock<=(p.reorderThreshold||10);
+    const low = !isService && p.stock<=(p.reorderThreshold===0?0:(p.reorderThreshold||10));
     const cost = p.cost || 0;
     const margin = cost>0 ? (((p.price-cost)/p.price)*100).toFixed(0)+'%' : '—';
     let expiryBadge = '';
@@ -3196,7 +3210,7 @@ async function updateStockLowBadge(){
   const products = (await getAll('products')).filter(p =>
     currentBusinessTypes.includes(p.btype||'duka') &&
     p.stock !== null && p.stock !== undefined &&
-    p.stock <= (p.reorderThreshold || 10)
+    p.stock <= (p.reorderThreshold===0?0:(p.reorderThreshold||10))
   );
   if(products.length > 0){
     badge.textContent = products.length;
@@ -3212,7 +3226,7 @@ async function renderReorderPanel(){
   const products = (await getAll('products')).filter(p =>
     currentBusinessTypes.includes(p.btype||'duka') &&
     p.stock !== null && p.stock !== undefined &&
-    p.stock <= (p.reorderThreshold || 10)
+    p.stock <= (p.reorderThreshold===0?0:(p.reorderThreshold||10))
   );
   if(products.length===0){
     box.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing below its reorder point right now.</p>`;
@@ -3245,7 +3259,16 @@ async function renderReorderPanel(){
   }
   box.innerHTML = html;
   box.querySelectorAll('button[data-gen-po]').forEach(btn=>{
-    btn.addEventListener('click', ()=> generateAndPrintPO(btn.dataset.genPo));
+    btn.addEventListener('click', ()=>{
+      // Disable immediately, synchronously, before generateAndPrintPO's first await — a fast
+      // double-click/double-tap used to create two duplicate POs for the same low-stock items,
+      // since nothing stopped a second click from firing while the first was still awaiting the
+      // next_po_number RPC. renderReorderPanel() (called at the end) rebuilds this whole panel
+      // with fresh buttons anyway, so there's nothing to manually re-enable on success.
+      if(btn.disabled) return;
+      btn.disabled = true;
+      generateAndPrintPO(btn.dataset.genPo).catch(()=>{ btn.disabled = false; });
+    });
   });
 }
 
@@ -3331,7 +3354,7 @@ async function generateAndPrintPO(supplierName){
     currentBusinessTypes.includes(p.btype||'duka') &&
     p.supplierName === supplierName &&
     p.stock !== null && p.stock !== undefined &&
-    p.stock <= (p.reorderThreshold || 10)
+    p.stock <= (p.reorderThreshold===0?0:(p.reorderThreshold||10))
   );
   if(products.length===0){ toast('Nothing to order for '+supplierName); return; }
 
@@ -3965,10 +3988,26 @@ $('receivePoPhotoInput').addEventListener('change', async (e)=>{
   $('receivePoPhotoImg').src = receivePoPhotoData;
   $('receivePoPhotoPreview').style.display = 'block';
 });
+let receivePoBusy = false; // re-entrancy guard — a rapid double-click used to add every item's stock twice from one delivery, see below
 $('receivePoConfirmBtn').addEventListener('click', async ()=>{
   if(!receivingPo) return;
+  if(receivePoBusy){ toast('Already receiving this PO — one moment'); return; }
   const invoiceNumber = $('receivePoInvoiceNumber').value.trim();
   if(!invoiceNumber){ toast('Enter the supplier\'s invoice number'); return; }
+  // Re-check status straight from storage, not just the in-memory receivingPo reference —
+  // guards against this exact PO having already been received (by this same double-click, or
+  // by another device, picked up by a pull) since the modal was opened.
+  const freshAll = await getAll('purchase_orders');
+  const fresh = freshAll.find(x=>x.id===receivingPo.id);
+  if(fresh && fresh.status==='received'){ toast('This PO was already received'); $('receivePoModal').classList.remove('show'); receivingPo=null; renderPoList(); return; }
+  // Symmetric check to the one in the OCR-confirm handler — catch a payable already linked to
+  // this PO whose invoice was already auto-read and applied to stock.
+  const linkedPayables = await getAll('payables');
+  const linkedPayable = linkedPayables.find(x=>x.poNumber && x.poNumber.toLowerCase()===receivingPo.poNumber.toLowerCase() && x.stockUpdateStatus==='processed');
+  if(linkedPayable && !confirm(`An invoice linked to ${receivingPo.poNumber} was already auto-read and applied to stock. Receive this PO's items into stock as well? Only do this if they're genuinely different items, or you'll double-count.`)) return;
+  receivePoBusy = true;
+  $('receivePoConfirmBtn').disabled = true;
+  try{
   const po = receivingPo;
   // Stock update — same movement-logging pattern as Feed Stock, so it shows up in
   // Reports' "Stock received" numbers exactly like a manual feed would.
@@ -3978,7 +4017,7 @@ $('receivePoConfirmBtn').addEventListener('click', async ()=>{
     if(!p) continue;
     p.stock = (p.stock===null||p.stock===undefined?0:p.stock) + item.qty;
     await put('products', p);
-    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10});
+    await pushProductUpsert(p);
     const movement = {sku:p.sku, name:p.name, qty:item.qty, cost:item.cost||p.cost||0, btype:p.btype||'duka', ts:new Date().toISOString()};
     await put('stock_movements', movement);
     await queuePush('stock_movement', movement);
@@ -3994,6 +4033,7 @@ $('receivePoConfirmBtn').addEventListener('click', async ()=>{
   $('receivePoModal').classList.remove('show');
   receivingPo = null;
   renderPoList(); renderReorderPanel(); renderStockTable(); renderProductGrid(); updateStockLowBadge();
+  } finally { receivePoBusy = false; $('receivePoConfirmBtn').disabled = false; }
 });
 
 // ---------- Payables — what the shop owes its suppliers ----------
@@ -4296,17 +4336,37 @@ function renderOcrReviewItems(products, unmatchedCount){
   $('ocrUnmatchedNote').textContent = unmatchedCount>0 ? `${unmatchedCount} line(s) on the invoice didn't match anything in Stock — add those products first if they're new.` : '';
 }
 $('ocrCancelBtn').addEventListener('click', ()=>{ $('invoiceOcrModal').classList.remove('show'); ocrPendingPayable = null; });
+let ocrConfirmBusy = false; // re-entrancy guard — a rapid double-click used to add every item's stock twice from one invoice
 $('ocrConfirmBtn').addEventListener('click', async ()=>{
   if(!ocrPendingPayable) return;
+  if(ocrConfirmBusy){ toast('Already applying this invoice — one moment'); return; }
   const toApply = ocrParsedItems.filter(i => i.include && i.matchedSku && i.qty>0);
   if(toApply.length===0){ toast('Nothing selected to apply'); return; }
+  // Re-check straight from storage — guards against this exact payable's stock already having
+  // been applied (by this same double-click, or picked up from another device via a pull)
+  // since the review screen was opened.
+  const freshPayables = await getAll('payables');
+  const freshPayable = freshPayables.find(x=>x.id===ocrPendingPayable.id);
+  if(freshPayable && freshPayable.stockUpdateStatus==='processed'){ toast('Stock was already updated from this invoice'); $('invoiceOcrModal').classList.remove('show'); ocrPendingPayable=null; renderPayablesLists(); return; }
+  // The one real, currently-unmitigated risk this app has for double-counting a delivery:
+  // receiving a PO adds stock, and separately OCR-applying that same invoice adds stock again
+  // — nothing links the two. This is the one point where we can at least catch the common
+  // case: the invoice is linked to a PO number that's already marked received.
+  if(ocrPendingPayable.poNumber){
+    const allPOs = await getAll('purchase_orders');
+    const linkedPo = allPOs.find(x=>x.poNumber.toLowerCase()===ocrPendingPayable.poNumber.toLowerCase());
+    if(linkedPo && linkedPo.status==='received' && !confirm(`${linkedPo.poNumber} was already marked "Received" — its stock was already added. Apply this invoice's items to stock as well? Only do this if they're genuinely different items, or you'll double-count.`)) return;
+  }
+  ocrConfirmBusy = true;
+  $('ocrConfirmBtn').disabled = true;
+  try{
   const products = await getAll('products');
   for(const item of toApply){
     const p = products.find(x=>x.sku===item.matchedSku);
     if(!p) continue;
     p.stock = (p.stock===null||p.stock===undefined?0:p.stock) + item.qty;
     await put('products', p);
-    await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype, supplierName:p.supplierName||null, reorderThreshold:p.reorderThreshold||10});
+    await pushProductUpsert(p);
     const movement = {sku:p.sku, name:p.name, qty:item.qty, cost:item.cost||p.cost||0, btype:p.btype||'duka', ts:new Date().toISOString()};
     await put('stock_movements', movement);
     await queuePush('stock_movement', movement);
@@ -4321,6 +4381,7 @@ $('ocrConfirmBtn').addEventListener('click', async ()=>{
   $('invoiceOcrModal').classList.remove('show');
   ocrPendingPayable = null;
   renderPayablesLists(); renderStockTable(); renderProductGrid(); updateStockLowBadge();
+  } finally { ocrConfirmBusy = false; $('ocrConfirmBtn').disabled = false; }
 });
 
 // ---------- Customer credit — what customers owe the shop ----------
@@ -4528,7 +4589,7 @@ async function renderReports(){
   const itemCount = sales.reduce((s,x)=>s+x.lines.reduce((a,l)=>a+l.qty,0),0);
   const cogs = sales.reduce((s,x)=>s + x.lines.reduce((a,l)=>a+(l.qty*(l.cost||0)),0), 0);
   const purchasesCost = movements.reduce((s,m)=>s+(m.qty*(m.cost||0)),0);
-  const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=(p.reorderThreshold||10)).length;
+  const lowStock = products.filter(p=>p.stock!==null && p.stock!==undefined && p.stock<=(p.reorderThreshold===0?0:(p.reorderThreshold||10))).length;
 
   // Payables/Customer credit — outstanding is a point-in-time balance (not period-filtered,
   // since "what you owe right now" doesn't mean anything scoped to "this week"); paid-this-
@@ -5009,7 +5070,7 @@ async function pushToSupabase(item){
     body = {
       shop_id:shopId, sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype,
       supplier_name: p.supplierName || null,
-      reorder_threshold: p.reorderThreshold || 10,
+      reorder_threshold: (p.reorderThreshold===0?0:(p.reorderThreshold||10)), // a product deliberately set to 0 ("only alert at zero stock") must not silently become 10 here
       expiry_date: p.expiryDate || null, is_rx: p.isRx || false,
       updated_at: p.updated_at || new Date().toISOString(),
     };
@@ -5090,6 +5151,20 @@ async function queuePush(type, payload){
   // staff: someone just added as a cashier may walk straight to her own phone within seconds,
   // and she can only be found there once her record has actually reached the backend.
   if(isOnline) runSyncLoop();
+}
+// Every product_upsert push MUST carry every column pushToSupabase writes, full stop — this
+// is a real upsert on the backend, not a patch. Several call sites used to send only
+// {sku,name,cat,price,cost,stock,btype}: every ordinary sale (checkout/credit-sale/refund/
+// stock-take) was silently wiping that product's supplier name, expiry date, Rx flag and
+// resetting its reorder threshold back to 10 on Supabase — and then on every OTHER device
+// after their next pull — the moment anyone sold one unit of it. One helper, always full
+// fields, so this can't drift out of sync again.
+async function pushProductUpsert(p){
+  await queuePush('product_upsert', {
+    sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype,
+    supplierName:p.supplierName||null, reorderThreshold:(p.reorderThreshold===0?0:(p.reorderThreshold||10)),
+    expiryDate:p.expiryDate||null, isRx:p.isRx||false,
+  });
 }
 async function runSyncLoop(){
   if(!isOnline || !shopId) return;
@@ -5265,6 +5340,20 @@ async function pullShopData(fullPull, force){
         const ls = localStaff.find(u=>u.id===rs.id);
         if(force || !ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
           await put('users', {id:rs.id, name:rs.name, role:rs.role, pin:rs.pin, active:rs.active!==false, email:rs.email, updated_at:rs.updated_at});
+          // This device's local `users` row was kept in sync, but the live, already-logged-in
+          // `currentUser` in memory never was — so revoking or demoting someone on another
+          // device had no effect on a session they already had open here; they could keep
+          // using admin-only screens until they happened to log out themselves. Force it the
+          // moment this device learns about it.
+          if(currentUser && currentUser.id===rs.id && (rs.active===false || rs.role!==currentUser.role)){
+            const reason = rs.active===false ? 'account deactivated remotely' : `role changed remotely to ${rs.role}`;
+            await pauseCartForUser(currentUser.id); // don't drop an in-progress cart just because access changed mid-sale
+            toast(rs.active===false ? 'Your account was deactivated — signing you out' : `Your role changed to ${rs.role} — signing you out, please log back in`);
+            logAudit('Signed out', reason);
+            currentUser = null;
+            try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+            showLoginScreen();
+          }
         }
       }
     }
@@ -5318,9 +5407,17 @@ async function pullShopData(fullPull, force){
       if(changedKeys.has('suppliers')) await loadSuppliers();
       if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
     }
-    // Sales from OTHER devices — so the admin can see a cashier's phone sales too
-    const sinceClause = (!fullPull && lastPullSync) ? `&ts=gt.${encodeURIComponent(lastPullSync)}` : '';
-    const salesRes = await fetch(`${supaUrl}/rest/v1/sales?shop_id=eq.${shopId}${sinceClause}&select=*`, {headers: sbHeaders()});
+    // Sales from OTHER devices — so the admin can see a cashier's phone sales too.
+    // Deliberately NOT filtered by "since last pull" — it used to filter on `ts` (the SALE'S
+    // OWN client-side "when it happened" timestamp), not a server insert time. A sale rung up
+    // offline keeps its original (old) ts; by the time it actually reaches the backend, every
+    // other device's pull cursor has already moved past that ts, so their incremental pulls
+    // would never see it — it sits on the server, invisible everywhere else, until a rare
+    // full pull (shop-switch only) happened to catch it. Always fetching every sale/refund and
+    // relying on the existing per-row "already have it?" check below is the correct trade for
+    // a small shop's transaction volume — a future optimization would add a real server-side
+    // insert timestamp/sequence column to filter on instead, but that needs a schema change.
+    const salesRes = await fetch(`${supaUrl}/rest/v1/sales?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(salesRes.ok){
       const remoteSales = await salesRes.json();
       for(const rs of remoteSales){
@@ -5328,8 +5425,8 @@ async function pullShopData(fullPull, force){
         if(!existing) await put('sales', Object.assign({}, rs, {synced:true}));
       }
     }
-    // Refunds from OTHER devices too — same reasoning as sales above
-    const refundsRes = await fetch(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}${sinceClause}&select=*`, {headers: sbHeaders()});
+    // Refunds from OTHER devices too — same reasoning and same fix as sales above
+    const refundsRes = await fetch(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(refundsRes.ok){
       const remoteRefunds = await refundsRes.json();
       for(const rr of remoteRefunds){
@@ -6959,7 +7056,7 @@ async function renderStockTakeHistory(){
       const oldQty = p.stock;
       p.stock = newQty;
       await put('products', p);
-      await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+      await pushProductUpsert(p);
       logAudit('Corrected stock after stock take', `${p.name}: ${oldQty} → ${newQty}`);
       toast(`${p.name} corrected to ${newQty}`);
       btn.textContent = 'Corrected ✓'; btn.disabled = true;
@@ -6993,11 +7090,24 @@ document.querySelectorAll('.refund-method-btn').forEach(btn=>{
   });
 });
 $('refundCancelBtn').addEventListener('click', ()=>{ $('refundModal').classList.remove('show'); refundingSale = null; });
+let refundConfirmBusy = false;
 $('refundConfirmBtn').addEventListener('click', async ()=>{
   if(!refundingSale) return;
+  if(refundConfirmBusy){ toast('Already processing this refund — one moment'); return; }
   const amount = parseFloat($('refundAmountInput').value);
   if(isNaN(amount) || amount<=0){ toast('Enter a valid refund amount'); return; }
-  if(amount > refundingSale.total){ toast('Refund can\'t be more than the original sale total'); return; }
+  // Was only checked against the ORIGINAL sale total, not what's already been refunded — the
+  // same sale could be refunded multiple times, each up to the full total again, with no cap
+  // on the cumulative amount. Sum whatever's already been refunded for this sale and cap the
+  // remaining refundable amount against that instead.
+  const existingRefunds = (await getAll('refunds')).filter(r=>r.saleId===refundingSale.id);
+  const alreadyRefunded = existingRefunds.reduce((s,r)=>s+r.amount, 0);
+  const refundable = refundingSale.total - alreadyRefunded;
+  if(refundable <= 0){ toast('This sale has already been fully refunded'); return; }
+  if(amount > refundable){ toast(`Refund can't exceed ${fmtKsh(refundable)} — ${fmtKsh(alreadyRefunded)} of this sale was already refunded`); return; }
+  refundConfirmBusy = true;
+  $('refundConfirmBtn').disabled = true;
+  try{
   const reason = $('refundReasonInput').value.trim();
   const restock = $('refundRestockInput').checked;
   const refund = {
@@ -7014,7 +7124,7 @@ $('refundConfirmBtn').addEventListener('click', async ()=>{
       if(p && p.stock!==null && p.stock!==undefined){
         p.stock += line.qty;
         await put('products', p);
-        await queuePush('product_upsert', {sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost, stock:p.stock, btype:p.btype});
+        await pushProductUpsert(p);
       }
     }
   }
@@ -7023,6 +7133,7 @@ $('refundConfirmBtn').addEventListener('click', async ()=>{
   $('refundModal').classList.remove('show');
   refundingSale = null;
   renderReports();
+  } finally { refundConfirmBusy = false; $('refundConfirmBtn').disabled = false; }
 });
 
 async function tryRestoreSession(){
