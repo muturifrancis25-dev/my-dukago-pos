@@ -1616,6 +1616,17 @@
     <h3 style="text-align:center;">Manage shop</h3>
     <p class="hint" id="manageShopName" style="text-align:center; margin:0 0 14px;">—</p>
 
+    <h3 style="font-size:13.5px;">License</h3>
+    <p class="hint">Controls whether this shop can sign in and sync at all. Suspending or cancelling signs out every device at that shop within moments of it next going online — data stays intact and picks up again the moment you reactivate.</p>
+    <select id="manageShopLicenseStatus" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-bottom:8px;">
+      <option value="trial">Trial</option>
+      <option value="active">Active</option>
+      <option value="suspended">Suspended</option>
+      <option value="cancelled">Cancelled</option>
+    </select>
+    <textarea id="manageShopLicenseNote" placeholder="Optional note shown to the shop, e.g. &quot;Payment overdue — contact us to reactivate&quot;" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-bottom:10px; min-height:56px; font-family:inherit; resize:vertical;"></textarea>
+    <button class="primary-btn" id="manageShopSaveLicenseBtn" style="width:100%; margin-bottom:18px;">Save license status</button>
+
     <h3 style="font-size:13.5px;">Business types</h3>
     <p class="hint">Check every type this shop should be able to sell under. Unchecked types become unavailable on their counter until you enable them here again.</p>
     <div id="manageShopBizTypes" style="margin-bottom:10px;">Loading…</div>
@@ -2484,13 +2495,15 @@ async function loadAllShopsList(){
     box.innerHTML = '';
     shops.forEach(s=>{
       const isActive = s.active !== false;
+      const licenseStatus = s.license_status || (isActive ? 'active' : 'suspended');
+      const badgeColor = licenseStatus==='trial' ? 'var(--marigold-dark, var(--marigold))' : (licenseStatus==='active' ? '' : 'var(--clay)');
       const row = document.createElement('div');
       row.style.cssText = 'padding:9px 0; border-bottom:1px solid var(--line); font-size:12.5px;';
       const created = s.created_at ? new Date(s.created_at).toLocaleDateString('en-KE') : '—';
       row.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
           <div>
-            <b>${s.name || 'Unnamed shop'}</b> ${isActive ? '' : '<span style="color:var(--clay); font-weight:700; font-size:10.5px;">· DEACTIVATED</span>'}<br>
+            <b>${s.name || 'Unnamed shop'}</b> ${badgeColor ? `<span style="color:${badgeColor}; font-weight:700; font-size:10.5px;">· ${licenseStatus.toUpperCase()}</span>` : ''}<br>
             <span style="color:var(--muted); font-family:var(--mono); font-size:10.5px;">${s.id}</span><br>
             <span style="color:var(--muted);">Set up ${created}</span>
           </div>
@@ -2514,7 +2527,7 @@ async function loadAllShopsList(){
         if(!confirm(`${verb.charAt(0).toUpperCase()+verb.slice(1)} "${shopName}"? ${currentlyActive ? 'Its admin and staff will be signed out and blocked from signing back in until reactivated. Their data stays intact.' : 'This shop will be able to sign in and sync again.'}`)) return;
         try{
           const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
-            method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive}),
+            method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive, license_status: currentlyActive ? 'suspended' : 'active'}),
           });
           if(!res.ok){ toast('Could not update — check the connection'); return; }
           logAudit(`Shop ${currentlyActive ? 'deactivated' : 'reactivated'} by Platform Administrator`, `${shopName} (${targetShopId})`);
@@ -2538,11 +2551,48 @@ async function openManageShopModal(shopId, shopName){
   $('manageShopName').textContent = shopName;
   $('manageShopNewPin').value = '';
   $('manageShopModal').classList.add('show');
+  await renderManageShopLicense(shopId);
   await renderManageShopBizTypes(shopId);
   await renderManageShopAdminInfo(shopId);
   await renderManageShopTableView(shopId);
 }
 $('manageShopCloseBtn').addEventListener('click', ()=> $('manageShopModal').classList.remove('show'));
+
+// ---------- License status — the master switch on whether a shop can sign in/sync at all ----------
+// `license_status` is the source of truth going forward; `active` (the older boolean the rest of
+// the app already checks — see isShopActive() and the live re-check in pullShopData()) is kept in
+// lockstep with it on every save here, so neither the sign-in gate nor the open-session kick needs
+// to know about license_status at all — they just keep reading the same `active` flag they always did.
+async function renderManageShopLicense(targetShopId){
+  $('manageShopLicenseStatus').value = 'active';
+  $('manageShopLicenseNote').value = '';
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=license_status,license_note,active`, {headers: mpesaFunctionHeaders()});
+    if(!res.ok) return; // schema may not have the columns yet on an older backend — falls back to the defaults above
+    const rows = await res.json();
+    if(!rows.length) return;
+    const s = rows[0];
+    $('manageShopLicenseStatus').value = s.license_status || (s.active===false ? 'suspended' : 'active');
+    $('manageShopLicenseNote').value = s.license_note || '';
+  }catch(e){ /* leave defaults */ }
+}
+$('manageShopSaveLicenseBtn').addEventListener('click', async ()=>{
+  if(!manageShopTargetId) return;
+  const status = $('manageShopLicenseStatus').value;
+  const note = $('manageShopLicenseNote').value.trim();
+  const blocking = status==='suspended' || status==='cancelled';
+  if(blocking && !confirm(`Set "${$('manageShopName').textContent}" to ${status}? Every device at that shop will be signed out and blocked from signing back in until you change this back to Trial or Active. Their data stays intact.`)) return;
+  try{
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+      method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({license_status: status, license_note: note || null, active: !blocking}),
+    });
+    if(!res.ok){ toast('Could not save — check the connection'); return; }
+    logAudit('Set license status (Platform Administrator)', `${$('manageShopName').textContent} → ${status}`);
+    toast(`License set to ${status}`);
+  }catch(e){
+    toast('Could not save — check the connection');
+  }
+});
 
 async function renderManageShopTableView(targetShopId){
   try{
@@ -5332,6 +5382,28 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
 async function pullShopData(fullPull, force){
   if(!backendLive() || !shopId) return;
   try{
+    // License/active check — runs every tick this function runs (every sync cycle while online,
+    // per the fix that made pulling unconditional on push-queue length), not just at sign-in.
+    // Before this, a shop suspended by the platform administrator mid-session stayed fully
+    // usable on any device that was already signed in until someone happened to log out and
+    // back in — the same gap that used to exist for staff deactivation/role changes, closed
+    // the same way: sign the open session out the moment this device learns about it.
+    if(currentUser){
+      try{
+        const shopRes = await fetch(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: sbHeaders()});
+        if(shopRes.ok){
+          const shopRows = await shopRes.json();
+          if(shopRows.length && shopRows[0].active===false){
+            await pauseCartForUser(currentUser.id); // don't drop an in-progress cart just because the license changed mid-sale
+            toast(shopRows[0].license_note || 'This shop has been deactivated — contact your platform administrator');
+            logAudit('Signed out', 'shop deactivated remotely'+(shopRows[0].license_note ? ` — ${shopRows[0].license_note}` : ''));
+            currentUser = null;
+            try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+            showLoginScreen();
+          }
+        }
+      }catch(e){ /* ambiguous/offline — never block on a check we couldn't actually make */ }
+    }
     // Staff — never overwrite a PIN with something older; skip re-pulling your own live session
     const staffRes = await fetch(`${supaUrl}/rest/v1/staff?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(staffRes.ok){
@@ -6886,20 +6958,20 @@ async function attemptLogin(){
 // true/false when it can genuinely check, or null when it can't (offline) — offline-first
 // means we never block a sign-in over a check we simply couldn't make.
 async function isShopActive(){
-  if(!shopId) return true; // nothing to check yet — a device mid-setup isn't anyone's business to block
-  if(!isOnline || !backendLive()) return null;
+  if(!shopId) return {active:true}; // nothing to check yet — a device mid-setup isn't anyone's business to block
+  if(!isOnline || !backendLive()) return {active:null};
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active`, {headers: mpesaFunctionHeaders()});
-    if(!res.ok) return null;
+    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: mpesaFunctionHeaders()});
+    if(!res.ok) return {active:null};
     const rows = await res.json();
-    if(!rows.length) return null; // shop record not found remotely — don't block on ambiguity
-    return rows[0].active !== false;
-  }catch(e){ return null; }
+    if(!rows.length) return {active:null}; // shop record not found remotely — don't block on ambiguity
+    return {active: rows[0].active !== false, note: rows[0].license_note};
+  }catch(e){ return {active:null}; }
 }
 async function completeSignIn(u, opts={}){
-  const active = await isShopActive();
-  if(active === false){
-    toast('This shop has been deactivated — contact your platform administrator');
+  const shopStatus = await isShopActive();
+  if(shopStatus.active === false){
+    toast(shopStatus.note || 'This shop has been deactivated — contact your platform administrator');
     logAudit('Sign-in blocked — shop deactivated', u.name);
     showLoginScreen();
     return;
@@ -7163,11 +7235,11 @@ async function tryRestoreSession(){
   const users = await getAll('users');
   const u = users.find(x => x.id===uid && x.active!==false);
   if(!u) return false;
-  const active = await isShopActive();
-  if(active === false){
+  const shopStatus = await isShopActive();
+  if(shopStatus.active === false){
     try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
     logAudit('Session restore blocked — shop deactivated', u.name);
-    toast('This shop has been deactivated — contact your platform administrator');
+    toast(shopStatus.note || 'This shop has been deactivated — contact your platform administrator');
     return false; // falls through to showLoginScreen() in init()
   }
   currentUser = u;
