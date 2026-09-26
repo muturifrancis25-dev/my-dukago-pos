@@ -9,13 +9,13 @@
   "dir": "ltr",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0b1512",
+  "background_color": "#ffffff",
   "theme_color": "#12241f",
   "categories": ["business", "productivity", "shopping"],
   "icons": [
-    { "src": "icons/icon-192-v3.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512-v3.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-192-maskable-v3.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon-512-maskable-v3.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icons/icon-192-v4.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-v4.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192-maskable-v4.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-512-maskable-v4.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
