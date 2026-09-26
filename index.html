@@ -5996,7 +5996,16 @@ function renderBrandSwatches(){
 }
 function applyBrandColor(colorId){
   const preset = BRAND_COLOR_PRESETS.find(p=>p.id===colorId) || BRAND_COLOR_PRESETS[0];
-  if(document.documentElement.getAttribute('data-theme') !== 'dark'){
+  if(document.documentElement.getAttribute('data-theme') === 'dark'){
+    // Dark mode always uses its own tuned background regardless of the shop's light-mode
+    // brand color — but an inline style (set below, for light mode) beats ANY stylesheet
+    // rule, including html[data-theme="dark"]'s. If a color was applied earlier in this same
+    // session while in light mode, that inline override was silently sticking around and
+    // leaking a light-mode tint into dark mode the moment you switched. Clear it explicitly
+    // so dark mode's own CSS block actually wins.
+    document.documentElement.style.removeProperty('--bg');
+    document.documentElement.style.removeProperty('--bg-glow');
+  } else {
     document.documentElement.style.setProperty('--bg', preset.bg);
     document.documentElement.style.setProperty('--bg-glow', preset.glow);
   }
@@ -7057,6 +7066,7 @@ function applyTheme(theme){
   else document.documentElement.removeAttribute('data-theme');
   try{ localStorage.setItem('my_duka_theme', theme); }catch(e){}
   $('themeToggleBtn').innerHTML = theme==='dark' ? ICON_SUN : ICON_MOON;
+  applyBrandColor(selectedBrandColor); // re-evaluate the light-mode tint override for the new theme — see applyBrandColor's own comment
 }
 $('themeToggleBtn').addEventListener('click', ()=>{
   const isDark = document.documentElement.getAttribute('data-theme')==='dark';
