@@ -6765,8 +6765,18 @@ function shakePinDots(){
     setTimeout(()=>d.classList.remove('shake'), 350);
   });
 }
+// A 4-digit entry that matches nothing yet is genuinely ambiguous — it could be a finished
+// staff PIN, or just the first 4 digits of someone's 6-digit admin PIN still being typed. This
+// timer resolves that ambiguity after a short pause instead of sitting silently forever if the
+// person stops at 4 digits (see tryPinCheckpoint below) — previously a real 4-digit PIN that
+// simply wasn't cached on this device yet, entered while offline, produced no feedback at all
+// unless the person kept tapping past it into a 6-digit attempt, which is what made it look like
+// a correct PIN was being rejected as "Incorrect PIN" when the actual cause was "not on this
+// device, and we can't check further because we're offline."
+let pinCheckTimer = null;
 async function tryPinCheckpoint(){
   if(!PIN_LENGTHS.includes(pinBuffer.length)) return;
+  if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
 
   // The default bootstrap trigger — only means anything on a device that's never been set up.
   if(pinBuffer.length===4 && pinBuffer==='1234' && !shopId){
@@ -6798,7 +6808,22 @@ async function tryPinCheckpoint(){
     }
   }
 
-  if(pinBuffer.length < MAX_PIN_LENGTH) return; // might still be a 6-digit PIN in progress
+  if(pinBuffer.length < MAX_PIN_LENGTH){
+    // Give a short window for a 5th/6th digit before treating this as a finished, failed
+    // attempt — but always resolve it one way or another, rather than waiting indefinitely.
+    const attemptedPin = pinBuffer;
+    const wasOffline = !(isOnline && backendLive());
+    pinCheckTimer = setTimeout(()=>{
+      pinCheckTimer = null;
+      if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
+      toast(wasOffline
+        ? "That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on"
+        : 'Incorrect PIN');
+      shakePinDots();
+      pinBuffer=''; setTimeout(updatePinDots, 200);
+    }, 750);
+    return;
+  }
   // Nothing matched at either length, anywhere.
   toast('Incorrect PIN');
   shakePinDots();
@@ -6807,8 +6832,8 @@ async function tryPinCheckpoint(){
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
   const k = btn.dataset.k;
-  if(k==='clear'){ pinBuffer=''; updatePinDots(); return; }
-  if(k==='back'){ pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
+  if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinBuffer=''; updatePinDots(); return; }
+  if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
   if(pinBuffer.length>=MAX_PIN_LENGTH) return;
   pinBuffer += k;
   updatePinDots();
@@ -6818,7 +6843,7 @@ $('loginKeypad').addEventListener('click', e=>{
 document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){ pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120); }
-  if(e.key==='Backspace'){ pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
+  if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
 });
 
 // ---------- Set Admin PIN screen — what "1234" on a fresh device leads into ----------
