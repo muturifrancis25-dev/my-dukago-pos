@@ -2626,6 +2626,7 @@ $('manageShopResetPinBtn').addEventListener('click', async ()=>{
     // must not create a collision with some other shop's staff.
     const uniqueCheck = await isPinGloballyUnique(newPin, null);
     if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
+    if(!uniqueCheck.checkedRemote){ toast('Could not verify this PIN against every shop — check the connection and try again'); return; }
     const staffRes = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${manageShopTargetId}&role=eq.admin&active=eq.true&select=id`, {headers: mpesaFunctionHeaders()});
     const rows = staffRes.ok ? await staffRes.json() : [];
     if(rows.length===0){ toast('No active admin account found for this shop'); return; }
@@ -6400,6 +6401,7 @@ async function renderStaffTable(){
         if(!new RegExp(`^\\d{${requiredLen}}$`).test(newPin)){ toast(`PIN must be exactly ${requiredLen} digits for ${u.role==='admin'?'an admin':'this role'}`); return; }
         const uniqueCheck = await isPinGloballyUnique(newPin, u.id);
         if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
+        if(!uniqueCheck.checkedRemote){ toast('Changing a PIN needs a connection — this device is offline (or the backend is unreachable), so a clash with another shop can\'t be ruled out. Try again once you\'re online.'); return; }
         u.pin = newPin; await put('users', u);
         await queuePush('staff_upsert', {id:u.id, name:u.name, role:u.role, pin:u.pin, active:u.active!==false});
         toast(u.name+"'s PIN updated");
@@ -6420,6 +6422,11 @@ $('addStaffBtn').addEventListener('click', async ()=>{
   if(!new RegExp(`^\\d{${requiredLen}}$`).test(pin)){ toast(`Enter a ${requiredLen}-digit PIN${role==='admin'?' (admin accounts need 6 digits)':''}`); return; }
   const uniqueCheck = await isPinGloballyUnique(pin, null);
   if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
+  // Closing the one real gap the offline-first design leaves open: without a live check
+  // against every other shop's PINs, two shops creating staff at the same moment while both
+  // offline could pick the same PIN with nothing catching it until they both eventually sync.
+  // Requiring a connection here is what actually closes that, not just reduces it.
+  if(!uniqueCheck.checkedRemote){ toast('Adding staff needs a connection — this device is offline (or the backend is unreachable), so a clash with another shop can\'t be ruled out. Try again once you\'re online.'); return; }
   const newUser = {id:'u_'+Date.now(), name, role, pin, active:true, email: email || null};
   await put('users', newUser);
   await queuePush('staff_upsert', newUser);
@@ -6799,6 +6806,16 @@ async function handleSetPinDigit(k){
     $('setPinError').textContent = `That PIN is already in use — choose a different one.`;
     shakeSetPinDots();
     setTimeout(()=>resetSetPinFlow(), 1000);
+    return;
+  }
+  // Same reasoning as adding staff — this is the exact same collision risk (two brand-new
+  // shops both offline picking the same admin PIN), just at first-launch instead. This app
+  // already needs one online session to cache itself for offline use in the first place, so
+  // requiring one here too isn't a new burden.
+  if(!uniqueCheck.checkedRemote){
+    $('setPinError').textContent = `Setting up needs a connection — this device is offline, so we can't confirm this PIN doesn't clash with another shop's. Connect and try again.`;
+    shakeSetPinDots();
+    setTimeout(()=>resetSetPinFlow(), 1500);
     return;
   }
   $('setPinError').textContent = '';
