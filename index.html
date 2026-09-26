@@ -401,6 +401,11 @@
   /* ---- Printable receipt — hidden on screen, shown only when printing ---- */
   #receiptPrintArea{display:none;}
   @media print{
+    /* Zero out the browser's own page margins/headers-footers — without this, every
+       print path (receipt, statement, kitchen ticket, PO) gets pushed off-center on a
+       thermal roll no matter what width class is applied below. */
+    @page{ margin:0; size:auto; }
+    html, body{ margin:0 !important; padding:0 !important; }
     body.printing-receipt > *{ display:none !important; }
     body.printing-receipt #receiptPrintArea{
       display:block !important; font-family:'Courier New',monospace; color:#000; margin:0 auto;
@@ -430,8 +435,9 @@
     .stmt-footer{margin-top:26px; padding-top:10px; border-top:1px solid #ccc; font-size:10px; color:#555; line-height:1.5;}
 
     /* ---- Kitchen ticket — large, no prices, meant to be read fast from across a
-       kitchen, not itemized for a customer. Uses the receipt paper width setting
-       since it's printed on the same till printer as receipts/POs. ---- */
+       kitchen, not itemized for a customer. Restaurants/hotels can set a separate
+       "kitchen printer" roll width (kt-paper-*) from the counter's (paper-*), since
+       the two are commonly different physical printers. ---- */
     body.printing-kitchen > *{ display:none !important; }
     body.printing-kitchen #receiptPrintArea{
       display:block !important; font-family:'Courier New',monospace; color:#000; margin:0 auto; width:100%;
@@ -449,6 +455,19 @@
     .kt-line{border-bottom:1px dashed #000; padding:7px 0;}
     .kt-line:last-child{border-bottom:none;}
     .kt-cutline{text-align:center; font-size:10px; letter-spacing:3px; margin-top:14px; color:#666;}
+    /* Kitchen ticket has its own paper-width class (kt-paper-58/80/a4) since a restaurant
+       may run a different roll width at the kitchen printer than at the counter. */
+    #receiptPrintArea.kt-paper-58{ width:58mm; }
+    #receiptPrintArea.kt-paper-80{ width:80mm; }
+    #receiptPrintArea.kt-paper-a4{ width:100%; padding:20mm; }
+
+    .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
+    .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
+    .rcpt-divider{border-top:1px dashed #000; margin:6px 0;}
+    .rcpt-line{display:flex; justify-content:space-between; padding:1px 0;}
+    .rcpt-grand{font-weight:700; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:1.1em;}
+    .rcpt-footer{text-align:center; margin-top:10px; font-weight:700;}
+  }
   </style>
   <style>
   /* ---- Table Service floor plan — a proper color-coded grid, the way real
@@ -480,13 +499,6 @@
   .floor-card.status-ready .fc-icon{color:var(--sage);}
   .floor-card.status-ready{background:color-mix(in srgb, var(--sage) 9%, var(--panel));}
   .floor-card.new-table-card{align-items:center; justify-content:center; text-align:center; border-style:dashed; color:var(--muted);}
-    .rcpt-store{font-weight:700; text-align:center; font-size:1.25em; margin-bottom:2px;}
-    .rcpt-meta{text-align:center; font-size:0.85em; margin-bottom:1px;}
-    .rcpt-divider{border-top:1px dashed #000; margin:6px 0;}
-    .rcpt-line{display:flex; justify-content:space-between; padding:1px 0;}
-    .rcpt-grand{font-weight:700; border-top:1px dashed #000; margin-top:4px; padding-top:4px; font-size:1.1em;}
-    .rcpt-footer{text-align:center; margin-top:10px; font-weight:700;}
-  }
 
   /* ---- Payment method row on till ---- */
   .paymethod-row{display:flex; flex-wrap:nowrap; align-items:stretch; gap:10px; padding:0 8px 10px;}
@@ -1108,7 +1120,22 @@
           <option value="a4">A4 / letter page</option>
         </select>
       </div>
-      <button class="primary-btn" id="saveReceiptBtn">Save receipt settings</button>
+      <div id="kitchenPrinterRow" style="display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--line);">
+        <p class="hint">
+          Restaurants and hotels usually run a second printer in the kitchen for order tickets, separate from
+          the counter printer above. A browser can't pick which physical printer a job goes to — whoever hits
+          Print still chooses the printer from the normal print dialog — but the kitchen ticket can use its own
+          roll width below, in case the kitchen printer takes a different paper size than the counter one.
+        </p>
+        <div class="form-row" style="grid-template-columns:1fr;">
+          <select id="kitchenPaperSelect">
+            <option value="58mm">Kitchen printer: 58mm thermal roll</option>
+            <option value="80mm">Kitchen printer: 80mm thermal roll</option>
+            <option value="a4">Kitchen printer: A4 / letter page</option>
+          </select>
+        </div>
+      </div>
+      <button class="primary-btn" id="saveReceiptBtn" style="margin-top:10px;">Save receipt settings</button>
       <button class="primary-btn" id="testPrintBtn" style="background:var(--sage); margin-left:8px;">Test print</button>
     </div>
 
@@ -1911,7 +1938,8 @@ const PLATFORM_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJz
 let shopId = null; // internal UUID, never shown to anyone — a PIN is what identifies a person now
 let lastPullSync = null;
 let receiptAction = 'ask'; // 'ask' | 'print' | 'pdf' | 'skip' — how receipts are offered after a sale
-let receiptPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — affects the printable receipt layout only
+let receiptPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — counter/till printer: receipts, statements, POs
+let kitchenPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — separate kitchen-printer roll width, restaurant/hotel only (falls back to receiptPaperWidth until set)
 let gdriveClientId = '', gdriveFileId = null, gdriveAccessToken = null, gdriveAutoOn = false, gdriveAutoTimer = null;
 let currentBusinessTypes = ['duka']; // array — supports combining multiple business types on one till
 let currentUser = null; // {id, name, role}
@@ -3783,7 +3811,7 @@ function buildKitchenTicketHTML(table, lines, round){
 // to be read fast from across a kitchen, not itemized for a customer.
 function printKitchenTicket(table, lines, round){
   $('receiptPrintArea').innerHTML = buildKitchenTicketHTML(table, lines, round);
-  $('receiptPrintArea').className = '';
+  $('receiptPrintArea').className = 'kt-paper-'+kitchenPaperWidth.replace('mm','');
   document.body.classList.add('printing-kitchen');
   let cleaned = false;
   const cleanup = ()=>{ if(cleaned) return; cleaned=true; document.body.classList.remove('printing-kitchen'); window.removeEventListener('afterprint', cleanup); };
@@ -5385,9 +5413,14 @@ async function loadSettingsPanelValues(){
   tableViewEnabled = tv ? !!tv.value : true; // defaults on — only Super Admin can turn it off remotely
   updateTableServiceVisibility();
   const receipt = await getSetting('receipt');
-  if(receipt){ receiptAction = receipt.value.action; receiptPaperWidth = receipt.value.paper; }
+  if(receipt){
+    receiptAction = receipt.value.action; receiptPaperWidth = receipt.value.paper;
+    kitchenPaperWidth = receipt.value.kitchenPaper || receiptPaperWidth; // falls back until explicitly set
+  }
   $('receiptActionSelect').value = receiptAction;
   $('receiptPaperSelect').value = receiptPaperWidth;
+  $('kitchenPaperSelect').value = kitchenPaperWidth;
+  $('kitchenPrinterRow').style.display = tableServiceEnabled() ? '' : 'none'; // one printer for every other business model
 
   const gClient = await getSetting('gdrive_client_id');
   gdriveClientId = gClient ? gClient.value : '';
@@ -5441,8 +5474,11 @@ $('saveVatBtn').addEventListener('click', ()=> saveVatSettings(true));
 $('saveReceiptBtn').addEventListener('click', async ()=>{
   receiptAction = $('receiptActionSelect').value;
   receiptPaperWidth = $('receiptPaperSelect').value;
-  await put('settings', {key:'receipt', value:{action:receiptAction, paper:receiptPaperWidth}});
-  logAudit('Updated receipt settings', `${receiptAction}, ${receiptPaperWidth}`);
+  kitchenPaperWidth = $('kitchenPaperSelect').value;
+  const value = {action:receiptAction, paper:receiptPaperWidth, kitchenPaper:kitchenPaperWidth};
+  await put('settings', {key:'receipt', value});
+  await queuePush('settings_upsert', {key:'receipt', value}); // was missing before — receipt settings never synced across this shop's devices
+  logAudit('Updated receipt settings', `${receiptAction}, ${receiptPaperWidth}${tableServiceEnabled()?', kitchen '+kitchenPaperWidth:''}`);
   toast('Receipt settings saved');
 });
 $('testPrintBtn').addEventListener('click', ()=>{
