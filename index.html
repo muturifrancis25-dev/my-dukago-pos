@@ -5295,23 +5295,27 @@ async function pullShopData(fullPull, force){
     if(settingsRes.ok){
       const remoteSettings = await settingsRes.json();
       let pulledBusinessTypes = null;
+      const changedKeys = new Set(); // only re-apply what actually changed this pull — see below
       for(const rs of remoteSettings){
         const local = await getSetting(rs.key);
         if(force || !local || !local.updated_at || new Date(rs.updated_at) > new Date(local.updated_at)){
           await put('settings', {key:rs.key, value:rs.value, updated_at:rs.updated_at});
+          changedKeys.add(rs.key);
           if(rs.key==='active_business_types') pulledBusinessTypes = rs.value;
         }
       }
-      // Re-apply anything that changed so this device actually reflects it on screen right
-      // away — saving to storage alone isn't enough, the live UI needs updating too. Business
-      // type specifically must NOT re-push here (pushToBackend:false) — it just came FROM the
-      // backend, so pushing it back is redundant, and doing so was the other half of this bug.
-      await loadBusinessProfile();
-      await loadSettingsPanelValues();
-      await loadBranding(); // same reasoning as business type/VAT above — a pulled logo/color
-                             // change needs to actually repaint this device, not just save quietly
-      await loadSuppliers(); // a supplier added on another device needs to show up in this
-                              // device's dropdown without waiting for a reload
+      // Re-apply only the settings that actually changed this pull, not everything every
+      // 6-second tick. Unconditionally re-running loadBranding()/loadSettingsPanelValues()
+      // on every pull — even when nothing changed — was stomping on a person's own in-progress,
+      // not-yet-saved edit on this exact device: tap a brand color swatch to preview it, and the
+      // next pull (up to 6s later, now running constantly) would call loadBranding() and reapply
+      // whatever color was last actually SAVED, silently reverting the live preview before
+      // "Save branding" was ever clicked. Business type specifically must NOT re-push here
+      // (pushToBackend:false) — it just came FROM the backend, so pushing it back is redundant.
+      if(changedKeys.has('business_profile')) await loadBusinessProfile();
+      if(changedKeys.has('vat') || changedKeys.has('credit_sales_enabled') || changedKeys.has('table_view_enabled') || changedKeys.has('receipt')) await loadSettingsPanelValues();
+      if(changedKeys.has('branding')) await loadBranding();
+      if(changedKeys.has('suppliers')) await loadSuppliers();
       if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
     }
     // Sales from OTHER devices — so the admin can see a cashier's phone sales too
