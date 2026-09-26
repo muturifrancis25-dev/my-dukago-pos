@@ -5986,7 +5986,11 @@ function renderBrandSwatches(){
     sw.title = preset.name;
     const selected = selectedBrandColor === preset.id;
     sw.style.cssText = `width:36px; height:36px; border-radius:50%; background:${preset.swatch}; border:3px solid ${selected ? 'var(--teal-dark)' : 'transparent'}; cursor:pointer; box-shadow:0 0 0 1px var(--line);`;
-    sw.addEventListener('click', ()=>{ selectedBrandColor = preset.id; renderBrandSwatches(); });
+    sw.addEventListener('click', ()=>{
+      selectedBrandColor = preset.id;
+      renderBrandSwatches();
+      applyBrandColor(selectedBrandColor); // live preview on tap — used to only actually repaint the background once "Save branding" was clicked, so picking a swatch looked like nothing happened
+    });
     box.appendChild(sw);
   });
 }
