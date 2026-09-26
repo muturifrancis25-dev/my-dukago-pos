@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v2';
+const CACHE_NAME = 'my-duka-pos-shell-v3';
 const SHELL_FILES = [
   './index.html',
   './manifest.json'
@@ -35,6 +35,8 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  const isNavigation = event.request.mode === 'navigate';
+
   event.respondWith(
     fetch(event.request, { cache: 'no-store' })
       .then((response) => {
@@ -42,6 +44,15 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() =>
+        // ignoreSearch matters here — a home-screen icon can launch with an
+        // extra query string (e.g. some Android PWA wrappers append one),
+        // which would otherwise miss an exact cache match even though the
+        // shell is cached. For a page-load itself, always fall back to the
+        // cached index.html specifically (this is a single-page app — there
+        // is nothing else to navigate to), not just a same-URL cache match.
+        caches.match(event.request, { ignoreSearch: true })
+          .then((cached) => cached || (isNavigation ? caches.match('./index.html') : undefined))
+      )
   );
 });

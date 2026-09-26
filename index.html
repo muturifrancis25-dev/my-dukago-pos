@@ -7248,13 +7248,6 @@ async function init(){
   verifyRealConnectivity();
   const restored = await tryRestoreSession();
   if(!restored) showLoginScreen();
-
-  // Register the service worker so this page itself (not just its data) loads
-  // with zero network — required for a genuinely offline-capable app.
-  if('serviceWorker' in navigator){
-    try{ await navigator.serviceWorker.register('sw.js'); log('Offline app-shell caching enabled.','ok'); }
-    catch(e){ log('Service worker not registered — page reload still needs network this time (see note in Sync & Setup).','warn'); }
-  }
 }
 async function bootWithRecovery(){
   try{
@@ -7287,6 +7280,19 @@ $('bootErrorResetBtn').addEventListener('click', async ()=>{
   }catch(e){ /* fall through to reload regardless — a fresh openDB() will recreate it */ }
   location.reload();
 });
+// Register the service worker FIRST, on its own, before anything else in boot — this is what
+// makes the app open with zero network at all on a future launch. It used to be the very last
+// step inside init(), so if ANYTHING earlier in boot threw (a bad IndexedDB upgrade, a
+// corrupt settings value, any of the failures bootWithRecovery's own recovery banner exists
+// to catch) the app could complete many genuinely-online sessions in a row without the service
+// worker ever actually getting registered — meaning it would still fail to open at all the
+// next time someone launched it offline, exactly as if it had never been used online. This
+// runs unconditionally, independent of whether the rest of boot succeeds.
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js')
+    .then(()=>log('Offline app-shell caching enabled.','ok'))
+    .catch(e=>log('Service worker not registered — page reload still needs network this time: '+e.message,'warn'));
+}
 bootWithRecovery();
 </script>
 <div id="receiptPrintArea"></div>
