@@ -475,7 +475,8 @@
   .floor-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle;}
   .floor-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(136px,1fr)); gap:14px; padding:8px 18px 28px;}
   .floor-card{
-    background:var(--panel); border:2px solid var(--muted); border-radius:16px; padding:14px 10px 12px;
+    background:var(--panel); border:2.5px solid color-mix(in srgb, var(--muted) 75%, var(--ink) 25%);
+    border-radius:16px; padding:14px 10px 12px;
     cursor:pointer; text-align:center; position:relative; min-height:160px;
     display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:1px;
     transition:transform .1s, box-shadow .15s; font-family:var(--sans);
@@ -491,9 +492,9 @@
   /* Small status dot, top-left of every card — the one thing on the card that always
      tells you the table's state at a glance, independent of border/background contrast,
      which can be hard to tell apart quickly across 20 tables. */
-  .floor-card .fc-status-dot{position:absolute; top:9px; left:9px; width:10px; height:10px; border-radius:50%; background:var(--line);}
-  .floor-card.status-empty{border-style:dashed;}
-  .floor-card.status-empty .fc-status-dot{background:var(--line);}
+  .floor-card .fc-status-dot{position:absolute; top:9px; left:9px; width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 0 2px var(--panel);}
+  .floor-card.status-empty{border-style:dashed; border-color:color-mix(in srgb, var(--muted) 60%, var(--ink) 15%);}
+  .floor-card.status-empty .fc-status-dot{background:var(--muted);}
   .floor-card.status-open{border-color:var(--marigold);}
   .floor-card.status-open .fc-icon{color:var(--marigold);}
   .floor-card.status-open{background:color-mix(in srgb, var(--marigold) 7%, var(--panel));}
@@ -678,6 +679,13 @@
         <div class="totals-block">
           <div class="trow"><span>Subtotal</span><span id="tableOrderSubTotal">KSh 0</span></div>
           <div class="trow grand"><span>Bill so far</span><span id="tableOrderGrandTotal">KSh 0</span></div>
+        </div>
+        <!-- Table bills only ever settle as cash or M-Pesa (customer credit isn't wired into
+             table settlement) — this was missing entirely before, so every table bill quietly
+             went through on whatever payMethod the walk-in till last had, usually cash. -->
+        <div class="paymethod-row" id="tablePayMethodRow">
+          <button class="active" data-method="cash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><line x1="6" y1="12" x2="6" y2="12.01"/><line x1="18" y1="12" x2="18" y2="12.01"/></svg>Cash</button>
+          <button data-method="mpesa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="7" y1="18" x2="17" y2="18"/></svg>M-Pesa</button>
         </div>
         <div class="action-row" style="grid-template-columns:1fr 1fr 1fr;">
           <button class="btn-clear" id="sendToKitchenBtn">🍳 Kitchen</button>
@@ -2231,12 +2239,25 @@ function renderCart(){
 
 // ---------- Checkout ----------
 let payMethod = 'cash';
+// Walk-in checkout and table-bill settlement are two different panels but share this one
+// payMethod value and the same checkout()/finalizeSale() flow underneath — so picking a
+// method in either row has to update both rows' active state, not just its own.
+function setPayMethod(method){
+  payMethod = method;
+  document.querySelectorAll('#payMethodRow button[data-method], #tablePayMethodRow button[data-method]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.method===method);
+  });
+  $('checkoutBtn').textContent = payMethod==='cash' ? 'PAY' : (payMethod==='credit' ? 'PAY · CREDIT' : 'PAY · M-PESA');
+  $('settleTableBtn').textContent = payMethod==='mpesa' ? 'Settle bill · M-PESA' : 'Settle bill';
+}
 document.addEventListener('DOMContentLoaded', ()=>{
   $('payMethodRow').addEventListener('click', e=>{
     const btn = e.target.closest('button[data-method]'); if(!btn) return;
-    payMethod = btn.dataset.method;
-    $('payMethodRow').querySelectorAll('button').forEach(b=>b.classList.toggle('active', b===btn));
-    $('checkoutBtn').textContent = payMethod==='cash' ? 'PAY' : (payMethod==='credit' ? 'PAY · CREDIT' : 'PAY · M-PESA');
+    setPayMethod(btn.dataset.method);
+  });
+  $('tablePayMethodRow').addEventListener('click', e=>{
+    const btn = e.target.closest('button[data-method]'); if(!btn) return;
+    setPayMethod(btn.dataset.method);
   });
 });
 
@@ -3649,6 +3670,7 @@ function selectTable(id){
   tableViewMode = 'order';
   $('walkInReceiptPanel').style.display = 'none';
   $('tableOrderPanel').style.display = 'flex';
+  setPayMethod('cash'); // always start a table's bill on cash — never inherit whatever the last walk-in sale used
   showTillGridView();
   renderTableOrderView();
 }
