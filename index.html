@@ -5093,21 +5093,30 @@ async function queuePush(type, payload){
 }
 async function runSyncLoop(){
   if(!isOnline || !shopId) return;
-  const queue = await getAll('sync_queue'); if(queue.length===0) return;
+  const queue = await getAll('sync_queue');
   const live = backendLive();
-  log(`Sync started — ${queue.length} item(s) to push (${live?'live Supabase':'simulated'}).`);
-  for(const item of queue){
-    try{
-      if(live) await pushToSupabase(item); else await new Promise(r=>setTimeout(r,250));
-      if(item.type==='sale'){
-        const s = await new Promise(res=>{ const r=tx('sales').get(item.payload.id); r.onsuccess=()=>res(r.result); });
-        if(s){ s.synced=true; await put('sales', s); }
-      }
-      await del('sync_queue', item.id);
-      log(`✓ Synced ${item.type} (${item.type==='sale'?fmtKsh(item.payload.total):item.payload.name})`,'ok');
-    }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); }
+  if(queue.length>0){
+    log(`Sync started — ${queue.length} item(s) to push (${live?'live Supabase':'simulated'}).`);
+    for(const item of queue){
+      try{
+        if(live) await pushToSupabase(item); else await new Promise(r=>setTimeout(r,250));
+        if(item.type==='sale'){
+          const s = await new Promise(res=>{ const r=tx('sales').get(item.payload.id); r.onsuccess=()=>res(r.result); });
+          if(s){ s.synced=true; await put('sales', s); }
+        }
+        await del('sync_queue', item.id);
+        log(`✓ Synced ${item.type} (${item.type==='sale'?fmtKsh(item.payload.total):item.payload.name})`,'ok');
+      }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); }
+    }
+    updatePendingBadge(); renderReports();
   }
-  updatePendingBadge(); renderReports();
+  // Pulling used to only happen right after THIS device pushed something of its own — so a
+  // device with nothing queued (a waiter just watching the floor, a second till that hasn't
+  // rung anything up) never learned that another device settled a bill, sent an order to the
+  // kitchen, or printed someone's bill. It would sit there showing stale table statuses
+  // indefinitely. Pull on every tick instead, regardless of whether this device had anything
+  // to push, so every login sees the same table state within one sync cycle (~6s) of it
+  // actually changing anywhere.
   if(live) await pullShopData();
 }
 
