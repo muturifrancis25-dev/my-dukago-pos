@@ -1226,6 +1226,15 @@
     <div class="login-mark" id="mainLoginMark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 9a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0L22 5H2Z" fill="currentColor"/><rect x="4" y="10" width="16" height="10" rx="0.5" fill="currentColor"/><rect x="10" y="14" width="4" height="6" fill="var(--marigold)"/></svg></div>
     <h2>My DukaGO POS</h2>
     <p>Enter your PIN to start this counter.</p>
+    <div id="bootErrorBanner" style="display:none; background:var(--marigold-pale); border:1px solid var(--marigold); border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:12px; color:var(--ink); text-align:left;">
+      <b>This device's local data didn't load properly.</b>
+      <span id="bootErrorDetail"></span>
+      PIN entry below may not work until this is fixed.
+      <div style="margin-top:8px;">
+        <button type="button" id="bootErrorRetryBtn" style="padding:6px 10px; border-radius:6px; border:1px solid var(--marigold-dark); background:var(--panel); color:var(--ink); font-weight:700; font-size:12px; cursor:pointer;">Try again</button>
+        <button type="button" id="bootErrorResetBtn" style="padding:6px 10px; border-radius:6px; border:1px solid var(--clay); background:var(--panel); color:var(--clay); font-weight:700; font-size:12px; cursor:pointer; margin-left:6px;">Reset local data on this device</button>
+      </div>
+    </div>
     <p style="display:none; text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
@@ -1937,10 +1946,18 @@ function openDB(){
   });
 }
 function tx(store, mode='readonly'){ return db.transaction(store,mode).objectStore(store); }
-function getAll(store){ return new Promise(res=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result); }); }
-function put(store,val){ return new Promise(res=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); }); }
-function del(store,key){ return new Promise(res=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); }); }
-function getSetting(key){ return new Promise(res=>{ const r=tx('settings').get(key); r.onsuccess=()=>res(r.result); }); }
+// Every one of these used to wire up only `onsuccess`. A failed request (a blocked upgrade,
+// a full-storage quota error, a corrupted record) never called that handler, so the returned
+// promise simply never resolved — it hung forever. Because boot (see init() below) is one
+// long unbroken chain of awaits on these, a single stuck IndexedDB request silently froze the
+// entire app before the login screen ever appeared, with no error and no way back except
+// wiping local storage — which is exactly the "have to uninstall to log in again" symptom.
+// Wiring `onerror` to reject fixes that: a genuine failure now surfaces as a catchable error
+// instead of a permanent hang.
+function getAll(store){ return new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function put(store,val){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function del(store,key){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
+function getSetting(key){ return new Promise((res,rej)=>{ const r=tx('settings').get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 
 async function logAudit(action, details=''){
   await put('audit_log', {
@@ -5085,6 +5102,18 @@ async function clearLocalShopData(){
   }
 }
 async function pullSpecificShop(targetShopId){
+  // This is called every time a typed PIN isn't in THIS device's local `users` store yet —
+  // which happens constantly for perfectly ordinary reasons (a cashier was just added on
+  // another device and this one hasn't synced her down). That is NOT a shop switch, and
+  // must never be treated as one: wiping open_orders/sales/etc. here was destroying live
+  // open-table bills (and anything else not yet reflected on the server) on a device that
+  // was already correctly on this exact shop, just because one PIN hadn't arrived yet.
+  // Only wipe-and-force-pull when the device is genuinely moving to a DIFFERENT shop.
+  if(shopId && targetShopId === shopId){
+    await pullShopData(false, false); // safe, additive pull — picks up the new staff record, touches nothing else
+    logAudit('Synced a staff PIN from another device', 'same shop — no local data was cleared');
+    return;
+  }
   const prevShopId = shopId;
   // If this device still has changes that haven't reached the backend, they belong to
   // whichever shop is currently loaded — wiping local stores now would lose them forever.
@@ -5096,7 +5125,7 @@ async function pullSpecificShop(targetShopId){
   shopId = targetShopId;
   await put('settings', {key:'shop_id', value:shopId});
   await clearLocalShopData();
-  await pullShopData(true, true); // force=true — a shop switch must always trust the server completely, never a stale local timestamp comparison
+  await pullShopData(true, true); // force=true — a genuine shop switch must always trust the server completely, never a stale local timestamp comparison
   logAudit('Auto-joined shop via PIN lookup', prevShopId ? `was ${prevShopId}` : 'first shop on this device');
 }
 // Checked before saving ANY new or changed PIN — local first (works offline), then the whole
@@ -6912,7 +6941,18 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 // No branching here anymore — the same sequence runs every time, whether this device has
 // been set up before or not. The PIN entry logic itself figures out what to do; boot's only
 // job is getting the local database and UI into a ready state.
-(async function init(){
+// ---------- Boot ----------
+// No branching here anymore — the same sequence runs every time, whether this device has
+// been set up before or not. The PIN entry logic itself figures out what to do; boot's only
+// job is getting the local database and UI into a ready state.
+//
+// The whole sequence used to run with nothing catching a failure. Combined with IndexedDB
+// requests that could hang forever on error (fixed above), a single stuck step here froze
+// the app on a blank screen with no way forward except wiping local storage by hand — the
+// uninstall-to-log-in-again workaround. Now a failure anywhere in boot still gets the login
+// screen on screen, with a visible explanation and two real recovery options, instead of
+// silence.
+async function init(){
   $('themeToggleBtn').innerHTML = document.documentElement.getAttribute('data-theme')==='dark' ? ICON_SUN : ICON_MOON;
   $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
   relocatePlatformControlsToSuperAdminView(); // done once, every load — see the function's own comment
@@ -6947,7 +6987,39 @@ $('themeToggleBtn').addEventListener('click', ()=>{
     try{ await navigator.serviceWorker.register('sw.js'); log('Offline app-shell caching enabled.','ok'); }
     catch(e){ log('Service worker not registered — page reload still needs network this time (see note in Sync & Setup).','warn'); }
   }
-})();
+}
+async function bootWithRecovery(){
+  try{
+    await init();
+    $('bootErrorBanner').style.display = 'none';
+  }catch(e){
+    console.error('Boot failed:', e);
+    // Even though boot didn't finish, still get the login screen up rather than leaving
+    // a blank page — most of the app's globals have sensible starting values, and PIN
+    // entry itself will surface a clearer error if something's still genuinely broken.
+    try{ showLoginScreen(); }catch(e2){ /* DOM itself is fine even if this throws */ }
+    $('bootErrorDetail').textContent = ' (' + (e && e.message ? e.message : 'unknown error') + ') ';
+    $('bootErrorBanner').style.display = 'block';
+  }
+}
+$('bootErrorRetryBtn').addEventListener('click', ()=>{ location.reload(); });
+$('bootErrorResetBtn').addEventListener('click', async ()=>{
+  const sure = confirm(
+    'This clears ALL local data on this device only (products, sales history, open tables, staff PINs) and starts fresh. '+
+    'Anything already synced to the server is safe and will come back the next time this device signs in online. '+
+    'Anything that never made it to the server — because this device was offline or broken — will be lost. Continue?'
+  );
+  if(!sure) return;
+  try{
+    if(db){ db.close(); }
+    await new Promise((res,rej)=>{
+      const req = indexedDB.deleteDatabase('soko_pos_db_v1');
+      req.onsuccess = ()=>res(); req.onerror = ()=>rej(req.error); req.onblocked = ()=>res();
+    });
+  }catch(e){ /* fall through to reload regardless — a fresh openDB() will recreate it */ }
+  location.reload();
+});
+bootWithRecovery();
 </script>
 <div id="receiptPrintArea"></div>
 </body>
