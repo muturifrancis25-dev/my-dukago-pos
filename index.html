@@ -1205,7 +1205,13 @@
         <div><b style="font-size:13px;">Simulate connectivity</b><br><span class="hint" style="margin:0;">Test how offline sales queue, then flush on reconnect.</span></div>
         <button id="toggleNetBtn" class="primary-btn">Go online</button>
       </div>
-      <h3 style="margin-top:14px;">Sync log</h3>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; flex-wrap:wrap; gap:6px;">
+        <h3 style="margin:0;">Sync log</h3>
+        <div>
+          <button class="primary-btn" id="copySyncLogBtn" style="font-size:11px; padding:5px 10px;">Copy log</button>
+          <button class="primary-btn" id="downloadSyncLogBtn" style="font-size:11px; padding:5px 10px;">Download .txt</button>
+        </div>
+      </div>
       <div class="sync-log" id="syncLog"></div>
     </div>
   </section>
@@ -5382,6 +5388,34 @@ window.addEventListener('online', ()=>setConnectivity(true,'device back online')
 window.addEventListener('offline', ()=>setConnectivity(false,'device lost connection'));
 $('toggleNetBtn').addEventListener('click', ()=>{
   setConnectivity(!isOnline, 'manual test toggle');
+});
+// Log lines can run long and are selectable-but-fiddly to grab by hand on a phone —
+// these two just get the same text out (clipboard for pasting into a chat, or a real
+// file for attaching/emailing) instead of a screenshot, which crops mid-line.
+$('copySyncLogBtn').addEventListener('click', async ()=>{
+  const text = $('syncLog').innerText.trim();
+  if(!text){ toast('Sync log is empty'); return; }
+  try{
+    await navigator.clipboard.writeText(text);
+    toast('Sync log copied');
+  }catch(e){
+    // Clipboard API can be blocked (older WebView, no HTTPS context) — fall back to a
+    // manual select so the person can still long-press → Copy themselves.
+    const range = document.createRange(); range.selectNodeContents($('syncLog'));
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    toast('Log selected — long-press to copy');
+  }
+});
+$('downloadSyncLogBtn').addEventListener('click', ()=>{
+  const text = $('syncLog').innerText.trim();
+  if(!text){ toast('Sync log is empty'); return; }
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `sync-log-${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  toast('Sync log downloaded');
 });
 setInterval(()=>{ if(isOnline) runSyncLoop(); }, 6000);
 // A device can report "online" (wifi connected) while the internet itself is down,
