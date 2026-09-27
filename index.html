@@ -2557,10 +2557,20 @@ async function loadAllShopsList(){
         const verb = currentlyActive ? 'deactivate' : 'reactivate';
         if(!confirm(`${verb.charAt(0).toUpperCase()+verb.slice(1)} "${shopName}"? ${currentlyActive ? 'Its admin and staff will be signed out and blocked from signing back in until reactivated. Their data stays intact.' : 'This shop will be able to sign in and sync again.'}`)) return;
         try{
-          const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+          let res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
             method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive, license_status: currentlyActive ? 'suspended' : 'active'}),
           });
-          if(!res.ok){ toast('Could not update — check the connection'); return; }
+          if(!res.ok){
+            // The license_status/license_note columns are a manual migration — if they haven't
+            // been added to this Supabase project yet, PostgREST rejects the whole PATCH over
+            // the unknown columns, which would otherwise take the basic Activate/Deactivate
+            // control down with it. Fall back to the plain `active` flag alone so this core
+            // moderation control keeps working regardless of migration status.
+            res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+              method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive}),
+            });
+            if(!res.ok){ toast('Could not update — check the connection'); return; }
+          }
           logAudit(`Shop ${currentlyActive ? 'deactivated' : 'reactivated'} by Platform Administrator`, `${shopName} (${targetShopId})`);
           toast(`${shopName} ${currentlyActive ? 'deactivated' : 'reactivated'}`);
           loadAllShopsList();
@@ -2614,10 +2624,20 @@ $('manageShopSaveLicenseBtn').addEventListener('click', async ()=>{
   const blocking = status==='suspended' || status==='cancelled';
   if(blocking && !confirm(`Set "${$('manageShopName').textContent}" to ${status}? Every device at that shop will be signed out and blocked from signing back in until you change this back to Trial or Active. Their data stays intact.`)) return;
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+    let res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
       method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({license_status: status, license_note: note || null, active: !blocking}),
     });
-    if(!res.ok){ toast('Could not save — check the connection'); return; }
+    if(!res.ok){
+      // Same migration fallback as the quick toggle above — without the license_status/
+      // license_note columns yet, at least still apply the active/suspended switch itself.
+      res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+        method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !blocking}),
+      });
+      if(!res.ok){ toast('Could not save — check the connection'); return; }
+      toast(`Shop set to ${!blocking ? 'active' : 'suspended'} — but the status/note fields need a database update first (ask your developer) before those save too`);
+      logAudit('Set shop active flag only — license columns missing (Platform Administrator)', `${$('manageShopName').textContent} → ${status}`);
+      return;
+    }
     logAudit('Set license status (Platform Administrator)', `${$('manageShopName').textContent} → ${status}`);
     toast(`License set to ${status}`);
   }catch(e){
@@ -5213,7 +5233,23 @@ async function pushToSupabase(item){
       updated_at:p.updated_at || new Date().toISOString(),
     };
   }
-  else { table='stock_movements'; body=Object.assign({shop_id:shopId}, item.payload); }
+  else if(item.type==='stock_take_upsert'){
+    table='stock_takes'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, ts:p.ts, performed_by:p.performed_by, items:p.items,
+      updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
+  else {
+    // Every recognized item.type has its own explicit branch above — reaching this means a
+    // sync_queue entry was created with a type nothing here handles (a typo, or new code added
+    // without a matching branch). Silently routing it into stock_movements used to be exactly
+    // the kind of table/column mismatch that produced a real production incident earlier
+    // (PGRST204 on table_orders.bill_printed) — fail loudly here instead so it shows up in the
+    // sync log as an error, not as a row quietly mis-filed into the wrong table.
+    throw new Error(`Unknown sync item type "${item.type}" — nothing in pushToSupabase() handles it`);
+  }
   const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
     method:'POST', headers: sbHeaders({'Prefer':prefer}),
     body: JSON.stringify(body)
@@ -5470,7 +5506,7 @@ async function pullShopData(fullPull, force){
       for(const rp of remoteProducts){
         const lp = localProducts.find(p=>p.sku===rp.sku);
         if(force || !lp || !lp.updated_at || new Date(rp.updated_at) > new Date(lp.updated_at)){
-          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, supplierName:rp.supplier_name||null, reorderThreshold:rp.reorder_threshold||10, expiryDate:rp.expiry_date||null, isRx:rp.is_rx||false, updated_at:rp.updated_at});
+          await put('products', {sku:rp.sku, name:rp.name, cat:rp.cat, price:rp.price, cost:rp.cost, stock:rp.stock, btype:rp.btype, supplierName:rp.supplier_name||null, reorderThreshold:(rp.reorder_threshold===0?0:(rp.reorder_threshold||10)), expiryDate:rp.expiry_date||null, isRx:rp.is_rx||false, updated_at:rp.updated_at});
         }
       }
       // A genuinely full pull is authoritative — a product deleted on another device
@@ -5614,6 +5650,20 @@ async function pullShopData(fullPull, force){
         }
       }
       if(tableServiceEnabled()){ refreshFloorIfActive(); if(activeTableId) renderTableOrderView(); }
+    }
+    // Stock takes — previously local-only (see stock_take_upsert): a count done on one device
+    // is now visible from any other device/admin dashboard at that shop, not just the till it
+    // was performed on. Stock-take records are append-only (never edited after submission), so
+    // this is a simple "pull anything not already here" rather than a last-write-wins merge.
+    const stRes = await fetch(`${supaUrl}/rest/v1/stock_takes?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(stRes.ok){
+      const remoteTakes = await stRes.json();
+      const localTakes = await getAll('stock_takes');
+      for(const rt of remoteTakes){
+        if(!localTakes.find(t=>t.id===rt.id)){
+          await put('stock_takes', {id:rt.id, ts:rt.ts, performed_by:rt.performed_by, items:rt.items, updated_at:rt.updated_at});
+        }
+      }
     }
     lastPullSync = new Date().toISOString();
     await put('settings', {key:'last_pull_sync', value:lastPullSync});
@@ -6805,9 +6855,19 @@ function shakePinDots(){
 // a correct PIN was being rejected as "Incorrect PIN" when the actual cause was "not on this
 // device, and we can't check further because we're offline."
 let pinCheckTimer = null;
+// Bumped on every call to tryPinCheckpoint (i.e. every keystroke) and captured at the start of
+// each call. A slow lookup for an EARLIER, now-abandoned attempt (e.g. someone typed 4 digits,
+// nothing matched fast enough, so they kept typing and a different PIN already logged them in
+// while the first lookup was still in flight) must never act once it finally resolves — without
+// this, a stale remote match could fire pullSpecificShop() and silently switch this device to a
+// different shop's data seconds into an already-successful, unrelated session. Checked after
+// every await in this function, alongside `currentUser` (set the moment any login succeeds).
+let pinCheckGeneration = 0;
 async function tryPinCheckpoint(){
   if(!PIN_LENGTHS.includes(pinBuffer.length)) return;
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
+  const myGeneration = ++pinCheckGeneration;
+  const stale = () => myGeneration !== pinCheckGeneration || !!currentUser;
 
   // The default bootstrap trigger — only means anything on a device that's never been set up.
   if(pinBuffer.length===4 && pinBuffer==='1234' && !shopId){
@@ -6819,6 +6879,7 @@ async function tryPinCheckpoint(){
 
   // This device's own local staff first — works instantly, works offline.
   const users = await getAll('users');
+  if(stale()) return;
   const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
   if(localMatch){ attemptLogin(); return; }
 
@@ -6826,11 +6887,14 @@ async function tryPinCheckpoint(){
   // type their own real PIN on a fresh device and be found automatically, no code needed.
   if(isOnline && backendLive()){
     const remoteMatch = await lookupPinGlobally(pinBuffer);
+    if(stale()) return; // a newer attempt already resolved (matched locally or is mid-flight) — don't act on this one
     if(remoteMatch){
       try{
         await pullSpecificShop(remoteMatch.shop_id);
+        if(stale()) return; // someone already signed in through a different, faster attempt meanwhile
         attemptLogin(); // local data now has this person in it — try again
       }catch(e){
+        if(stale()) return;
         toast(e.message || 'Could not switch to that shop on this device');
         shakePinDots();
         pinBuffer=''; setTimeout(updatePinDots, 200);
@@ -6863,8 +6927,8 @@ async function tryPinCheckpoint(){
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
   const k = btn.dataset.k;
-  if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinBuffer=''; updatePinDots(); return; }
-  if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
+  if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=''; updatePinDots(); return; }
+  if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
   if(pinBuffer.length>=MAX_PIN_LENGTH) return;
   pinBuffer += k;
   updatePinDots();
@@ -6874,7 +6938,7 @@ $('loginKeypad').addEventListener('click', e=>{
 document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){ pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120); }
-  if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
+  if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
 });
 
 // ---------- Set Admin PIN screen — what "1234" on a fresh device leads into ----------
@@ -7011,8 +7075,8 @@ async function attemptLogin(){
 // Checked at every path into an active session — a fresh sign-in, AND a restored one (see
 // tryRestoreSession below) — since a shop that's already signed in on a device would
 // otherwise bypass a deactivation entirely just by never re-entering their PIN. Returns
-// true/false when it can genuinely check, or null when it can't (offline) — offline-first
-// means we never block a sign-in over a check we simply couldn't make.
+// {active, note}: active is true/false when it can genuinely check, or null when it can't
+// (offline) — offline-first means we never block a sign-in over a check we simply couldn't make.
 async function isShopActive(){
   if(!shopId) return {active:true}; // nothing to check yet — a device mid-setup isn't anyone's business to block
   if(!isOnline || !backendLive()) return {active:null};
@@ -7079,11 +7143,15 @@ $('stockTakeBannerBtn').addEventListener('click', ()=>{
   }, 100);
 });
 
-// ---------- Stock take: required every 3 days for Supermarket / Chemist / Agrovet ----------
+// ---------- Stock take: required every 3 days for the types in STOCK_TAKE_REQUIRED_TYPES ----------
 async function renderStockTakePanel(){
   const panel = $('stockTakePanel');
   if(!stockTakeRequiredForThisShop()){
-    panel.innerHTML = '<h3>Stock take</h3><p class="hint">Not required for this business type — this is only enforced for Supermarket, Chemist, and Agrovet, where enough SKUs move through that periodic counting genuinely matters.</p>';
+    // Built from STOCK_TAKE_REQUIRED_TYPES itself, not a hand-typed list — so this can't go
+    // stale again the next time a business type is added to that list (as liquor just was).
+    const types = allBusinessTypes();
+    const names = STOCK_TAKE_REQUIRED_TYPES.map(id => types[id] ? types[id].label : id).join(', ');
+    panel.innerHTML = `<h3>Stock take</h3><p class="hint">Not required for this business type — this is only enforced for ${names}, where enough SKUs move through that periodic counting genuinely matters.</p>`;
     return;
   }
   // Panel content only gets rebuilt from scratch once (first time it's actually needed) —
@@ -7162,6 +7230,7 @@ async function submitStockTake(){
   const ts = new Date().toISOString();
   const record = {id:'st_'+Date.now(), ts, performed_by: currentUser?currentUser.name:'Unknown', items};
   await put('stock_takes', record);
+  await queuePush('stock_take_upsert', record); // previously local-only — invisible from any other device until now
   await put('settings', {key:'last_stock_take_at', value:ts});
   await queuePush('settings_upsert', {key:'last_stock_take_at', value:ts});
   const discrepant = items.filter(i=>i.discrepancy!==0);
