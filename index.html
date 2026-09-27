@@ -1939,6 +1939,37 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'HTL-BREAKFAST', name:'Breakfast (per guest)', price:600, stock:null, cat:'Food & Beverage'},
       {sku:'HTL-DINNER', name:'Dinner (per guest)', price:1200, stock:null, cat:'Food & Beverage'},
     ]
+  },
+  liquor: {
+    label:'Wines & Spirits / Liquor Store', emoji:'🍷',
+    desc:'Beers, wines, spirits, and ready-to-drink — age-restricted retail.',
+    subtitle:'Liquor Store', unitLabel:'stock',
+    cats:['Beer','Wines','Spirits','Ready-to-Drink','Soft Drinks & Mixers','Other'],
+    colors:{Beer:'#b8862b', Wines:'#7a2f3f', Spirits:'#4c3a5c', 'Ready-to-Drink':'#2f7a8c', 'Soft Drinks & Mixers':'#4c7a52', Other:'#5c6670'},
+    starter:[
+      {sku:'LIQ-TUSKER-500', name:'Tusker Lager 500ml', price:220, stock:60, cat:'Beer'},
+      {sku:'LIQ-WHITECAP-500', name:'White Cap 500ml', price:220, stock:50, cat:'Beer'},
+      {sku:'LIQ-GUINNESS-500', name:'Guinness Smooth 500ml', price:250, stock:40, cat:'Beer'},
+      {sku:'LIQ-BALOZI-500', name:'Balozi 500ml', price:200, stock:36, cat:'Beer'},
+      {sku:'LIQ-HEINEKEN-330', name:'Heineken 330ml', price:250, stock:30, cat:'Beer'},
+      {sku:'LIQ-4COUSINS-750', name:'Four Cousins Red 750ml', price:900, stock:18, cat:'Wines'},
+      {sku:'LIQ-DROSTDYHOF-750', name:'Drostdy-Hof 750ml', price:950, stock:14, cat:'Wines'},
+      {sku:'LIQ-CAPRICE-750', name:'Caprice 750ml', price:850, stock:12, cat:'Wines'},
+      {sku:'LIQ-KENYACANE-250', name:'Kenya Cane 250ml', price:350, stock:24, cat:'Spirits'},
+      {sku:'LIQ-KENYACANE-750', name:'Kenya Cane 750ml', price:950, stock:16, cat:'Spirits'},
+      {sku:'LIQ-COUNTY-750', name:'County Gin 750ml', price:900, stock:16, cat:'Spirits'},
+      {sku:'LIQ-CHROME-750', name:'Chrome Gin 750ml', price:1100, stock:14, cat:'Spirits'},
+      {sku:'LIQ-JWRED-750', name:'Johnnie Walker Red Label 750ml', price:3200, stock:8, cat:'Spirits'},
+      {sku:'LIQ-SMIRNOFF-750', name:'Smirnoff Vodka 750ml', price:1600, stock:10, cat:'Spirits'},
+      {sku:'LIQ-VICEROY-750', name:'Viceroy Brandy 750ml', price:1400, stock:10, cat:'Spirits'},
+      {sku:'LIQ-SMIRNOFFICE-300', name:'Smirnoff Ice 300ml', price:250, stock:30, cat:'Ready-to-Drink'},
+      {sku:'LIQ-SNAPP-300', name:'Snapp 300ml', price:200, stock:30, cat:'Ready-to-Drink'},
+      {sku:'LIQ-CAPTAINMORGAN-300', name:'Captain Morgan Can 300ml', price:280, stock:24, cat:'Ready-to-Drink'},
+      {sku:'LIQ-TONIC-300', name:'Tonic Water 300ml', price:100, stock:36, cat:'Soft Drinks & Mixers'},
+      {sku:'LIQ-SODAWATER-300', name:'Soda Water 300ml', price:100, stock:36, cat:'Soft Drinks & Mixers'},
+      {sku:'LIQ-ICECUBES-BAG', name:'Ice Cubes (bag)', price:100, stock:20, cat:'Other'},
+      {sku:'LIQ-BOTTLEOPENER', name:'Bottle Opener', price:150, stock:15, cat:'Other'},
+    ]
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
@@ -1948,7 +1979,7 @@ let PLATFORM_BUSINESS_TYPES = {}; // loaded fresh from the platform-wide table a
 function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...PLATFORM_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
 // Larger, higher-stock-risk businesses get a recurring stock take reminder every 3 days —
 // small dukas/fuel/carwash/gas/water don't carry enough SKUs for this to be worth enforcing.
-const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet'];
+const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet','liquor'];
 const STOCK_TAKE_INTERVAL_DAYS = 3;
 function stockTakeRequiredForThisShop(){
   return currentBusinessTypes.some(id => STOCK_TAKE_REQUIRED_TYPES.includes(id));
