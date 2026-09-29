@@ -1970,6 +1970,38 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'LIQ-ICECUBES-BAG', name:'Ice Cubes (bag)', price:100, stock:20, cat:'Other'},
       {sku:'LIQ-BOTTLEOPENER', name:'Bottle Opener', price:150, stock:15, cat:'Other'},
     ]
+  },
+  pub: {
+    label:'Pub / Bar', emoji:'🍻',
+    desc:'Draught kegs by the glass, shots, beers, wines and spirits — sold and settled like a restaurant tab, not a retail till.',
+    subtitle:'Pub / Bar', unitLabel:'per serving',
+    cats:['Draught (Keg)','Beer','Spirits & Shots','Wines','Soft Drinks & Mixers','Other'],
+    colors:{'Draught (Keg)':'#b8862b', Beer:'#8c6a4a', 'Spirits & Shots':'#4c3a5c', Wines:'#7a2f3f', 'Soft Drinks & Mixers':'#4c7a52', Other:'#5c6670'},
+    starter:[
+      // Draught and shots are poured from a keg/bottle rather than sold as a discrete stocked
+      // unit — same treatment as fuel-per-litre or a restaurant menu item: priced per serving,
+      // stock left null so it never blocks a sale on quantity. The keg/bottle itself is still
+      // a physical thing the owner tracks by eye or a separate note, same as a fuel tank level.
+      {sku:'PUB-DRAUGHT-TUSKER-PINT', name:'Tusker Draught (Pint)', price:280, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-DRAUGHT-TUSKER-HALF', name:'Tusker Draught (Half Pint)', price:150, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-DRAUGHT-GUINNESS-PINT', name:'Guinness Draught (Pint)', price:320, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-TUSKER-500', name:'Tusker Lager 500ml', price:250, stock:60, cat:'Beer'},
+      {sku:'PUB-WHITECAP-500', name:'White Cap 500ml', price:250, stock:48, cat:'Beer'},
+      {sku:'PUB-GUINNESS-500', name:'Guinness Smooth 500ml', price:280, stock:36, cat:'Beer'},
+      {sku:'PUB-HEINEKEN-330', name:'Heineken 330ml', price:280, stock:30, cat:'Beer'},
+      {sku:'PUB-KENYACANE-SHOT', name:'Kenya Cane (Shot)', price:150, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-SMIRNOFF-SHOT', name:'Smirnoff Vodka (Shot)', price:200, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-VICEROY-SHOT', name:'Viceroy Brandy (Shot)', price:200, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-JWRED-SHOT', name:'Johnnie Walker Red Label (Shot)', price:400, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-GINTONIC', name:'Gin & Tonic', price:350, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-HOUSEWINE-RED', name:'House Red Wine (Glass)', price:350, stock:null, cat:'Wines'},
+      {sku:'PUB-HOUSEWINE-WHITE', name:'House White Wine (Glass)', price:350, stock:null, cat:'Wines'},
+      {sku:'PUB-SODA-300', name:'Soda 300ml', price:120, stock:36, cat:'Soft Drinks & Mixers'},
+      {sku:'PUB-TONIC-300', name:'Tonic Water 300ml', price:150, stock:30, cat:'Soft Drinks & Mixers'},
+      {sku:'PUB-WATER-500', name:'Bottled Water 500ml', price:100, stock:40, cat:'Soft Drinks & Mixers'},
+      {sku:'PUB-BARSNACK-NUTS', name:'Bar Snacks (peanuts)', price:150, stock:25, cat:'Other'},
+      {sku:'PUB-ICECUBES-BAG', name:'Ice Cubes (bag)', price:100, stock:20, cat:'Other'},
+    ]
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
@@ -2378,7 +2410,7 @@ $('mpesaCancelBtn').addEventListener('click', closeMpesaModal);
 // ---------- Path 1: manual code entry — unchanged from before, always available ----------
 $('mpesaManualChoiceBtn').addEventListener('click', ()=>{
   showMpesaStep('mpesaManualStep');
-  const isRestaurant = currentBusinessTypes.includes('restaurant');
+  const isRestaurant = tableServiceEnabled();
   $('mpesaCodeInput').placeholder = isRestaurant ? 'M-Pesa code (optional)' : 'M-Pesa code (last 3 digits required)';
   $('mpesaCodeHint').textContent = isRestaurant
     ? 'If the customer\'s confirmation SMS is handy, jot the code down for your own record — or just confirm they\'ve paid.'
@@ -2393,9 +2425,10 @@ $('mpesaSendBtn').addEventListener('click', async ()=>{
   // "already paid" match paths, there's nothing proving this payment actually happened
   // except whatever the cashier types. Requiring at least the last 3 characters of the
   // real code is the minimum friction that makes someone actually look at the customer's
-  // SMS rather than tap through blind. Restaurants are the one exception — tables often
-  // settle by phone/away from the counter where checking a code isn't always practical.
-  if(!currentBusinessTypes.includes('restaurant') && code.length < 3){
+  // SMS rather than tap through blind. Table-service businesses (restaurant/hotel/pub) are
+  // the exception — tabs often settle by phone/away from the counter where checking a code
+  // isn't always practical.
+  if(!tableServiceEnabled() && code.length < 3){
     toast('Enter at least the last 3 digits of the M-Pesa code');
     $('mpesaCodeInput').focus();
     return;
@@ -3675,7 +3708,7 @@ function tableIconSVG(){
   </svg>`;
 }
 
-function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant') || currentBusinessTypes.includes('hotel'); }
+function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant') || currentBusinessTypes.includes('hotel') || currentBusinessTypes.includes('pub'); }
 function tableFloorModeActive(){ return tableServiceEnabled() && tableViewEnabled; }
 
 function updateTableServiceVisibility(){
@@ -7417,6 +7450,15 @@ $('themeToggleBtn').addEventListener('click', ()=>{
 // uninstall-to-log-in-again workaround. Now a failure anywhere in boot still gets the login
 // screen on screen, with a visible explanation and two real recovery options, instead of
 // silence.
+// Chrome (and other Credential Management API browsers) can auto-surface a "Use saved
+// password?" bottom-sheet for this origin on page load, if it holds a saved credential from
+// some earlier visit — this has nothing to do with the till's own PIN login, which uses no
+// <form>/password field at all, but the browser doesn't know that. preventSilentAccess() tells
+// it not to offer that automatic prompt for the rest of this page load. It only suppresses the
+// unsolicited auto-prompt, not any password manager the person opens themselves on purpose.
+if(window.navigator && navigator.credentials && navigator.credentials.preventSilentAccess){
+  navigator.credentials.preventSilentAccess().catch(()=>{});
+}
 async function init(){
   $('themeToggleBtn').innerHTML = document.documentElement.getAttribute('data-theme')==='dark' ? ICON_SUN : ICON_MOON;
   $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
