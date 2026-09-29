@@ -622,7 +622,7 @@
           <div style="display:flex; gap:14px; font-size:11px; color:var(--muted);">
             <span><span class="floor-dot" style="background:var(--line);"></span> Empty</span>
             <span><span class="floor-dot" style="background:var(--marigold);"></span> Open</span>
-            <span><span class="floor-dot" style="background:var(--clay);"></span> Kitchen waiting</span>
+            <span><span class="floor-dot" style="background:var(--clay);"></span> <span id="floorLegendStationLabel">Kitchen</span> waiting</span>
             <span><span class="floor-dot" style="background:var(--sage);"></span> Ready to pay</span>
           </div>
         </div>
@@ -693,7 +693,7 @@
           <button data-method="mpesa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="7" y1="18" x2="17" y2="18"/></svg>M-Pesa</button>
         </div>
         <div class="action-row" style="grid-template-columns:1fr 1fr 1fr;">
-          <button class="btn-clear" id="sendToKitchenBtn">🍳 Kitchen</button>
+          <button class="btn-clear" id="sendToKitchenBtn">🍳 Kitchen</button> <!-- label swapped to "🍸 Bar" at render time for a pub-only shop, see stationLabel() -->
           <button class="btn-clear" id="printBillBtn">🧾 Print bill</button>
           <button class="btn-pay" id="settleTableBtn" disabled>Settle bill</button>
         </div>
@@ -3755,6 +3755,14 @@ function tableIconSVG(){
 
 function tableServiceEnabled(){ return currentBusinessTypes.includes('restaurant') || currentBusinessTypes.includes('hotel') || currentBusinessTypes.includes('pub'); }
 function tableFloorModeActive(){ return tableServiceEnabled() && tableViewEnabled; }
+// A pub/bar with no restaurant or hotel side has no kitchen at all — drinks come from the
+// counter/bar itself. Every "kitchen" label in the table-service flow (button, status text,
+// floor legend, order ticket) swaps to "Bar" for a pub-only shop; a shop that combines pub
+// with restaurant/hotel still says Kitchen, since it genuinely has one.
+function isBarOnlyShop(){ return currentBusinessTypes.includes('pub') && !currentBusinessTypes.includes('restaurant') && !currentBusinessTypes.includes('hotel'); }
+function stationLabel(){ return isBarOnlyShop() ? 'Bar' : 'Kitchen'; }
+function stationLabelLower(){ return isBarOnlyShop() ? 'bar' : 'kitchen'; }
+function stationEmoji(){ return isBarOnlyShop() ? '🍸' : '🍳'; }
 
 function updateTableServiceVisibility(){
   if(tableFloorModeActive()){
@@ -3773,6 +3781,7 @@ function showFloorView(){
   $('tableFloorView').style.display = 'block';
   $('tableOrderTopBar').style.display = 'none';
   document.querySelector('.till-grid').style.display = 'none';
+  $('floorLegendStationLabel').textContent = stationLabel();
   renderFloorGrid();
 }
 function showTillGridView(){
@@ -3812,7 +3821,7 @@ async function renderFloorGrid(){
       sub = `${itemCount} item(s) · ${timeLabel}`; total = fmtKsh(totalAmt);
       if(t.billPrinted){ statusClass = 'status-ready'; badge = `<span class="fc-badge" style="background:var(--sage);">READY</span>`; }
       else if(unsent>0){ statusClass = 'status-open'; badge = `<span class="fc-badge" style="background:var(--marigold-dark, var(--marigold));">${unsent} NEW</span>`; }
-      else { statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">KITCHEN</span>`; }
+      else { statusClass = 'status-waiting'; badge = `<span class="fc-badge" style="background:var(--clay);">${stationLabel().toUpperCase()}</span>`; }
     } else if(t){
       statusClass = 'status-open'; sub = 'No items yet';
     }
@@ -3918,7 +3927,7 @@ async function adjustTableLineQty(idx, delta){
   if(!table) return;
   const line = table.lines[idx];
   if(!line) return;
-  if(line.sentToKitchen){ toast('Already sent to the kitchen — can\'t be quietly changed here'); return; }
+  if(line.sentToKitchen){ toast(`Already sent to the ${stationLabelLower()} — can't be quietly changed here`); return; }
   line.qty += delta;
   if(line.qty<=0) table.lines.splice(idx,1);
   table.billPrinted = false;
@@ -3932,7 +3941,7 @@ async function removeTableLine(idx){
   if(!table) return;
   const line = table.lines[idx];
   if(!line) return;
-  if(line.sentToKitchen){ toast('Already sent to the kitchen — can\'t be quietly removed here'); return; }
+  if(line.sentToKitchen){ toast(`Already sent to the ${stationLabelLower()} — can't be quietly removed here`); return; }
   table.lines.splice(idx,1);
   table.billPrinted = false;
   await put('open_orders', table);
@@ -3948,7 +3957,8 @@ async function renderTableOrderView(){
   $('tableOrderLabel').textContent = table.label;
   $('tableOrderAvatar').textContent = (table.label||'T').charAt(0).toUpperCase();
   const unsent = table.lines.filter(l=>!l.sentToKitchen).length;
-  $('tableOrderSub').textContent = table.lines.length===0 ? 'Open order' : (unsent>0 ? `${unsent} item(s) not yet sent to kitchen` : 'All items sent to kitchen');
+  $('sendToKitchenBtn').textContent = `${stationEmoji()} ${stationLabel()}`;
+  $('tableOrderSub').textContent = table.lines.length===0 ? 'Open order' : (unsent>0 ? `${unsent} item(s) not yet sent to ${stationLabelLower()}` : `All items sent to ${stationLabelLower()}`);
   const list = $('tableOrderList');
   if(table.lines.length===0){
     list.innerHTML = '<div class="receipt-empty">No items yet — tap a product to add it to this table</div>';
@@ -3975,7 +3985,7 @@ async function renderTableOrderView(){
   $('settleTableBtn').title = canSettle ? '' : 'Print the bill first — the customer sees it before paying';
   let statusMsg = '';
   if(table.lines.length>0){
-    if(unsent>0) statusMsg = `${unsent} item(s) waiting to be sent to the kitchen. `;
+    if(unsent>0) statusMsg = `${unsent} item(s) waiting to be sent to the ${stationLabelLower()}. `;
     statusMsg += table.billPrinted ? '✓ Bill printed — ready to settle.' : 'Print the bill before settling — the customer should see it first.';
   }
   $('tableOrderKitchenStatus').textContent = statusMsg;
@@ -3994,8 +4004,8 @@ $('sendToKitchenBtn').addEventListener('click', async ()=>{
   table.lastSentAt = new Date().toISOString();
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
-  logAudit('Sent to kitchen', `${table.label} — ${newLines.length} item(s)`);
-  toast('Sent to kitchen');
+  logAudit(`Sent to ${stationLabelLower()}`, `${table.label} — ${newLines.length} item(s)`);
+  toast(`Sent to ${stationLabelLower()}`);
   renderTableOrderView();
 });
 
@@ -4078,7 +4088,7 @@ $('settleTableBtn').addEventListener('click', async ()=>{
   const table = tables.find(t=>t.id===activeTableId);
   if(!table || table.lines.length===0) return;
   if(!table.billPrinted){ toast('Print the bill first — the customer sees it before paying'); return; }
-  if(table.lines.some(l=>!l.sentToKitchen) && !confirm('Some items haven\'t been sent to the kitchen yet — settle the bill anyway?')) return;
+  if(table.lines.some(l=>!l.sentToKitchen) && !confirm(`Some items haven't been sent to the ${stationLabelLower()} yet — settle the bill anyway?`)) return;
   // payMethod is a single global set by buttons that live in the walk-in panel — hidden
   // while a table's selected, so it could be silently stuck on 'credit' from an earlier
   // walk-in sale. Customer credit isn't wired into table settlement yet (it never marks
