@@ -2015,7 +2015,7 @@ let PLATFORM_BUSINESS_TYPES = {}; // loaded fresh from the platform-wide table a
 function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...PLATFORM_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
 // Larger, higher-stock-risk businesses get a recurring stock take reminder every 3 days —
 // small dukas/fuel/carwash/gas/water don't carry enough SKUs for this to be worth enforcing.
-const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet','liquor'];
+const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet','liquor','pub'];
 const STOCK_TAKE_INTERVAL_DAYS = 3;
 function stockTakeRequiredForThisShop(){
   return currentBusinessTypes.some(id => STOCK_TAKE_REQUIRED_TYPES.includes(id));
@@ -2434,6 +2434,20 @@ $('mpesaSendBtn').addEventListener('click', async ()=>{
   // isn't always practical.
   if(!tableServiceEnabled() && code.length < 3){
     toast('Enter at least the last 3 digits of the M-Pesa code');
+    $('mpesaCodeInput').focus();
+    return;
+  }
+  // Real M-Pesa confirmation codes are alphanumeric (e.g. "QFT7X9K2"), never pure digits.
+  // A cashier who types the sale amount itself (or another all-digit number) to blast
+  // through this box is the single highest-risk fraud pattern here — it's not proof of
+  // payment, just proof someone typed digits. Block a purely-numeric code outright, and
+  // separately catch one that echoes the amount being charged.
+  if(code && /^[0-9]+$/.test(code)){
+    const totalDigits = String(Math.round(mpesaPending.total));
+    const looksLikeAmount = code === totalDigits || totalDigits.includes(code) || code.includes(totalDigits);
+    toast(looksLikeAmount
+      ? "That looks like the sale amount, not an M-Pesa code — check the customer's confirmation SMS"
+      : 'M-Pesa codes contain letters (e.g. QFT7X9K2) — enter the real code from the confirmation SMS, not digits only');
     $('mpesaCodeInput').focus();
     return;
   }
@@ -5278,6 +5292,14 @@ async function pushToSupabase(item){
       updated_at:p.updated_at || new Date().toISOString(),
     };
   }
+  else if(item.type==='shop_upsert'){
+    // The shops table IS the root record — its own `id` is the shop id, not a shop_id foreign
+    // key like every other table here. merge-duplicates means this is safe to send more than
+    // once (e.g. a later name update, or a retry after a first attempt that actually did land).
+    table='shops'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = { id:p.id, name:p.name, updated_at:p.updated_at || new Date().toISOString() };
+  }
   else {
     // Every recognized item.type has its own explicit branch above — reaching this means a
     // sync_queue entry was created with a type nothing here handles (a typo, or new code added
@@ -5336,7 +5358,20 @@ async function runSyncLoop(){
         }
         await del('sync_queue', item.id);
         log(`✓ Synced ${item.type} (${item.type==='sale'?fmtKsh(item.payload.total):item.payload.name})`,'ok');
-      }catch(e){ log(`✗ Failed to sync ${item.type}: ${e.message} — will retry next cycle.`,'warn'); }
+      }catch(e){
+        // A single bad item (a malformed payload, a row a backend trigger rejects) used to
+        // retry forever, silently, every ~6s, with nothing telling anyone it was stuck — it
+        // never got dropped (data safety first) but it also never surfaced. Keep retrying
+        // (still never lose data) but count attempts, and once an item has failed enough
+        // times in a row to rule out "just a blip", say so loudly once so it actually gets
+        // looked at instead of quietly jamming behind newer items forever.
+        item.failCount = (item.failCount||0) + 1;
+        await put('sync_queue', item);
+        if(item.failCount===10 || item.failCount % 50===0){
+          toast(`⚠ A ${item.type} update has failed to sync ${item.failCount}× — it's still queued and retrying, but check your connection or contact support if this continues.`);
+        }
+        log(`✗ Failed to sync ${item.type} (attempt ${item.failCount}): ${e.message} — will retry next cycle.`,'warn');
+      }
     }
     updatePendingBadge(); renderReports();
   }
@@ -5365,26 +5400,24 @@ async function loadShopIdentity(){
 async function registerNewShop(){
   shopId = makeShopId();
   await put('settings', {key:'shop_id', value:shopId});
-  if(backendLive()){
-    try{
-      await fetch(`${supaUrl}/rest/v1/shops`, {
-        method:'POST', headers: sbHeaders({'Prefer':'return=minimal'}),
-        body: JSON.stringify({id:shopId, name:'New shop'})
-      });
-    }catch(e){ log('Could not register shop with backend yet — will still work locally: '+e.message, 'warn'); }
-  }
+  // This USED to be a one-shot fire-and-forget fetch, skipped entirely if offline and simply
+  // logged-and-abandoned on any transient failure even when online — every other piece of shop
+  // data in this app goes through the durable sync_queue/queuePush retry path, but this one
+  // didn't. The result: a shop fully set up while offline (or hitting one bad network moment at
+  // exactly this instant) could end up permanently invisible to the Platform Admin's shop list
+  // and permanently unfindable by the PIN-portability lookup from any other device — forever,
+  // with no retry and no error surfaced to anyone. Routing it through queuePush closes that gap
+  // the same way every other entity is protected.
+  await queuePush('shop_upsert', {id:shopId, name:'New shop'});
   logAudit('Shop set up');
 }
 // Updates the shops table's name column once a real business name is known, so it's
 // identifiable in the Supabase dashboard among many shops instead of staying "New shop".
+// Durable via queuePush for the same reason registerNewShop() is — a name update made while
+// offline must not just be silently dropped once the device reconnects.
 async function updateShopNameInBackend(name){
-  if(!backendLive() || !shopId) return;
-  try{
-    await fetch(`${supaUrl}/rest/v1/shops?id=eq.${shopId}`, {
-      method:'PATCH', headers: sbHeaders({'Prefer':'return=minimal'}),
-      body: JSON.stringify({name})
-    });
-  }catch(e){ /* cosmetic only — never block the actual profile save over this */ }
+  if(!shopId) return;
+  await queuePush('shop_upsert', {id:shopId, name});
 }
 // Looks up a PIN across EVERY shop on the platform — this is what lets someone type their own
 // PIN on a brand-new device and be found automatically, with no code to type anywhere.
