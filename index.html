@@ -641,8 +641,9 @@
           <div class="avatar">W</div>
           <div><div class="cname">Walk-in customer</div><div class="csub">No loyalty account</div></div>
         </div>
-        <div class="scan-row">
-          <input id="scanInput" type="text" placeholder="Scan barcode, or type to search products…" autocomplete="off">
+        <div class="scan-row" style="display:flex; gap:8px; align-items:center;">
+          <input id="scanInput" type="text" placeholder="Scan barcode, or type to search products…" autocomplete="off" style="flex:1;">
+          <button class="icon-btn" id="liveScanCheckoutBtn" title="Scan with camera" style="flex:none; padding:9px 11px; border:1.5px solid var(--line); border-radius:8px;">📷</button>
         </div>
         <div class="receipt-lines">
           <div class="rline-head"><span>Item</span><span>Qty</span><span>Price</span><span></span></div>
@@ -802,7 +803,10 @@
         <span id="scanProductStatus" style="font-size:11.5px; color:var(--muted); margin-left:8px;"></span>
       </div>
       <div class="form-row">
-        <input id="newSku" placeholder="SKU / barcode">
+        <div style="display:flex; gap:6px;">
+          <input id="newSku" placeholder="SKU / barcode" style="flex:1;">
+          <button class="modal-cancel" id="liveScanStockBtn" title="Scan barcode with camera" style="flex:none; padding:0 12px;">📷</button>
+        </div>
         <input id="newName" placeholder="Product name">
         <select id="newCat">
           <option value="Groceries">Groceries</option>
@@ -1368,6 +1372,24 @@
       <button class="modal-cancel" id="saCancelBtn">Cancel</button>
       <button class="modal-confirm" id="saVerifyBtn">Verify</button>
     </div>
+  </div>
+</div>
+
+<!-- Live camera barcode scanner — a real barcode decode (UPC/EAN/Code128/QR), not the AI
+     photo-of-the-label reader above. Uses the browser's own BarcodeDetector where available
+     (Chrome/Edge on Android and desktop); where it isn't, this is honest about not working
+     rather than pretending to scan and silently doing nothing. Shared by both checkout
+     (adds straight to cart) and Feed Stock (fills the SKU field, and auto-fills the rest of
+     the form from the matching product if one already exists, for a fast restock). -->
+<div class="modal-overlay" id="barcodeScanModal">
+  <div class="modal-box" style="width:min(94vw,380px); text-align:left; padding:16px;">
+    <h3 style="margin-top:0;">Scan barcode</h3>
+    <div style="position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:4/3;">
+      <video id="barcodeScanVideo" autoplay playsinline muted style="width:100%; height:100%; object-fit:cover;"></video>
+      <div style="position:absolute; inset:18%; border:2px solid var(--marigold); border-radius:8px; pointer-events:none;"></div>
+    </div>
+    <p id="barcodeScanStatus" class="hint" style="min-height:16px; margin:10px 0;">Point the camera at the barcode.</p>
+    <button class="modal-cancel" id="barcodeScanCancelBtn" style="width:100%; padding:11px;">Cancel</button>
   </div>
 </div>
 
@@ -3200,6 +3222,79 @@ $('scanProductInput').addEventListener('change', async (e)=>{
     status.textContent = 'Could not read the pack: ' + err.message + ' — this needs the product-scan Edge Function deployed on Supabase.';
   }
   $('scanProductInput').value = '';
+});
+
+// ---------- Live camera barcode scanner — real decode, shared by checkout + Feed Stock ----------
+let barcodeScanStream = null;
+let barcodeScanDetector = null;
+let barcodeScanRAF = null;
+let barcodeScanOnDetect = null;
+function barcodeDetectionSupported(){ return 'BarcodeDetector' in window; }
+async function openBarcodeScanner(onDetect){
+  if(!barcodeDetectionSupported()){
+    toast('Live barcode scanning isn\'t supported in this browser — use a USB/Bluetooth barcode scanner instead, or type the code in by hand.');
+    return;
+  }
+  barcodeScanOnDetect = onDetect;
+  $('barcodeScanStatus').textContent = 'Point the camera at the barcode.';
+  $('barcodeScanModal').classList.add('show');
+  try{
+    barcodeScanStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const video = $('barcodeScanVideo');
+    video.srcObject = barcodeScanStream;
+    await video.play();
+    barcodeScanDetector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code']});
+    const scanFrame = async ()=>{
+      if(!barcodeScanStream) return; // scanner was closed mid-frame — stop the loop
+      try{
+        const codes = await barcodeScanDetector.detect(video);
+        if(codes.length>0){
+          const value = codes[0].rawValue;
+          closeBarcodeScanner();
+          if(barcodeScanOnDetect) barcodeScanOnDetect(value);
+          return;
+        }
+      }catch(e){ /* a single bad frame isn't worth surfacing — just try the next one */ }
+      barcodeScanRAF = requestAnimationFrame(scanFrame);
+    };
+    barcodeScanRAF = requestAnimationFrame(scanFrame);
+  }catch(e){
+    $('barcodeScanStatus').textContent = 'Could not open the camera: ' + (e.message || 'permission denied or no camera available') + '.';
+  }
+}
+function closeBarcodeScanner(){
+  $('barcodeScanModal').classList.remove('show');
+  if(barcodeScanRAF){ cancelAnimationFrame(barcodeScanRAF); barcodeScanRAF = null; }
+  if(barcodeScanStream){ barcodeScanStream.getTracks().forEach(t=>t.stop()); barcodeScanStream = null; }
+  $('barcodeScanVideo').srcObject = null;
+  barcodeScanOnDetect = null;
+}
+$('barcodeScanCancelBtn').addEventListener('click', closeBarcodeScanner);
+$('liveScanCheckoutBtn').addEventListener('click', ()=>{
+  openBarcodeScanner((code)=>{
+    addToCart(code); // exact SKU/barcode match — same path a hardware scanner uses
+    toast('Scanned: '+code);
+  });
+});
+$('liveScanStockBtn').addEventListener('click', ()=>{
+  openBarcodeScanner(async (code)=>{
+    $('newSku').value = code;
+    // If this barcode already belongs to a known product, auto-fill the rest of the form
+    // from it — turns a routine restock into "scan, confirm qty, save" instead of retyping
+    // a name/price/category that's already on record.
+    const products = await getAll('products');
+    const existing = products.find(p=>p.sku===code);
+    if(existing){
+      $('newName').value = existing.name;
+      populateCatSelect();
+      $('newCat').value = existing.cat;
+      $('newPrice').value = existing.price;
+      toast('Matched existing product: '+existing.name+' — enter quantity received and save');
+    } else {
+      toast('New barcode — fill in the product details and save');
+    }
+    $('newQty').focus();
+  });
 });
 
 async function addStock(){
