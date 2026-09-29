@@ -65,15 +65,20 @@
      a dark one. */
   html[data-theme="dark"]{
     --ink:#eef2f2;
-    --bg:#172922;
-    --panel:#21362c;
-    --line:#355746;
-    --muted:#96ad9f;
+    /* Lightened from the original near-black-green (#172922/#21362c/#355746) — dark mode was
+       reading as too heavy/dense against the near-white text, described as "too dark" and
+       "busy" to read comfortably during a long shift. Same hue family, same brand identity,
+       just a noticeably lighter surface so the white text has room to breathe instead of
+       sitting on what was almost black. */
+    --bg:#2b3d36;
+    --panel:#354a40;
+    --line:#4a6b58;
+    --muted:#9fb5a8;
     --sage-dark:#3ddc84;
     --clay:#ff6b57;
     --marigold-pale:#2a2312;
     --accent-text:#3ddc84;
-    --bg-glow:#1d3128;
+    --bg-glow:#31453c;
     --floor-empty-border:color-mix(in srgb, #96ad9f 75%, #eef2f2 25%); /* keep the dark-mode look as-is — gold on the dark green panel reads muddy, not bold */
   }
   html{ color-scheme: light; }
