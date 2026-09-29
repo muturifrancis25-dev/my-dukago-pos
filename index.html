@@ -7011,28 +7011,28 @@ async function tryPinCheckpoint(){
   }
 
   if(pinBuffer.length < MAX_PIN_LENGTH){
-    // A 4-digit entry that matches nothing yet is genuinely ambiguous: it's either a finished,
-    // wrong cashier/supervisor PIN, OR someone still mid-way through typing a 6-digit admin PIN
-    // who simply paused. Admin PINs are LONGER on purpose (see PIN_LENGTHS comment above) —
-    // typing 6 digits on a phone keypad, or pausing to glance at a written-down PIN between the
-    // 4th and 5th digit, routinely takes longer than a fraction of a second. This used to give
-    // up (and WIPE the buffer) after only 750ms, which meant a completely correct 6-digit admin
-    // PIN got silently erased mid-entry any time the person paused for less than a second —
-    // exactly the "PIN not working" / "password not working" reports this was causing. Now:
-    // wait much longer before saying anything at all, and even then only warn — never erase
-    // what's already been typed, so someone genuinely mid-PIN can just keep going.
-    const attemptedPin = pinBuffer;
+    // A 4-digit entry that matches nothing yet is genuinely ambiguous — it's either a finished,
+    // wrong cashier/supervisor PIN, or someone still mid-way through a 6-digit Admin PIN who
+    // simply paused. There is NO way to tell these apart from the digits alone, so this build
+    // no longer GUESSES with a timer at all. Guessing wrong (twice now) is what caused every
+    // "PIN/password not working" report: a real 6-digit PIN got silently erased mid-entry
+    // because the app assumed a pause meant "finished and wrong." The only states that are ever
+    // unambiguous are: (a) it matches something right now — handled above, instantly — or
+    // (b) all 6 digits are in and NOTHING matches anywhere — handled below. Everything in
+    // between is just "still typing," so it does nothing and waits, online or off.
+    //
+    // The one exception: fully offline, with nothing to check against but this device's own
+    // cache, a 4-digit entry that goes nowhere for a while is worth a hint, since it may be a
+    // real PIN this device just hasn't synced yet — but even then it only informs, never erases.
     const wasOffline = !(isOnline && backendLive());
-    pinCheckTimer = setTimeout(()=>{
-      pinCheckTimer = null;
-      if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
-      toast(wasOffline
-        ? "That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on"
-        : "No match yet — if this is a 6-digit Admin PIN, keep typing; otherwise tap Clear and try again");
-      shakePinDots();
-      // Deliberately NOT clearing pinBuffer here — see comment above. A genuinely wrong
-      // 4-digit PIN just sits there, shaken, until the person taps Clear or Back themselves.
-    }, 4000);
+    if(wasOffline){
+      const attemptedPin = pinBuffer;
+      pinCheckTimer = setTimeout(()=>{
+        pinCheckTimer = null;
+        if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
+        toast("That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on. Still typing a 6-digit Admin PIN? Just keep going.");
+      }, 4000);
+    }
     return;
   }
   // Nothing matched at either length, anywhere.
