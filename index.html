@@ -7011,8 +7011,16 @@ async function tryPinCheckpoint(){
   }
 
   if(pinBuffer.length < MAX_PIN_LENGTH){
-    // Give a short window for a 5th/6th digit before treating this as a finished, failed
-    // attempt — but always resolve it one way or another, rather than waiting indefinitely.
+    // A 4-digit entry that matches nothing yet is genuinely ambiguous: it's either a finished,
+    // wrong cashier/supervisor PIN, OR someone still mid-way through typing a 6-digit admin PIN
+    // who simply paused. Admin PINs are LONGER on purpose (see PIN_LENGTHS comment above) —
+    // typing 6 digits on a phone keypad, or pausing to glance at a written-down PIN between the
+    // 4th and 5th digit, routinely takes longer than a fraction of a second. This used to give
+    // up (and WIPE the buffer) after only 750ms, which meant a completely correct 6-digit admin
+    // PIN got silently erased mid-entry any time the person paused for less than a second —
+    // exactly the "PIN not working" / "password not working" reports this was causing. Now:
+    // wait much longer before saying anything at all, and even then only warn — never erase
+    // what's already been typed, so someone genuinely mid-PIN can just keep going.
     const attemptedPin = pinBuffer;
     const wasOffline = !(isOnline && backendLive());
     pinCheckTimer = setTimeout(()=>{
@@ -7020,10 +7028,11 @@ async function tryPinCheckpoint(){
       if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
       toast(wasOffline
         ? "That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on"
-        : 'Incorrect PIN');
+        : "No match yet — if this is a 6-digit Admin PIN, keep typing; otherwise tap Clear and try again");
       shakePinDots();
-      pinBuffer=''; setTimeout(updatePinDots, 200);
-    }, 750);
+      // Deliberately NOT clearing pinBuffer here — see comment above. A genuinely wrong
+      // 4-digit PIN just sits there, shaken, until the person taps Clear or Back themselves.
+    }, 4000);
     return;
   }
   // Nothing matched at either length, anywhere.
