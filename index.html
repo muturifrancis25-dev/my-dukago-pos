@@ -2006,6 +2006,33 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'PUB-BARSNACK-NUTS', name:'Bar Snacks (peanuts)', price:150, stock:25, cat:'Other'},
       {sku:'PUB-ICECUBES-BAG', name:'Ice Cubes (bag)', price:100, stock:20, cat:'Other'},
     ]
+  },
+  wholesaler: {
+    label:'Wholesaler', emoji:'📦',
+    desc:'Bulk FMCG — sold by the carton, sack, crate or dozen to shopkeepers and dukas, not single units to end consumers.',
+    subtitle:'Wholesale', unitLabel:'bulk unit',
+    cats:['Cereals & Grains','Cooking Fat & Oil','Sugar & Salt','Beverages','Soap & Detergents','Other'],
+    colors:{'Cereals & Grains':'#a1662f', 'Cooking Fat & Oil':'#b8862b', 'Sugar & Salt':'#4c7a52', Beverages:'#2f7a8c', 'Soap & Detergents':'#4c3a5c', Other:'#5c6670'},
+    starter:[
+      // Wholesale SKUs are the bulk pack itself (a 50kg sack, a 12x500ml carton) priced and
+      // stocked as one countable unit — same pattern as every other stocked item — because a
+      // wholesaler's stock and pricing decisions genuinely happen at the pack level, not by
+      // breaking it down to pieces at the till.
+      {sku:'WHL-MAIZEFLOUR-90KG', name:'Maize Flour 90kg Bag', price:6500, stock:20, cat:'Cereals & Grains'},
+      {sku:'WHL-RICE-50KG', name:'Pishori Rice 50kg Bag', price:7500, stock:15, cat:'Cereals & Grains'},
+      {sku:'WHL-BEANS-90KG', name:'Beans 90kg Bag', price:9000, stock:10, cat:'Cereals & Grains'},
+      {sku:'WHL-COOKINGOIL-20L', name:'Cooking Oil 20L Jerrican', price:5200, stock:12, cat:'Cooking Fat & Oil'},
+      {sku:'WHL-COOKINGFAT-CTN', name:'Cooking Fat 17kg Carton', price:4800, stock:10, cat:'Cooking Fat & Oil'},
+      {sku:'WHL-SUGAR-50KG', name:'Sugar 50kg Bag', price:6800, stock:14, cat:'Sugar & Salt'},
+      {sku:'WHL-SALT-CTN', name:'Table Salt Carton (24x500g)', price:1200, stock:20, cat:'Sugar & Salt'},
+      {sku:'WHL-SODA-CRATE', name:'Soda Crate (24x300ml)', price:1080, stock:25, cat:'Beverages'},
+      {sku:'WHL-WATER-CTN', name:'Bottled Water Carton (24x500ml)', price:600, stock:30, cat:'Beverages'},
+      {sku:'WHL-TEA-CTN', name:'Tea Leaves Carton (100x50g)', price:4500, stock:8, cat:'Beverages'},
+      {sku:'WHL-BARSOAP-CTN', name:'Bar Soap Carton (52 bars)', price:3200, stock:12, cat:'Soap & Detergents'},
+      {sku:'WHL-WASHPOWDER-CTN', name:'Washing Powder Carton (24x500g)', price:3600, stock:10, cat:'Soap & Detergents'},
+      {sku:'WHL-MATCHES-CTN', name:'Matches Carton (100 boxes)', price:900, stock:15, cat:'Other'},
+      {sku:'WHL-CANDLES-CTN', name:'Candles Carton (100pcs)', price:2200, stock:10, cat:'Other'},
+    ]
   }
 };
 let CUSTOM_BUSINESS_TYPES = {}; // loaded from settings at boot; admin-created types
@@ -2015,7 +2042,7 @@ let PLATFORM_BUSINESS_TYPES = {}; // loaded fresh from the platform-wide table a
 function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...PLATFORM_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
 // Larger, higher-stock-risk businesses get a recurring stock take reminder every 3 days —
 // small dukas/fuel/carwash/gas/water don't carry enough SKUs for this to be worth enforcing.
-const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet','liquor','pub'];
+const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet','liquor','pub','wholesaler'];
 const STOCK_TAKE_INTERVAL_DAYS = 3;
 function stockTakeRequiredForThisShop(){
   return currentBusinessTypes.some(id => STOCK_TAKE_REQUIRED_TYPES.includes(id));
