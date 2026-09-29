@@ -1310,7 +1310,11 @@
   <div class="modal-box">
     <h3 id="pinModalTitle">Admin access</h3>
     <p id="pinModalSub">Enter an admin PIN to open Stock, Reports and Sync setup.</p>
-    <input id="pinInput" type="password" inputmode="numeric" maxlength="6" placeholder="PIN">
+    <!-- Intentionally NOT type="password" — this is a 4-6 digit PIN, not an account password,
+         but type="password" is exactly what makes Chrome/Android's password manager treat it as
+         a real login and start offering to save/autofill it (the "Use saved password?" prompt).
+         -webkit-text-security keeps the same masked-dot look without triggering that. -->
+    <input id="pinInput" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="6" placeholder="PIN" style="-webkit-text-security:disc; text-security:disc;">
     <div class="modal-actions">
       <button class="modal-cancel" id="pinCancelBtn">Cancel</button>
       <button class="modal-confirm" id="pinConfirmBtn">Confirm</button>
