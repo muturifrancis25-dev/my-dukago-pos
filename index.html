@@ -6967,6 +6967,14 @@ $('loginKeypad').addEventListener('click', e=>{
   if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=''; updatePinDots(); return; }
   if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
   if(pinBuffer.length>=MAX_PIN_LENGTH) return;
+  // Cancel any pending "give up on a 4-digit attempt" timer on EVERY keystroke, not only ones
+  // that land on 4 or 6 digits. tryPinCheckpoint() itself only clears it at those two lengths —
+  // a 5th digit lands in between and used to fall straight through a `return` before ever
+  // reaching that clear, leaving the earlier timer counting down regardless. If someone paused
+  // more than ~750ms between their 4th and 6th digit (completely normal typing speed), that
+  // stale timer could fire mid-entry and wipe out a perfectly valid 6-digit PIN before they'd
+  // even finished typing it — exactly the "PIN not recognized" failure this was meant to fix.
+  if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; }
   pinBuffer += k;
   updatePinDots();
   setTimeout(tryPinCheckpoint, 120);
@@ -6974,7 +6982,10 @@ $('loginKeypad').addEventListener('click', e=>{
 // A physical/USB numeric keypad or keyboard works too
 document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
-  if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){ pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120); }
+  if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){
+    if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } // see the click handler's comment above
+    pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120);
+  }
   if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
 });
 
