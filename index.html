@@ -1758,7 +1758,11 @@ const OUTLET_ID = 'outlet_001';
 // Bumped by hand every time this file is updated — the one honest way to tell, at a glance,
 // whether a device is actually running the latest build or a stale cached/leftover copy.
 // If what you see on screen doesn't match this, that's the whole problem right there.
+// BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
+// plain "last updated" date+time shown right on the login screen — easier for a shop owner to
+// read off at a glance and compare than a slug, which is all that screen really needs to say.
 const BUILD_VERSION = '2026-10-03-pin-crashproof-2';
+const BUILD_DATE_LABEL = '03 Oct 2026, 14:10';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2161,6 +2165,22 @@ function openDB(){
   });
 }
 function tx(store, mode='readonly'){ return db.transaction(store,mode).objectStore(store); }
+// A `fetch()` at least fails on its own eventually (and now has a hard timeout too, see
+// fetchT below in the sync code) — but a raw IndexedDB request has no such guarantee. If its
+// transaction never gets to run (queued behind another transaction that itself never finishes
+// committing — a real, documented quirk on some Android WebViews, not a hypothetical), the
+// request's onsuccess/onerror NEITHER ever fires. Not a rejection, not a resolution — the
+// promise just sits there forever, which is a strictly worse failure than a normal error:
+// even a try/catch wrapped around the whole call chain can't catch something that never
+// settles. This wraps every local-database read/write in the app with a hard ceiling, so a
+// stuck transaction surfaces as a real, catchable timeout error within a few seconds instead
+// of being indistinguishable from the app being frozen solid.
+function withDbTimeout(promise, label){
+  return new Promise((resolve, reject)=>{
+    const timer = setTimeout(()=> reject(new Error((label||'This local data operation')+" is stuck — hasn't responded in 6 seconds. Try restarting the app.")), 6000);
+    promise.then(v=>{ clearTimeout(timer); resolve(v); }, e=>{ clearTimeout(timer); reject(e); });
+  });
+}
 // Every one of these used to wire up only `onsuccess`. A failed request (a blocked upgrade,
 // a full-storage quota error, a corrupted record) never called that handler, so the returned
 // promise simply never resolved — it hung forever. Because boot (see init() below) is one
@@ -2168,12 +2188,14 @@ function tx(store, mode='readonly'){ return db.transaction(store,mode).objectSto
 // entire app before the login screen ever appeared, with no error and no way back except
 // wiping local storage — which is exactly the "have to uninstall to log in again" symptom.
 // Wiring `onerror` to reject fixes that: a genuine failure now surfaces as a catchable error
-// instead of a permanent hang.
-function getAll(store){ return new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-function put(store,val){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-function del(store,key){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
-function getOne(store,key){ return new Promise((res,rej)=>{ const r=tx(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-function getSetting(key){ return new Promise((res,rej)=>{ const r=tx('settings').get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+// instead of a permanent hang. withDbTimeout on top of that closes the remaining gap: a
+// transaction that never even STARTS (queued behind a stuck one) never reaches onsuccess OR
+// onerror at all — this guarantees a verdict either way, within seconds.
+function getAll(store){ return withDbTimeout(new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }), 'Reading '+store); }
+function put(store,val){ return withDbTimeout(new Promise((res,rej)=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }), 'Saving to '+store); }
+function del(store,key){ return withDbTimeout(new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }), 'Deleting from '+store); }
+function getOne(store,key){ return withDbTimeout(new Promise((res,rej)=>{ const r=tx(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }), 'Reading '+store); }
+function getSetting(key){ return withDbTimeout(new Promise((res,rej)=>{ const r=tx('settings').get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }), 'Reading setting '+key); }
 
 async function logAudit(action, details=''){
   await put('audit_log', {
@@ -7964,7 +7986,7 @@ if(window.navigator && navigator.credentials && navigator.credentials.preventSil
 }
 async function init(){
   $('themeToggleBtn').innerHTML = document.documentElement.getAttribute('data-theme')==='dark' ? ICON_SUN : ICON_MOON;
-  $('loginBuildTag').textContent = 'build '+BUILD_VERSION; // visible even before signing in, on purpose
+  $('loginBuildTag').textContent = 'Updated: '+BUILD_DATE_LABEL; // visible even before signing in, on purpose
   relocatePlatformControlsToSuperAdminView(); // done once, every load — see the function's own comment
   db = await openDB();
   await loadShopIdentity();
