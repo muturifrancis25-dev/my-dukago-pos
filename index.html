@@ -1785,8 +1785,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-biometric-signin-8';
-const BUILD_DATE_LABEL = '03 Oct 2026, 17:15';
+const BUILD_VERSION = '2026-10-03-security-audit-9';
+const BUILD_DATE_LABEL = '03 Oct 2026, 17:55';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2153,8 +2153,15 @@ let kitchenPaperWidth = '80mm'; // '58mm' | '80mm' | 'a4' — separate kitchen-p
 let gdriveClientId = '', gdriveFileId = null, gdriveAccessToken = null, gdriveAutoOn = false, gdriveAutoTimer = null;
 let currentBusinessTypes = ['duka']; // array — supports combining multiple business types on one till
 let currentUser = null; // {id, name, role}
-let pinModalMode = null; // 'login' | 'admin_override' | 'approval'
+// Bumped every time completeSignIn starts a new session. The deferred shop-deactivation check
+// inside completeSignIn captures this at the start and checks it again before acting — just
+// checking currentUser.id===u.id isn't enough: the SAME person signing out and back in again
+// within that check's round-trip has the same id both times, so the id check alone can't tell
+// a stale, now-irrelevant check apart from a check that's actually about the current session.
+let signInGeneration = 0;
+let pinModalMode = null; // 'login' | 'admin_override' | 'approval' | 'identity_confirm'
 let pendingApprovalAction = null;
+let pinModalExpectedUserId = null; // only used in 'identity_confirm' mode — see openPinModal
 // A plain in-memory copy of this device's staff list, kept warm from the moment the app boots.
 // Checking a typed PIN against this array is pure, synchronous JavaScript — no database, no
 // transaction, no await, nothing that can ever queue behind something else or hang. This is
@@ -2747,6 +2754,13 @@ $('saFingerprintRemoveBtn').addEventListener('click', async ()=>{
   await refreshSaFingerprintPanel();
 });
 $('saExitBtn').addEventListener('click', ()=>{
+  // This used to leave superAdminUnlocked sitting at true for the rest of the session — meaning
+  // whichever shop staff member signed in on this device NEXT silently inherited full
+  // Platform-Administrator-level control (every business-type lockdown check in renderBizGrid
+  // reads this exact flag), with no re-verification and nothing in the audit log distinguishing
+  // them from an actual verified Platform Administrator. "Exit" has to mean exit.
+  superAdminUnlocked = false;
+  superAdminName = null;
   $('superAdminView').style.display = 'none';
   showLoginScreen();
 });
@@ -5519,7 +5533,13 @@ async function pushToSupabase(item){
     }
     return;
   }
-  let table, body, prefer='return=minimal';
+  // Default is merge-duplicates everywhere now — a retry after a successful push whose local
+  // bookkeeping step (marking it synced, deleting the queue item) failed or timed out used to
+  // re-POST a row whose id already exists on the server. Every OTHER type already opted into
+  // merge-duplicates individually; 'sale', 'stock_movement' and 'refund_record' didn't, so a
+  // retry of one of those hit a primary-key conflict, never cleared the queue item, and kept
+  // retrying forever — a real sale that DID reach the server kept being reported as stuck/failed.
+  let table, body, prefer='resolution=merge-duplicates,return=minimal';
   if(item.type==='sale'){
     table='sales';
     // Explicit field mapping, not a blind forward of the local object — the local sale
@@ -5805,7 +5825,11 @@ async function clearLocalShopData(){
     'refunds','payables','customer_debts','removal_requests','purchase_orders','audit_log','open_orders'
   ];
   for(const store of storesToClear){
-    await new Promise(res=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>res(); });
+    // A failed clear() used to resolve as if it succeeded, so a shop switch could silently
+    // leave stale records from the PREVIOUS shop behind, undetected — exactly backwards for a
+    // function whose whole job is shop-isolation. Now it genuinely rejects, so the caller's own
+    // error handling (tryPinCheckpoint's catch) surfaces it instead of quietly carrying on.
+    await new Promise((res,rej)=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error||new Error('Could not clear '+store)); });
   }
   for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_business_types','credit_sales_enabled','last_stock_take_at','table_view_enabled']){
     try{ await del('settings', key); }catch(e){ /* fine if it never existed locally */ }
@@ -6274,8 +6298,24 @@ $('fingerprintEnrollBtn').addEventListener('click', async ()=>{
   if(!sel.value){ toast('No admin/supervisor to enroll'); return; }
   const user = (await getAll('users')).find(u=>u.id===sel.value);
   if(!user) return;
-  await enrollFingerprint(user);
-  await updateFingerprintStatusLabel();
+  // Whoever is currently signed in and has Settings open could otherwise pick ANY admin or
+  // supervisor from the dropdown and enroll their OWN finger under that other person's name —
+  // the sensor only ever proves "a finger touched this device," never WHOSE finger it's
+  // supposed to be. That would let one admin silently gain the fingerprint-gated powers (and,
+  // if sign-in fingerprint is then turned on, the full sign-in) of a colleague, with no PIN
+  // and no consent from them at all. So before the sensor prompt even appears, the actual
+  // person being enrolled must prove it's them by entering THEIR OWN PIN right here — not just
+  // whoever is already signed in on this device.
+  openPinModal({
+    title: 'Confirm it\'s '+user.name,
+    sub: user.name+' must enter their own PIN to prove it\'s really them before enrolling a fingerprint in their name.',
+    mode: 'identity_confirm',
+    expectedUserId: user.id,
+    onVerified: async ()=>{
+      await enrollFingerprint(user);
+      await updateFingerprintStatusLabel();
+    }
+  });
 });
 $('fingerprintRemoveBtn').addEventListener('click', async ()=>{
   const sel = $('fingerprintUserSelect');
@@ -7109,8 +7149,9 @@ $('addStaffBtn').addEventListener('click', async ()=>{
 });
 
 // ---------- Shared PIN modal (login / admin override / supervisor approval) ----------
-function openPinModal({title, sub, mode, onVerified}){
+function openPinModal({title, sub, mode, onVerified, expectedUserId}){
   pinModalMode = mode; pendingApprovalAction = onVerified;
+  pinModalExpectedUserId = expectedUserId || null;
   $('pinModalTitle').textContent = title;
   $('pinModalSub').textContent = sub;
   $('pinInput').value='';
@@ -7127,16 +7168,17 @@ async function verifyPinModal(){
   let match;
   if(pinModalMode==='admin_override') match = users.find(u=>(u.role==='admin'||u.role==='supervisor') && u.pin===entered && u.active!==false);
   else if(pinModalMode==='approval') match = users.find(u=>(u.role==='supervisor'||u.role==='admin') && u.pin===entered && u.active!==false);
+  else if(pinModalMode==='identity_confirm') match = users.find(u=>u.id===pinModalExpectedUserId && u.pin===entered && u.active!==false);
   if(match){
     if(pinModalMode==='admin_override' && !(await requireFingerprintGate(match, 'opening settings/admin controls'))){
       $('pinInput').value=''; $('pinInput').focus();
       return;
     }
     $('pinModal').classList.remove('show');
-    toast((pinModalMode==='approval'?'Approved by ':'Unlocked by ')+match.name);
-    pendingApprovalAction && pendingApprovalAction(match.name);
+    if(pinModalMode!=='identity_confirm') toast((pinModalMode==='approval'?'Approved by ':'Unlocked by ')+match.name);
+    pendingApprovalAction && pendingApprovalAction(match);
   } else {
-    toast('Incorrect PIN');
+    toast(pinModalMode==='identity_confirm' ? "That's not this person's own PIN" : 'Incorrect PIN');
     $('pinInput').value=''; $('pinInput').focus();
   }
 }
@@ -7737,8 +7779,21 @@ async function tryPinCheckpoint(){
         const couldStillBeTyping = await pinPrefixExists(attemptedPin);
         if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return; // stale by the time the check returned
         if(!couldStillBeTyping){
-          toast("This PIN doesn't exist — it isn't registered to any shop.");
-          setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
+          // pinPrefixExists is deliberately scoped to THIS shop once a device has one — but that
+          // means "nothing in this shop starts with these 4 digits" does NOT by itself mean the
+          // PIN doesn't exist anywhere: it could be a complete, valid, active 4-digit PIN that
+          // simply belongs to a different shop (same wrong-shop case the 6-digit path already
+          // handles). One more check, platform-wide, before calling it nonexistent — otherwise
+          // a cashier on the wrong device would be told their real PIN "doesn't exist" at all.
+          const elsewhereMatch = await lookupPinGlobally(attemptedPin);
+          if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return;
+          if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
+            toast('Wrong shop — this PIN belongs to a different shop.');
+            setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
+          } else {
+            toast("This PIN doesn't exist — it isn't registered to any shop.");
+            setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
+          }
           shakePinDots();
           pinBuffer=''; setTimeout(updatePinDots, 200);
         }
@@ -7992,6 +8047,7 @@ async function completeSignIn(u, opts={}){
   // shows immediately (the fast, synchronous part below), and the deactivation check runs
   // afterward in the background, only kicking the person back out in the rare case it's needed.
   currentUser = u;
+  const mySignInGeneration = ++signInGeneration;
   $('loginScreen').classList.add('hide');
   $('setAdminPinScreen').classList.add('hide');
   $('cashierChip').textContent = `${u.name} · ${u.role}`;
@@ -8030,7 +8086,7 @@ async function completeSignIn(u, opts={}){
   // reason to hold up a sign-in that's already succeeded.
   try{
     const shopStatus = await isShopActive();
-    if(shopStatus.active === false && currentUser && currentUser.id === u.id){
+    if(shopStatus.active === false && mySignInGeneration === signInGeneration){
       toast(shopStatus.note || 'This shop has been deactivated — contact your platform administrator');
       logAudit('Sign-in blocked — shop deactivated', u.name);
       currentUser = null;
