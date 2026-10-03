@@ -1785,8 +1785,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-security-audit-9';
-const BUILD_DATE_LABEL = '03 Oct 2026, 17:55';
+const BUILD_VERSION = '2026-10-03-atomic-stock-10';
+const BUILD_DATE_LABEL = '03 Oct 2026, 18:10';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -3228,10 +3228,14 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
   }
   for(const item of cart){
     const p = products.find(x=>x.sku===item.sku);
-    if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
+    const hasStock = p.stock!==null && p.stock!==undefined;
+    if(hasStock) p.stock -= item.qty; // local, optimistic — the till still works instantly, offline included
     lines.push({sku:item.sku,name:item.name,qty:item.qty,price:item.price,cost:(p.cost||0),btype:(p.btype||'duka')});
     await put('products', p);
-    await pushProductUpsert(p);
+    // A sale's stock change is a DELTA push (adjust_stock RPC), not an absolute-value upsert —
+    // see pushStockAdjust's own comment for why: two tills selling the same SKU at once must
+    // both actually land their deduction, not have one silently overwrite the other.
+    if(hasStock) await pushStockAdjust(item.sku, -item.qty);
   }
   const change = tendered - total;
   const sale = {
@@ -3313,10 +3317,12 @@ $('csConfirmBtn').addEventListener('click', async ()=>{
   const lineItems = [];
   for(const item of cart){
     const p = products.find(x=>x.sku===item.sku);
-    if(p.stock!==null && p.stock!==undefined) p.stock -= item.qty;
+    const hasStock = p.stock!==null && p.stock!==undefined;
+    if(hasStock) p.stock -= item.qty;
     lineItems.push({sku:item.sku, name:item.name, qty:item.qty, price:item.price, cost:(p.cost||0)});
     await put('products', p);
-    await pushProductUpsert(p);
+    // Delta push, same reasoning as finalizeSale — see pushStockAdjust's comment.
+    if(hasStock) await pushStockAdjust(item.sku, -item.qty);
   }
   const totalCost = lineItems.reduce((s,l)=>s+(l.qty*l.cost),0);
   const {total} = creditSalePending;
@@ -5533,6 +5539,20 @@ async function pushToSupabase(item){
     }
     return;
   }
+  if(item.type==='stock_adjust'){
+    // Atomic server-side "stock = stock + delta" via the adjust_stock Postgres RPC — see
+    // pushStockAdjust's own comment for why this exists instead of pushing an absolute number.
+    const p = item.payload;
+    const res = await fetchT(`${supaUrl}/rest/v1/rpc/adjust_stock`, {
+      method:'POST', headers: sbHeaders({'Prefer':'return=minimal'}),
+      body: JSON.stringify({p_shop_id: shopId, p_sku: p.sku, p_delta: p.delta}),
+    });
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      throw new Error(`Supabase rejected the stock adjustment: ${res.status}${errText ? ' — '+errText.slice(0,150) : ''}`);
+    }
+    return;
+  }
   // Default is merge-duplicates everywhere now — a retry after a successful push whose local
   // bookkeeping step (marking it synced, deleting the queue item) failed or timed out used to
   // re-POST a row whose id already exists on the server. Every OTHER type already opted into
@@ -5681,6 +5701,22 @@ async function pushProductUpsert(p){
     supplierName:p.supplierName||null, reorderThreshold:(p.reorderThreshold===0?0:(p.reorderThreshold||10)),
     expiryDate:p.expiryDate||null, isRx:p.isRx||false,
   });
+}
+// Stock changes that are genuinely a DELTA (a sale deducting units, a refund putting units
+// back) go through this instead of pushProductUpsert — see 'stock_adjust' in pushToSupabase.
+// pushProductUpsert pushes an ABSOLUTE stock number, computed from whatever this device's
+// local copy happened to say at that moment. Two devices selling the same SKU around the same
+// time each compute their own "stock minus however many I sold" from a slightly stale local
+// snapshot — whichever absolute push reaches the server last simply overwrites the other's
+// deduction, silently losing a real sale's worth of stock movement (or masking an oversell).
+// adjust_stock (a Postgres RPC — see the SQL this requires, given separately) applies the
+// delta IN THE DATABASE itself, as one atomic "stock = stock + delta" update, so two devices'
+// deductions both actually land regardless of ordering. Only used for sale/refund-restock
+// stock movements; a deliberate admin edit (Feed Stock, product edit) still sets an absolute
+// count on purpose — that's a human correcting the number, not two tills racing each other.
+async function pushStockAdjust(sku, delta){
+  if(!delta) return; // nothing actually changed — don't queue a no-op network call
+  await queuePush('stock_adjust', {sku, delta});
 }
 async function runSyncLoop(){
   if(!isOnline || !shopId) return;
@@ -8312,7 +8348,8 @@ $('refundConfirmBtn').addEventListener('click', async ()=>{
       if(p && p.stock!==null && p.stock!==undefined){
         p.stock += line.qty;
         await put('products', p);
-        await pushProductUpsert(p);
+        // Delta push (positive this time — restocking), same reasoning as finalizeSale.
+        await pushStockAdjust(line.sku, line.qty);
       }
     }
   }
