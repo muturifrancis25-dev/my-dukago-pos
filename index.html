@@ -1767,8 +1767,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-pin-not-found-6';
-const BUILD_DATE_LABEL = '03 Oct 2026, 15:35';
+const BUILD_VERSION = '2026-10-03-4digit-not-found-7';
+const BUILD_DATE_LABEL = '03 Oct 2026, 15:48';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -5698,6 +5698,25 @@ async function lookupPinForThisShop(pinValue){
     return (rows && rows.length) ? rows[0] : null;
   }catch(e){ return null; }
 }
+// Answers one narrow question: could this 4-digit entry still be the first 4 digits of some
+// real 6-digit Admin PIN, somewhere this device is allowed to look? Used only to resolve the
+// "stopped at 4 digits, nothing matched" ambiguity after a pause (see tryPinCheckpoint) — true
+// means "keep waiting, they might still be typing," false means "conclusively nothing starts
+// with this, say so." Checks the in-memory cache first (instant, no network), then the backend
+// scoped the same way everything else here is: this shop only once a device has one, the whole
+// platform for a brand-new device that hasn't adopted a shop yet.
+async function pinPrefixExists(prefix){
+  const localHit = cachedUsers.some(u=>u.active!==false && u.pin && u.pin.length>prefix.length && u.pin.startsWith(prefix));
+  if(localHit) return true;
+  if(!(isOnline && backendLive())) return false;
+  try{
+    const scopeFilter = shopId ? `&shop_id=eq.${shopId}` : '';
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(prefix)}*${scopeFilter}&active=eq.true&select=id,pin`, {headers: sbHeaders()});
+    if(!res.ok) return false;
+    const rows = await res.json();
+    return !!(rows && rows.some(r=>r.pin && r.pin.length>prefix.length));
+  }catch(e){ return false; }
+}
 // Pulls one specific shop's data down by shop_id — used once a global PIN lookup reveals
 // which shop a person belongs to.
 // Wipes every shop-scoped local store before this device adopts a different shop's
@@ -7575,6 +7594,30 @@ async function tryPinCheckpoint(){
         toast("That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on. Still typing a 6-digit Admin PIN? Just keep going.");
         setLoginHint("Not found on this device yet — connect once to bring it in, or keep typing a 6-digit Admin PIN.", false);
       }, 4000);
+    } else {
+      // Online: a 4-digit entry that matched nothing yet COULD still be the start of a 6-digit
+      // Admin PIN being typed slowly — but it doesn't have to stay ambiguous. After a short
+      // pause with nothing further typed, ask a narrower question than "is this PIN correct":
+      // does ANYTHING this device can see actually start with these 4 digits? If nothing does,
+      // this was never going anywhere — a real 6-digit PIN always has a real prefix on record
+      // somewhere, so "no prefix match" conclusively means this 4-digit entry is not registered
+      // to any shop, not just "maybe still being typed." Previously this case sat silent forever
+      // when online (the old offline-only timer above never covered it), which is exactly what
+      // the "stuck at 4 dots, nothing happens" report was.
+      const attemptedPin = pinBuffer;
+      const myGeneration = pinCheckGeneration;
+      pinCheckTimer = setTimeout(async ()=>{
+        pinCheckTimer = null;
+        if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return;
+        const couldStillBeTyping = await pinPrefixExists(attemptedPin);
+        if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return; // stale by the time the check returned
+        if(!couldStillBeTyping){
+          toast("This PIN doesn't exist — it isn't registered to any shop.");
+          setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
+          shakePinDots();
+          pinBuffer=''; setTimeout(updatePinDots, 200);
+        }
+      }, 1500);
     }
     return;
   }
