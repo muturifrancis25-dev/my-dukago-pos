@@ -773,12 +773,13 @@
     </div>
     <div class="panel">
       <h3>Business type</h3>
-      <p class="hint">This sets what the sales screen looks like — categories, starter catalog, and whether items are tracked as stock or sold as a service. Switching doesn't delete anything you've already added; it just loads that type's starter items in.</p>
+      <p class="hint">This sets what the sales screen looks like — categories, starter catalog, and whether items are tracked as stock or sold as a service. Changing it doesn't delete anything you've already added; it just loads that type's starter items in. What type(s) this shop is set to is controlled by your platform administrator, not changed here — see Manage Shop on their end.</p>
       <div class="toggle-row">
         <div><b style="font-size:13px; font-family:var(--display);">Combine multiple types</b><br><span class="hint" style="margin:0;">Running more than one business from this counter? Turn this on to pick several — e.g. Duka + Carwash — in one go.</span></div>
         <button class="primary-btn" id="combineModeBtn">Turn on</button>
       </div>
       <p class="hint" id="combineLockedNotice" style="display:none; margin:8px 0 0;">Running more than one business type on this counter is enabled by your platform administrator — contact them if you need this turned on.</p>
+      <p class="hint" id="bizSwitchLockedNotice" style="display:none; margin:8px 0 0;">Switching to a different business type is set by your platform administrator — contact them to change what this shop is registered as.</p>
       <div class="biz-grid" id="bizGrid"></div>
       <button class="btn-pay" id="applyCombineBtn" style="display:none; margin-top:14px; width:100%;">Apply combination</button>
     </div>
@@ -1766,8 +1767,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-update-banner-4';
-const BUILD_DATE_LABEL = '03 Oct 2026, 14:35';
+const BUILD_VERSION = '2026-10-03-shop-lockdown-5';
+const BUILD_DATE_LABEL = '03 Oct 2026, 15:20';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -5669,10 +5670,29 @@ async function updateShopNameInBackend(name){
 }
 // Looks up a PIN across EVERY shop on the platform — this is what lets someone type their own
 // PIN on a brand-new device and be found automatically, with no code to type anywhere.
+// Searches EVERY shop on the platform for this PIN — only ever appropriate for a device that
+// has no shop of its own yet (shopId is still null): that's what lets a brand-new phone find
+// its owner's shop with nothing typed but the PIN itself. Once a device already belongs to a
+// shop, this must never be used to decide who can sign in there — see tryPinCheckpoint, which
+// calls this only when !shopId, and lookupPinForThisShop (below) otherwise.
 async function lookupPinGlobally(pinValue){
   if(!backendLive()) return null;
   try{
     const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()});
+    if(!res.ok) return null;
+    const rows = await res.json();
+    return (rows && rows.length) ? rows[0] : null;
+  }catch(e){ return null; }
+}
+// The shop-locked equivalent: used once this device already belongs to a shop. Only ever
+// matches staff belonging to THIS shop — a PIN that's valid somewhere else on the platform
+// but not for this shop_id is correctly treated here as "not found," never as a reason to
+// switch shops. Covers the ordinary case of a new cashier added on another device of the same
+// shop, whose PIN hasn't synced to this one yet.
+async function lookupPinForThisShop(pinValue){
+  if(!backendLive() || !shopId) return null;
+  try{
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&shop_id=eq.${shopId}&active=eq.true&select=*`, {headers: sbHeaders()});
     if(!res.ok) return null;
     const rows = await res.json();
     return (rows && rows.length) ? rows[0] : null;
@@ -5706,25 +5726,29 @@ async function pullSpecificShop(targetShopId){
   // must never be treated as one: wiping open_orders/sales/etc. here was destroying live
   // open-table bills (and anything else not yet reflected on the server) on a device that
   // was already correctly on this exact shop, just because one PIN hadn't arrived yet.
-  // Only wipe-and-force-pull when the device is genuinely moving to a DIFFERENT shop.
   if(shopId && targetShopId === shopId){
     await pullShopData(false, false); // safe, additive pull — picks up the new staff record, touches nothing else
     logAudit('Synced a staff PIN from another device', 'same shop — no local data was cleared');
     return;
   }
-  const prevShopId = shopId;
-  // If this device still has changes that haven't reached the backend, they belong to
-  // whichever shop is currently loaded — wiping local stores now would lose them forever.
-  // Refuse the switch rather than silently destroying unsynced sales/stock data.
-  const pendingQueue = await getAll('sync_queue');
-  if(pendingQueue.length > 0){
-    throw new Error(`This device has ${pendingQueue.length} unsynced change(s) from its current shop — connect to the internet and let it sync before switching to a different shop's PIN.`);
+  // A device that is ALREADY registered to a shop must never silently reassign itself to a
+  // DIFFERENT one just because someone typed a valid PIN that happens to belong there. This
+  // used to auto-switch (wiping all of this shop's local data and pulling the other shop's
+  // instead) with no confirmation, no role check, nothing — which is exactly how a real PIN
+  // belonging to a real different shop ("Kevo Gas") ended up opening a different shop's
+  // admin screen ("Mirimani Chemist") on a device that was never meant to leave it. A device
+  // only gets to adopt its first shop this way — once shopId is set, moving it to a different
+  // shop is a deliberate action, not an accident of what someone happened to type.
+  if(shopId){
+    const err = new Error('WRONG_SHOP');
+    err.wrongShop = true;
+    throw err;
   }
   shopId = targetShopId;
   await put('settings', {key:'shop_id', value:shopId});
   await clearLocalShopData();
-  await pullShopData(true, true); // force=true — a genuine shop switch must always trust the server completely, never a stale local timestamp comparison
-  logAudit('Auto-joined shop via PIN lookup', prevShopId ? `was ${prevShopId}` : 'first shop on this device');
+  await pullShopData(true, true); // force=true — a genuine first-time shop adoption must always trust the server completely, never a stale local timestamp comparison
+  logAudit('Joined shop via PIN lookup', 'first shop on this device');
 }
 // Checked before saving ANY new or changed PIN — local first (works offline), then the whole
 // platform if online. A PIN must be unique everywhere, not just within one shop, since a PIN
@@ -5739,6 +5763,18 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
   const clashes = (pin) => pin===pinValue || pin.startsWith(pinValue) || pinValue.startsWith(pin);
   const localClash = localUsers.find(u=>clashes(u.pin) && u.id!==excludeUserId && u.active!==false);
   if(localClash) return {unique:false, ownerName:localClash.name, checkedRemote:false};
+  // BUG FIXED HERE: this used to return `checkedRemote: backendLive()` at the very end,
+  // regardless of whether the remote check inside the try block below actually SUCCEEDED.
+  // backendLive() only checks that a Supabase URL/key look correctly formatted — it says
+  // nothing about whether the network call itself went through. So a flaky connection that
+  // made the fetch throw (caught below, intentionally, so one failed check doesn't crash PIN
+  // setup) was still being reported to the caller as "verified unique against the whole
+  // platform," when in fact nothing was ever confirmed. That is precisely how two different
+  // shops, each set up during a moment of bad connectivity, could end up with the exact same
+  // admin PIN — the setup screen's own "needs a connection to verify" gate (which exists
+  // specifically to prevent this) was being satisfied by a check that had actually failed.
+  // remoteCheckSucceeded only becomes true once real rows have actually come back.
+  let remoteCheckSucceeded = false;
   if(backendLive()){
     try{
       // Exact match, plus: if pinValue is 4 digits, any 6-digit PIN starting with it;
@@ -5751,14 +5787,16 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
           ? fetchT(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(pinValue)}*&active=eq.true&select=id,name,pin`, {headers: sbHeaders()})
           : fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(shortPrefix)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
       ]);
-      const exactRows = exactRes.ok ? await exactRes.json() : [];
-      const prefixRows = prefixRes.ok ? await prefixRes.json() : [];
+      if(!exactRes.ok || !prefixRes.ok) throw new Error('Supabase rejected the uniqueness check ('+exactRes.status+'/'+prefixRes.status+')');
+      const exactRows = await exactRes.json();
+      const prefixRows = await prefixRes.json();
+      remoteCheckSucceeded = true; // only reached once both queries genuinely came back
       const allRows = [...exactRows, ...prefixRows];
       const remoteClash = allRows.find(r=>r.id!==excludeUserId);
       if(remoteClash) return {unique:false, ownerName:remoteClash.name, checkedRemote:true};
-    }catch(e){ /* couldn't verify remotely — fall through as locally-unique-but-unconfirmed */ }
+    }catch(e){ /* couldn't verify remotely — checkedRemote correctly stays false below, caller must block */ }
   }
-  return {unique:true, checkedRemote: backendLive()};
+  return {unique:true, checkedRemote: remoteCheckSucceeded};
 }
 
 // ---------- Pull sync — the other half that makes this genuinely bidirectional ----------
@@ -6697,6 +6735,7 @@ async function renderBizGrid(){
   if(combineMode && combineSelection.length===0) combineSelection = [...currentBusinessTypes];
   $('combineModeBtn').style.display = superAdminUnlocked ? '' : 'none';
   $('combineLockedNotice').style.display = superAdminUnlocked ? 'none' : 'block';
+  $('bizSwitchLockedNotice').style.display = superAdminUnlocked ? 'none' : 'block';
   const types = allBusinessTypes();
   const grid = $('bizGrid'); grid.innerHTML='';
   Object.keys(types).forEach(id=>{
@@ -6721,6 +6760,13 @@ async function renderBizGrid(){
         return;
       }
       if(isActive && currentBusinessTypes.length===1){ toast('Already using '+t.label); return; }
+      // Switching business type used to be self-service for any shop admin — tap a different
+      // card, done, no approval. In practice that meant a shop registered as a Chemist could
+      // just turn itself into a Pub/Bar from its own till, no oversight at all. This is now
+      // locked the same way combine mode already was: a shop's own admin can look, but changing
+      // what the shop actually IS is a Platform Administrator decision, made from Manage Shop →
+      // Business types (which already exists and already does exactly this, remotely).
+      if(!superAdminUnlocked){ toast('Changing business type is set by your platform administrator — contact them to change this shop\'s type.'); return; }
       await applyBusinessTypes([id]);
       renderBizGrid();
     });
@@ -7402,8 +7448,12 @@ async function tryPinCheckpoint(){
   const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
   if(localMatch){ cachedUsers = users; await attemptLogin(localMatch); return; }
 
-  // Not found locally. If online, check the whole platform — this is what lets someone
-  // type their own real PIN on a fresh device and be found automatically, no code needed.
+  // Not found locally. If online, check the backend — but WHICH check depends on whether this
+  // device already belongs to a shop. A brand-new device (no shopId yet) is allowed to find
+  // its owner's shop anywhere on the platform, from nothing but the PIN — that's deliberate,
+  // it's what lets someone set up a new phone with zero extra steps. A device that ALREADY
+  // belongs to a shop must NEVER be moved to a different one just because a valid PIN for that
+  // other shop happened to be typed — see pullSpecificShop's own guard for why this matters.
   if(isOnline && backendLive()){
     // Only surface anything for a FULL, completed PIN — a 4-digit partial entry hits this same
     // remote check too (it's genuinely ambiguous, see below), and a toast there would fire on
@@ -7412,23 +7462,62 @@ async function tryPinCheckpoint(){
     // is worth saying out loud, especially now that it can take up to several seconds on a weak
     // connection before timing out — silence during that wait is what reads as "not responding."
     if(pinBuffer.length===MAX_PIN_LENGTH) toast('Checking…');
-    const remoteMatch = await lookupPinGlobally(pinBuffer);
-    if(stale()) return; // a newer attempt already resolved (matched locally or is mid-flight) — don't act on this one
-    if(remoteMatch){
-      try{
-        await pullSpecificShop(remoteMatch.shop_id);
-        if(stale()) return; // someone already signed in through a different, faster attempt meanwhile
-        const freshUsers = await getAll('users');
-        const freshMatch = freshUsers.find(x => x.pin===pinBuffer && x.active!==false);
-        await attemptLogin(freshMatch); // local data now has this person in it — try again
-      }catch(e){
-        if(stale()) return;
-        toast(e.message || 'Could not switch to that shop on this device');
-        setLoginHint(e.message || 'Could not switch to that shop on this device', true);
-        shakePinDots();
-        pinBuffer=''; setTimeout(updatePinDots, 200);
+
+    if(!shopId){
+      // Brand-new device — find this PIN's shop anywhere on the platform, same as before.
+      const remoteMatch = await lookupPinGlobally(pinBuffer);
+      if(stale()) return;
+      if(remoteMatch){
+        try{
+          await pullSpecificShop(remoteMatch.shop_id);
+          if(stale()) return;
+          const freshUsers = await getAll('users');
+          const freshMatch = freshUsers.find(x => x.pin===pinBuffer && x.active!==false);
+          await attemptLogin(freshMatch);
+        }catch(e){
+          if(stale()) return;
+          toast(e.message || 'Could not set up this shop on this device');
+          setLoginHint(e.message || 'Could not set up this shop on this device', true);
+          shakePinDots();
+          pinBuffer=''; setTimeout(updatePinDots, 200);
+        }
+        return;
       }
-      return;
+    } else {
+      // This device already belongs to a shop — only ever look for this PIN WITHIN that shop
+      // (covers a new cashier added on another device of the same shop, not yet synced here).
+      const sameShopMatch = await lookupPinForThisShop(pinBuffer);
+      if(stale()) return;
+      if(sameShopMatch){
+        try{
+          await pullSpecificShop(sameShopMatch.shop_id); // same-shop branch — safe, additive, never wipes
+          if(stale()) return;
+          const freshUsers = await getAll('users');
+          const freshMatch = freshUsers.find(x => x.pin===pinBuffer && x.active!==false);
+          await attemptLogin(freshMatch);
+        }catch(e){
+          if(stale()) return;
+          toast(e.message || 'Could not sync that staff record to this device');
+          setLoginHint(e.message || 'Could not sync that staff record to this device', true);
+          shakePinDots();
+          pinBuffer=''; setTimeout(updatePinDots, 200);
+        }
+        return;
+      }
+      // Not found in THIS shop. For a completed PIN, check (read-only, no switch) whether it
+      // belongs to some OTHER shop on the platform, purely to give an honest, specific message
+      // instead of a generic "Incorrect PIN" when the real issue is "right PIN, wrong device."
+      if(pinBuffer.length===MAX_PIN_LENGTH){
+        const elsewhereMatch = await lookupPinGlobally(pinBuffer);
+        if(stale()) return;
+        if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
+          toast('Wrong shop — this PIN belongs to a different shop.');
+          setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
+          shakePinDots();
+          pinBuffer=''; setTimeout(updatePinDots, 200);
+          return;
+        }
+      }
     }
   } else if(isOnline && !backendLive()){
     // Genuinely online, but this device has no backend configured at all — a 6-digit Admin PIN
