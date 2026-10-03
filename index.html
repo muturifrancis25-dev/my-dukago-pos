@@ -1695,7 +1695,14 @@
 <!-- Manage Shop — Super Admin only. Lets the platform administrator set a shop's active
      business types remotely (self-service combining is locked to Super Admin now — see
      the combine-mode gate), and reset a locked-out admin's PIN when a shop is stuck. -->
-<div class="modal-overlay" id="manageShopModal">
+<!-- z-index:270 is deliberate and required: the Super Admin screen this opens from
+     (#superAdminView) is itself z-index:260, above the default .modal-overlay z-index:250 — so
+     without this override, this modal was genuinely opening every time (the .show class was
+     correctly applied, the data loaded, everything worked), just stacked BEHIND the Super Admin
+     screen and therefore completely invisible. Tapping Manage looked like nothing happened at
+     all, until Exit hid the Super Admin screen and revealed the modal that had been sitting
+     there the whole time. -->
+<div class="modal-overlay" id="manageShopModal" style="z-index:270;">
   <div class="modal-box" style="width:min(92vw,420px); text-align:left; max-height:80vh; overflow-y:auto;">
     <h3 style="text-align:center;">Manage shop</h3>
     <p class="hint" id="manageShopName" style="text-align:center; margin:0 0 14px;">—</p>
@@ -1792,8 +1799,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-daily-stocktake-salon-11';
-const BUILD_DATE_LABEL = '03 Oct 2026, 20:15';
+const BUILD_VERSION = '2026-10-03-manage-shop-zindex-12';
+const BUILD_DATE_LABEL = '03 Oct 2026, 20:22';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
