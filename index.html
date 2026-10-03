@@ -2611,7 +2611,7 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
   if(!pin){ $('saLoginError').textContent = 'Enter a PIN'; return; }
   $('saLoginError').textContent = 'Checking…';
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/super-admin-login`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/super-admin-login`, {
       method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify({pin}),
     });
     const data = await res.json().catch(()=>({}));
@@ -2651,7 +2651,7 @@ async function loadAllShopsList(){
   const box = $('saShopsList');
   box.innerHTML = 'Loading…';
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?select=*&order=created_at.desc`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?select=*&order=created_at.desc`, {headers: mpesaFunctionHeaders()});
     if(!res.ok){ box.innerHTML = '<p class="hint">Could not load — check the connection.</p>'; return; }
     const shops = await res.json();
     $('saShopCount').textContent = shops.length;
@@ -2690,7 +2690,7 @@ async function loadAllShopsList(){
         const verb = currentlyActive ? 'deactivate' : 'reactivate';
         if(!confirm(`${verb.charAt(0).toUpperCase()+verb.slice(1)} "${shopName}"? ${currentlyActive ? 'Its admin and staff will be signed out and blocked from signing back in until reactivated. Their data stays intact.' : 'This shop will be able to sign in and sync again.'}`)) return;
         try{
-          let res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+          let res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
             method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive, license_status: currentlyActive ? 'suspended' : 'active'}),
           });
           if(!res.ok){
@@ -2699,7 +2699,7 @@ async function loadAllShopsList(){
             // the unknown columns, which would otherwise take the basic Activate/Deactivate
             // control down with it. Fall back to the plain `active` flag alone so this core
             // moderation control keeps working regardless of migration status.
-            res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+            res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
               method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive}),
             });
             if(!res.ok){ toast('Could not update — check the connection'); return; }
@@ -2741,7 +2741,7 @@ async function renderManageShopLicense(targetShopId){
   $('manageShopLicenseStatus').value = 'active';
   $('manageShopLicenseNote').value = '';
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=license_status,license_note,active`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=license_status,license_note,active`, {headers: mpesaFunctionHeaders()});
     if(!res.ok) return; // schema may not have the columns yet on an older backend — falls back to the defaults above
     const rows = await res.json();
     if(!rows.length) return;
@@ -2757,13 +2757,13 @@ $('manageShopSaveLicenseBtn').addEventListener('click', async ()=>{
   const blocking = status==='suspended' || status==='cancelled';
   if(blocking && !confirm(`Set "${$('manageShopName').textContent}" to ${status}? Every device at that shop will be signed out and blocked from signing back in until you change this back to Trial or Active. Their data stays intact.`)) return;
   try{
-    let res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+    let res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
       method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({license_status: status, license_note: note || null, active: !blocking}),
     });
     if(!res.ok){
       // Same migration fallback as the quick toggle above — without the license_status/
       // license_note columns yet, at least still apply the active/suspended switch itself.
-      res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+      res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
         method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !blocking}),
       });
       if(!res.ok){ toast('Could not save — check the connection'); return; }
@@ -2780,7 +2780,7 @@ $('manageShopSaveLicenseBtn').addEventListener('click', async ()=>{
 
 async function renderManageShopTableView(targetShopId){
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.table_view_enabled&select=value`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.table_view_enabled&select=value`, {headers: mpesaFunctionHeaders()});
     const rows = res.ok ? await res.json() : [];
     // Defaults to on — matches the local default so a shop that's never had this
     // setting saved yet shows the same behavior it would actually get.
@@ -2791,7 +2791,7 @@ $('manageShopSaveTableViewBtn').addEventListener('click', async ()=>{
   if(!manageShopTargetId) return;
   const enabled = $('manageShopTableViewCheckbox').checked;
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
       method:'POST', headers: mpesaFunctionHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),
       body: JSON.stringify({shop_id:manageShopTargetId, key:'table_view_enabled', value:enabled, updated_at:new Date().toISOString()}),
     });
@@ -2807,7 +2807,7 @@ async function renderManageShopBizTypes(targetShopId){
   const box = $('manageShopBizTypes');
   box.innerHTML = 'Loading…';
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.active_business_types&select=value`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.active_business_types&select=value`, {headers: mpesaFunctionHeaders()});
     const rows = res.ok ? await res.json() : [];
     const current = rows.length ? rows[0].value : ['duka'];
     const types = allBusinessTypes(); // built-in + platform types — a shop's own custom types aren't visible platform-wide, so aren't offered here
@@ -2826,7 +2826,7 @@ $('manageShopSaveBizBtn').addEventListener('click', async ()=>{
   const checked = [...$('manageShopBizTypes').querySelectorAll('input[data-biz-id]:checked')].map(el=>el.dataset.bizId);
   if(checked.length===0){ toast('Select at least one business type'); return; }
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
       method:'POST', headers: mpesaFunctionHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),
       body: JSON.stringify({shop_id:manageShopTargetId, key:'active_business_types', value:checked, updated_at:new Date().toISOString()}),
     });
@@ -2842,7 +2842,7 @@ async function renderManageShopAdminInfo(targetShopId){
   const box = $('manageShopAdminInfo');
   box.textContent = 'Loading…';
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${targetShopId}&role=eq.admin&active=eq.true&select=id,name,pin`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${targetShopId}&role=eq.admin&active=eq.true&select=id,name,pin`, {headers: mpesaFunctionHeaders()});
     const rows = res.ok ? await res.json() : [];
     if(rows.length===0){ box.textContent = 'No active admin account found for this shop.'; return; }
     box.innerHTML = rows.map(a=>`${a.name} — current PIN ${a.pin}`).join('<br>');
@@ -2861,10 +2861,10 @@ $('manageShopResetPinBtn').addEventListener('click', async ()=>{
     const uniqueCheck = await isPinGloballyUnique(newPin, null);
     if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
     if(!uniqueCheck.checkedRemote){ toast('Could not verify this PIN against every shop — check the connection and try again'); return; }
-    const staffRes = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${manageShopTargetId}&role=eq.admin&active=eq.true&select=id`, {headers: mpesaFunctionHeaders()});
+    const staffRes = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${manageShopTargetId}&role=eq.admin&active=eq.true&select=id`, {headers: mpesaFunctionHeaders()});
     const rows = staffRes.ok ? await staffRes.json() : [];
     if(rows.length===0){ toast('No active admin account found for this shop'); return; }
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?id=eq.${rows[0].id}`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?id=eq.${rows[0].id}`, {
       method:'PATCH', headers: mpesaFunctionHeaders({'Prefer':'return=minimal'}),
       body: JSON.stringify({pin:newPin, updated_at:new Date().toISOString()}),
     });
@@ -2896,7 +2896,7 @@ $('saAddBizTypeBtn').addEventListener('click', async ()=>{
   cats.forEach((c,i)=> colors[c] = BIZ_COLOR_PALETTE[i % BIZ_COLOR_PALETTE.length]);
   const id = label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') + '-' + Date.now().toString().slice(-4);
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types`, {
       method:'POST', headers: mpesaFunctionHeaders(),
       body: JSON.stringify({id, label, emoji, description:label, cats, colors, created_by: superAdminName}),
     });
@@ -2914,7 +2914,7 @@ function mpesaFunctionHeaders(extra){
   return Object.assign({'Content-Type':'application/json', 'Authorization':'Bearer '+PLATFORM_SUPABASE_KEY, 'apikey':PLATFORM_SUPABASE_KEY}, extra||{});
 }
 async function triggerStkPush(phone, amount){
-  const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/mpesa-initiate`, {
+  const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/mpesa-initiate`, {
     method:'POST', headers: mpesaFunctionHeaders(),
     body: JSON.stringify({
       phone, amount, shopId,
@@ -2934,7 +2934,7 @@ async function pollStkStatus(checkoutRequestId){
     await new Promise(r=>setTimeout(r, intervalMs));
     if(mpesaStkCancelled) return {status:'cancelled'};
     try{
-      const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_requests?checkout_request_id=eq.${encodeURIComponent(checkoutRequestId)}&select=status,mpesa_receipt,result_desc`, {
+      const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_requests?checkout_request_id=eq.${encodeURIComponent(checkoutRequestId)}&select=status,mpesa_receipt,result_desc`, {
         headers: mpesaFunctionHeaders(),
       });
       if(res.ok){
@@ -3011,7 +3011,7 @@ async function loadC2bMatchList(){
   list.innerHTML = '<p style="text-align:center; color:var(--muted); font-size:12px; padding:14px 0;">Checking for recent payments…</p>';
   try{
     const since = new Date(Date.now() - 20*60*1000).toISOString();
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?matched=eq.false&created_at=gt.${encodeURIComponent(since)}&order=created_at.desc&limit=15`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?matched=eq.false&created_at=gt.${encodeURIComponent(since)}&order=created_at.desc&limit=15`, {
       headers: mpesaFunctionHeaders(),
     });
     if(!res.ok) throw new Error('Could not reach the payment backend');
@@ -3038,7 +3038,7 @@ async function confirmC2bMatch(payment){
   if(!mpesaPending) return;
   const {subtotal, tax, total} = mpesaPending;
   try{
-    await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?trans_id=eq.${encodeURIComponent(payment.trans_id)}`, {
+    await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?trans_id=eq.${encodeURIComponent(payment.trans_id)}`, {
       method:'PATCH', headers: mpesaFunctionHeaders(),
       body: JSON.stringify({matched:true}),
     });
@@ -3238,7 +3238,7 @@ $('scanProductInput').addEventListener('change', async (e)=>{
   try{
     const imageDataUrl = await compressImageToDataUrl(file, 1400, 0.8);
     const catList = CATS.filter(c=>c!=='All');
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/product-scan`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/product-scan`, {
       method:'POST', headers: mpesaFunctionHeaders(),
       body: JSON.stringify({imageDataUrl, categories: catList}),
     });
@@ -3683,7 +3683,7 @@ async function generateAndPrintPO(supplierName){
   let poNumber;
   if(backendLive() && shopId){
     try{
-      const res = await fetch(`${supaUrl}/rest/v1/rpc/next_po_number`, {
+      const res = await fetchT(`${supaUrl}/rest/v1/rpc/next_po_number`, {
         method:'POST', headers: sbHeaders(), body: JSON.stringify({p_shop_id: shopId})
       });
       poNumber = res.ok ? await res.json() : null;
@@ -4617,10 +4617,10 @@ async function openInvoiceOcrReview(payable){
   try{
     const products = await getAll('products');
     const catalogForMatching = products.map(p=>({sku:p.sku, name:p.name}));
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/functions/v1/invoice-ocr`, {
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/invoice-ocr`, {
       method:'POST', headers: mpesaFunctionHeaders(),
       body: JSON.stringify({ imageDataUrl: payable.photo, catalog: catalogForMatching }),
-    });
+    }, 45000); // a photo + AI read genuinely takes longer than an ordinary API call — don't cut it off early
     const data = await res.json().catch(()=>({}));
     if(!res.ok || data.error) throw new Error(data.error || 'Could not read the invoice');
     // Expected shape: { items: [{ matchedSku, name, qty, cost }], unmatchedCount }
@@ -5378,12 +5378,30 @@ $('saveSupaBtn').addEventListener('click', ()=>{
 function backendLive(){
   return !!(supaUrl && supaKey && /^https:\/\/.+\.supabase\.co\/?$/.test(supaUrl));
 }
+// Every network call in this app — PIN login included — used to be a bare `fetchT()` with no
+// timeout at all. On a genuinely bad connection (weak signal, captive portal, a tower handover
+// mid-request — completely normal on Kenyan mobile data, not an edge case), a `fetchT()` doesn't
+// fail fast: it just hangs, sometimes for minutes, with zero error and zero feedback. A person
+// typing their PIN while that happens sees exactly what looks like "the app isn't responding" —
+// dots filled in, nothing happens — when the real cause is one stuck network request several
+// layers down. This wraps every `fetchT()` in the app with a hard timeout so a bad connection
+// fails LOUDLY and quickly instead of hanging silently: every other code path here already
+// treats a failed/rejected fetch as "couldn't reach the server" and falls back sensibly (works
+// offline, retries later) — it just never used to get the chance to, because the promise never
+// settled at all.
+function fetchT(url, opts, timeoutMs){
+  const ms = timeoutMs || 12000;
+  const controller = new AbortController();
+  const timer = setTimeout(()=> controller.abort(), ms);
+  const mergedOpts = Object.assign({}, opts, {signal: controller.signal});
+  return fetch(url, mergedOpts).finally(()=> clearTimeout(timer));
+}
 function sbHeaders(extra){
   return Object.assign({'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, extra||{});
 }
 async function pushToSupabase(item){
   if(item.type==='product_delete'){
-    const res = await fetch(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&sku=eq.${encodeURIComponent(item.payload.sku)}`, {
+    const res = await fetchT(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&sku=eq.${encodeURIComponent(item.payload.sku)}`, {
       method:'DELETE', headers: sbHeaders({'Prefer':'return=minimal'}),
     });
     if(!res.ok){
@@ -5501,7 +5519,7 @@ async function pushToSupabase(item){
     // sync log as an error, not as a row quietly mis-filed into the wrong table.
     throw new Error(`Unknown sync item type "${item.type}" — nothing in pushToSupabase() handles it`);
   }
-  const res = await fetch(`${supaUrl}/rest/v1/${table}`, {
+  const res = await fetchT(`${supaUrl}/rest/v1/${table}`, {
     method:'POST', headers: sbHeaders({'Prefer':prefer}),
     body: JSON.stringify(body)
   });
@@ -5616,7 +5634,7 @@ async function updateShopNameInBackend(name){
 async function lookupPinGlobally(pinValue){
   if(!backendLive()) return null;
   try{
-    const res = await fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()});
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()});
     if(!res.ok) return null;
     const rows = await res.json();
     return (rows && rows.length) ? rows[0] : null;
@@ -5689,10 +5707,10 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
       // covers both directions without needing a substring scan across the whole table.
       const shortPrefix = pinValue.length===6 ? pinValue.slice(0,4) : pinValue;
       const [exactRes, prefixRes] = await Promise.all([
-        fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
+        fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
         pinValue.length===4
-          ? fetch(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(pinValue)}*&active=eq.true&select=id,name,pin`, {headers: sbHeaders()})
-          : fetch(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(shortPrefix)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
+          ? fetchT(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(pinValue)}*&active=eq.true&select=id,name,pin`, {headers: sbHeaders()})
+          : fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(shortPrefix)}&active=eq.true&select=id,name`, {headers: sbHeaders()}),
       ]);
       const exactRows = exactRes.ok ? await exactRes.json() : [];
       const prefixRows = prefixRes.ok ? await prefixRes.json() : [];
@@ -5719,7 +5737,7 @@ async function pullShopData(fullPull, force){
     // the same way: sign the open session out the moment this device learns about it.
     if(currentUser){
       try{
-        const shopRes = await fetch(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: sbHeaders()});
+        const shopRes = await fetchT(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: sbHeaders()});
         if(shopRes.ok){
           const shopRows = await shopRes.json();
           if(shopRows.length && shopRows[0].active===false){
@@ -5734,7 +5752,7 @@ async function pullShopData(fullPull, force){
       }catch(e){ /* ambiguous/offline — never block on a check we couldn't actually make */ }
     }
     // Staff — never overwrite a PIN with something older; skip re-pulling your own live session
-    const staffRes = await fetch(`${supaUrl}/rest/v1/staff?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const staffRes = await fetchT(`${supaUrl}/rest/v1/staff?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(staffRes.ok){
       const remoteStaff = await staffRes.json();
       const localStaff = await getAll('users');
@@ -5760,7 +5778,7 @@ async function pullShopData(fullPull, force){
       }
     }
     // Products / stock
-    const prodRes = await fetch(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const prodRes = await fetchT(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(prodRes.ok){
       const remoteProducts = await prodRes.json();
       const localProducts = await getAll('products');
@@ -5782,7 +5800,7 @@ async function pullShopData(fullPull, force){
       }
     }
     // Shared settings (business profile, business type, VAT, receipt prefs)
-    const settingsRes = await fetch(`${supaUrl}/rest/v1/shop_settings?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const settingsRes = await fetchT(`${supaUrl}/rest/v1/shop_settings?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(settingsRes.ok){
       const remoteSettings = await settingsRes.json();
       let pulledBusinessTypes = null;
@@ -5819,7 +5837,7 @@ async function pullShopData(fullPull, force){
     // relying on the existing per-row "already have it?" check below is the correct trade for
     // a small shop's transaction volume — a future optimization would add a real server-side
     // insert timestamp/sequence column to filter on instead, but that needs a schema change.
-    const salesRes = await fetch(`${supaUrl}/rest/v1/sales?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const salesRes = await fetchT(`${supaUrl}/rest/v1/sales?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(salesRes.ok){
       const remoteSales = await salesRes.json();
       for(const rs of remoteSales){
@@ -5828,7 +5846,7 @@ async function pullShopData(fullPull, force){
       }
     }
     // Refunds from OTHER devices too — same reasoning and same fix as sales above
-    const refundsRes = await fetch(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const refundsRes = await fetchT(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(refundsRes.ok){
       const remoteRefunds = await refundsRes.json();
       for(const rr of remoteRefunds){
@@ -5838,7 +5856,7 @@ async function pullShopData(fullPull, force){
     }
     // Payables (what the shop owes suppliers) — these get EDITED (marked paid), so merge by
     // updated_at rather than "skip if it already exists" the way sales/refunds do.
-    const payRes = await fetch(`${supaUrl}/rest/v1/payables?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const payRes = await fetchT(`${supaUrl}/rest/v1/payables?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(payRes.ok){
       const remotePayables = await payRes.json();
       const localPayables = await getAll('payables');
@@ -5850,7 +5868,7 @@ async function pullShopData(fullPull, force){
       }
     }
     // Customer debts (what customers owe the shop) — same merge-by-updated_at reasoning
-    const debtRes = await fetch(`${supaUrl}/rest/v1/customer_debts?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const debtRes = await fetchT(`${supaUrl}/rest/v1/customer_debts?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(debtRes.ok){
       const remoteDebts = await debtRes.json();
       const localDebts = await getAll('customer_debts');
@@ -5864,7 +5882,7 @@ async function pullShopData(fullPull, force){
     // Cashier removal requests awaiting review — same merge reasoning, keyed off whichever
     // of requested/reviewed happened most recently, since a review is what updates a record
     // after it's created.
-    const rmvRes = await fetch(`${supaUrl}/rest/v1/cart_removal_requests?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const rmvRes = await fetchT(`${supaUrl}/rest/v1/cart_removal_requests?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(rmvRes.ok){
       const remoteRmv = await rmvRes.json();
       const localRmv = await getAll('removal_requests');
@@ -5878,7 +5896,7 @@ async function pullShopData(fullPull, force){
       }
     }
     // Purchase orders — created on one device (e.g. via Order Now), visible on all others.
-    const poRes = await fetch(`${supaUrl}/rest/v1/purchase_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const poRes = await fetchT(`${supaUrl}/rest/v1/purchase_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(poRes.ok){
       const remotePOs = await poRes.json();
       const localPOs = await getAll('purchase_orders');
@@ -5896,7 +5914,7 @@ async function pullShopData(fullPull, force){
     }
     // Table orders — a waiter on one device opens a table, another device (or the same
     // one after a reload) needs to see it and its kitchen-sent status stay in sync.
-    const toRes = await fetch(`${supaUrl}/rest/v1/table_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const toRes = await fetchT(`${supaUrl}/rest/v1/table_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(toRes.ok){
       const remoteTables = await toRes.json();
       const localTables = await getAll('open_orders');
@@ -5917,7 +5935,7 @@ async function pullShopData(fullPull, force){
     // is now visible from any other device/admin dashboard at that shop, not just the till it
     // was performed on. Stock-take records are append-only (never edited after submission), so
     // this is a simple "pull anything not already here" rather than a last-write-wins merge.
-    const stRes = await fetch(`${supaUrl}/rest/v1/stock_takes?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    const stRes = await fetchT(`${supaUrl}/rest/v1/stock_takes?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(stRes.ok){
       const remoteTakes = await stRes.json();
       const localTakes = await getAll('stock_takes');
@@ -6222,7 +6240,7 @@ async function backupToGoogleDrive(){
       const body =
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`+
         `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
-      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      const res = await fetchT('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method:'POST',
         headers:{ 'Authorization':'Bearer '+gdriveAccessToken, 'Content-Type':`multipart/related; boundary=${boundary}` },
         body
@@ -6232,7 +6250,7 @@ async function backupToGoogleDrive(){
       gdriveFileId = data.id;
       await put('settings', {key:'gdrive_file_id', value:gdriveFileId});
     } else {
-      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`, {
+      const res = await fetchT(`https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`, {
         method:'PATCH',
         headers:{ 'Authorization':'Bearer '+gdriveAccessToken, 'Content-Type':'application/json' },
         body: content
@@ -6444,7 +6462,7 @@ async function loadCustomBusinessTypes(){
 async function loadPlatformBusinessTypes(){
   PLATFORM_BUSINESS_TYPES = {};
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types?select=*`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types?select=*`, {headers: mpesaFunctionHeaders()});
     if(res.ok){
       const rows = await res.json();
       rows.forEach(r => {
@@ -7311,6 +7329,13 @@ async function tryPinCheckpoint(){
   // Not found locally. If online, check the whole platform — this is what lets someone
   // type their own real PIN on a fresh device and be found automatically, no code needed.
   if(isOnline && backendLive()){
+    // Only surface anything for a FULL, completed PIN — a 4-digit partial entry hits this same
+    // remote check too (it's genuinely ambiguous, see below), and a toast there would fire on
+    // every normal pause mid-way through typing a 6-digit Admin PIN, which is exactly the kind
+    // of premature feedback that caused confusion before. A finished entry checking the network
+    // is worth saying out loud, especially now that it can take up to several seconds on a weak
+    // connection before timing out — silence during that wait is what reads as "not responding."
+    if(pinBuffer.length===MAX_PIN_LENGTH) toast('Checking…');
     const remoteMatch = await lookupPinGlobally(pinBuffer);
     if(stale()) return; // a newer attempt already resolved (matched locally or is mid-flight) — don't act on this one
     if(remoteMatch){
@@ -7526,7 +7551,7 @@ async function isShopActive(){
   if(!shopId) return {active:true}; // nothing to check yet — a device mid-setup isn't anyone's business to block
   if(!isOnline || !backendLive()) return {active:null};
   try{
-    const res = await fetch(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: mpesaFunctionHeaders()});
     if(!res.ok) return {active:null};
     const rows = await res.json();
     if(!rows.length) return {active:null}; // shop record not found remotely — don't block on ambiguity
