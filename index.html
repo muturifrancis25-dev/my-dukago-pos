@@ -578,6 +578,11 @@
 </head>
 <body>
 
+<div id="updateReadyBar" style="display:none; position:fixed; top:0; left:0; right:0; z-index:500; background:var(--marigold); color:#1a1a1a; font-weight:700; font-size:13px; padding:10px 14px; align-items:center; justify-content:center; gap:12px; text-align:center;">
+  <span>A newer version of this app is ready.</span>
+  <button type="button" id="updateReadyReloadBtn" style="padding:6px 14px; border-radius:7px; border:1.5px solid #1a1a1a; background:#1a1a1a; color:var(--marigold); font-weight:700; font-size:12.5px; cursor:pointer;">Reload now</button>
+</div>
+
 <header>
   <div class="left">
     <div class="mark" id="headerMark"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="4.2" width="19" height="2.6" rx="0.6" fill="var(--marigold)"/><rect x="3.3" y="6.8" width="0.9" height="1.4" rx="0.3" fill="var(--marigold)"/><rect x="19.8" y="6.8" width="0.9" height="1.4" rx="0.3" fill="var(--marigold)"/><rect x="4.2" y="7.8" width="15.6" height="11.8" rx="1" fill="currentColor"/><rect x="6.2" y="9.6" width="4" height="4" fill="var(--bg)"/><line x1="8.2" y1="9.6" x2="8.2" y2="13.6" stroke="currentColor" stroke-width="0.5"/><line x1="6.2" y1="11.6" x2="10.2" y2="11.6" stroke="currentColor" stroke-width="0.5"/><path d="M13 19.6 L13 10.6 Q13 9.6 14 9.6 L16.5 9.6 Q17.5 9.6 17.5 10.6 L17.5 19.6 Z" fill="var(--bg)"/></svg></div>
@@ -1761,8 +1766,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-pin-memcache-3';
-const BUILD_DATE_LABEL = '03 Oct 2026, 14:25';
+const BUILD_VERSION = '2026-10-03-update-banner-4';
+const BUILD_DATE_LABEL = '03 Oct 2026, 14:35';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -8083,7 +8088,45 @@ $('bootErrorResetBtn').addEventListener('click', async ()=>{
 // runs unconditionally, independent of whether the rest of boot succeeds.
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js')
-    .then(()=>log('Offline app-shell caching enabled.','ok'))
+    .then(reg=>{
+      log('Offline app-shell caching enabled.','ok');
+      // A fix shipped to the server doesn't reach a device until that device's service worker
+      // actually re-checks for one — which, left to the browser's own defaults, can be rare if
+      // the app is reopened from the background instead of a genuine cold start, or if a reload
+      // happens to land mid-update. Someone testing a just-shipped fix, seeing it work, then
+      // seeing the SAME old failure again later, is exactly what that looks like from outside —
+      // not the code "forgetting" anything, just an old already-loaded copy still running
+      // because nothing ever told it a newer one existed. This makes that update check active
+      // and its result visible, instead of passive and invisible.
+      const notifyUpdateReady = ()=>{
+        const bar = $('updateReadyBar');
+        if(bar) bar.style.display = 'flex';
+      };
+      $('updateReadyReloadBtn').addEventListener('click', ()=>{
+        // sw.js already calls skipWaiting()+clients.claim() on its own, so the new worker takes
+        // over as soon as it activates — this just needs to ask it to, then reload once it has.
+        if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
+        let reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+          if(reloaded) return; reloaded = true;
+          location.reload();
+        });
+        setTimeout(()=>{ if(!reloaded){ reloaded = true; location.reload(); } }, 2000); // don't get stuck waiting forever if the event never fires
+      });
+      if(reg.waiting && navigator.serviceWorker.controller) notifyUpdateReady();
+      reg.addEventListener('updatefound', ()=>{
+        const nw = reg.installing;
+        if(!nw) return;
+        nw.addEventListener('statechange', ()=>{
+          if(nw.state==='installed' && navigator.serviceWorker.controller) notifyUpdateReady();
+        });
+      });
+      // Check for a newer build whenever the app regains focus (covers "reopened from
+      // background" — the most common real case, since a fully cold launch already checks on
+      // its own) and on a slow background interval while it stays open.
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) reg.update().catch(()=>{}); });
+      setInterval(()=> reg.update().catch(()=>{}), 10*60*1000);
+    })
     .catch(e=>log('Service worker not registered — page reload still needs network this time: '+e.message,'warn'));
 }
 bootWithRecovery();
