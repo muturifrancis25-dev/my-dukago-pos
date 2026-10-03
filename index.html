@@ -1148,6 +1148,10 @@
           <button class="primary-btn" id="fingerprintRemoveBtn" style="background:var(--muted);">Remove</button>
         </div>
       </div>
+      <div class="toggle-row" style="margin-top:8px;">
+        <div><b style="font-size:13px; font-family:var(--display);">Sign in with fingerprint</b><br><span class="hint" style="margin:0;">When on, this person can tap their fingerprint on this device's login screen instead of typing their PIN. Needs enrolling above first.</span></div>
+        <input type="checkbox" id="fingerprintLoginToggle">
+      </div>
     </div>
 
     <div class="panel">
@@ -1328,6 +1332,7 @@
       </div>
     </div>
     <p style="text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
+    <button type="button" class="primary-btn" id="loginFingerprintBtn" style="display:none; width:100%; margin:0 0 12px;">👆 Sign in with fingerprint</button>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
@@ -1398,6 +1403,7 @@
   <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
     <h3>Platform Administrator</h3>
     <p class="hint">This is separate from any shop's own admin login — for platform-level access only.</p>
+    <button type="button" class="primary-btn" id="saFingerprintBtn" style="display:none; width:100%; margin:0 0 10px;">👆 Use fingerprint instead</button>
     <label>Password</label>
     <input id="saPinInput" type="password" placeholder="Enter your Super Admin password" style="width:100%; padding:11px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--mono); letter-spacing:1px;">
     <p id="saLoginError" style="color:var(--clay); font-size:11.5px; min-height:16px; margin:0 0 10px;"></p>
@@ -1438,6 +1444,18 @@
       <button class="modal-cancel" id="saExitBtn" style="padding:7px 14px; font-size:12px;">Exit</button>
     </div>
     <p class="hint" id="saCurrentShopLine" style="margin:0 0 16px;">—</p>
+
+    <div class="panel">
+      <h3>Fingerprint sign-in (this device)</h3>
+      <p class="hint">Enroll your fingerprint on this device so next time you can unlock Platform Administrator access with a tap instead of typing your password. Platform access controls a lot — this is stored only on this device and never synced, same as the fingerprint security staff enroll for their own shops.</p>
+      <div class="toggle-row">
+        <div id="saFingerprintStatusLabel"><b style="font-size:13px;">Not checked yet</b></div>
+        <div style="display:flex; gap:8px;">
+          <button class="primary-btn" id="saFingerprintEnrollBtn">Enroll on this device</button>
+          <button class="primary-btn" id="saFingerprintRemoveBtn" style="background:var(--muted);">Remove</button>
+        </div>
+      </div>
+    </div>
 
     <div class="panel">
       <h3>All shops on this platform</h3>
@@ -1767,8 +1785,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-4digit-not-found-7';
-const BUILD_DATE_LABEL = '03 Oct 2026, 15:48';
+const BUILD_VERSION = '2026-10-03-biometric-signin-8';
+const BUILD_DATE_LABEL = '03 Oct 2026, 17:15';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2637,14 +2655,32 @@ wireSecretTapGesture('mainLoginMark');
 // the primary, more hidden path; this exists so getting in never depends on tap-timing working
 // out on a particular device.
 $('platformAdminLinkWrap').addEventListener('click', openSuperAdminModal);
+const PLATFORM_ADMIN_FP_ID = 'platform_admin'; // fixed device_security key — there's no local user record for this identity to key off instead
 function openSuperAdminModal(){
   if(superAdminUnlocked){ toast('Already verified as Platform Administrator ('+superAdminName+')'); return; }
   $('saPinInput').value = '';
   $('saLoginError').textContent = '';
   $('superAdminModal').classList.add('show');
+  updateSaFingerprintButtonVisibility();
   $('saPinInput').focus();
 }
 $('saCancelBtn').addEventListener('click', ()=> $('superAdminModal').classList.remove('show'));
+// Shared by both the password path (below) and the fingerprint path — one place that actually
+// opens the Super Admin screen, so the two can never quietly drift apart.
+function enterSuperAdminView(name){
+  superAdminUnlocked = true;
+  superAdminName = name || 'Platform Admin';
+  $('superAdminModal').classList.remove('show');
+  $('loginScreen').classList.add('hide');
+  $('saCurrentShopLine').textContent = shopId
+    ? `Currently showing settings for the shop loaded on this device (${businessProfile.storeName || 'unnamed shop'}).`
+    : `No shop is set up on this device yet — settings below apply once one is.`;
+  $('superAdminView').style.display = 'flex';
+  toast('Verified — welcome, '+superAdminName);
+  loadAllShopsList();
+  renderPlatformBizTypesList();
+  refreshSaFingerprintPanel();
+}
 $('saVerifyBtn').addEventListener('click', async ()=>{
   const pin = $('saPinInput').value.trim();
   if(!pin){ $('saLoginError').textContent = 'Enter a PIN'; return; }
@@ -2652,29 +2688,63 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
   try{
     const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/super-admin-login`, {
       method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify({pin}),
-    });
+    }, 7000);
     const data = await res.json().catch(()=>({}));
     if(!res.ok || !data.ok){
       $('saLoginError').textContent = data.error || 'Incorrect PIN';
       return;
     }
-    superAdminUnlocked = true;
-    superAdminName = data.name || 'Platform Admin';
-    $('superAdminModal').classList.remove('show');
-    logAudit('Platform Administrator verified on this device', superAdminName);
-    // Straight into the dedicated Super Admin screen — no shop credentials needed at all,
-    // which is the whole point: this identity is platform-wide, not tied to any one shop.
-    $('loginScreen').classList.add('hide');
-    $('saCurrentShopLine').textContent = shopId
-      ? `Currently showing settings for the shop loaded on this device (${businessProfile.storeName || 'unnamed shop'}).`
-      : `No shop is set up on this device yet — settings below apply once one is.`;
-    $('superAdminView').style.display = 'flex';
-    toast('Verified — welcome, '+superAdminName);
-    loadAllShopsList();
-    renderPlatformBizTypesList();
+    logAudit('Platform Administrator verified on this device', data.name || 'Platform Admin');
+    enterSuperAdminView(data.name);
   }catch(e){
     $('saLoginError').textContent = 'Could not reach the platform admin service — check your connection';
   }
+});
+// Fingerprint, as an alternative to the password above — same local, device-only trust model as
+// staff fingerprints (see the comment at requireFingerprintGate). The backend already verified
+// this exact person's password once, at the moment they enrolled below; this never re-asks the
+// backend, it only confirms "the same device, the same finger, as whoever enrolled."
+async function updateSaFingerprintButtonVisibility(){
+  const btn = $('saFingerprintBtn');
+  if(!btn) return;
+  btn.style.display = 'none';
+  if(!webauthnSupported()) return;
+  const rec = await getDeviceSecurity(PLATFORM_ADMIN_FP_ID);
+  if(rec && rec.credentialId && rec.loginEnabled) btn.style.display = 'block';
+}
+$('saFingerprintBtn').addEventListener('click', async ()=>{
+  const rec = await getDeviceSecurity(PLATFORM_ADMIN_FP_ID);
+  if(!rec || !rec.credentialId){ $('saLoginError').textContent = 'No fingerprint enrolled on this device yet'; return; }
+  $('saLoginError').textContent = 'Checking fingerprint…';
+  const ok = await verifyFingerprint({id: PLATFORM_ADMIN_FP_ID});
+  if(!ok){ $('saLoginError').textContent = 'Fingerprint not verified — try again, or use your password'; return; }
+  $('saLoginError').textContent = '';
+  logAudit('Platform Administrator verified on this device', (rec.name||'Platform Admin')+' (fingerprint)');
+  enterSuperAdminView(rec.name);
+});
+async function refreshSaFingerprintPanel(){
+  const label = $('saFingerprintStatusLabel');
+  if(!label) return;
+  if(!webauthnSupported()){
+    label.innerHTML = '<b style="font-size:13px; color:var(--muted);">Not supported on this device/browser</b>';
+    return;
+  }
+  const rec = await getDeviceSecurity(PLATFORM_ADMIN_FP_ID);
+  label.innerHTML = (rec && rec.credentialId)
+    ? '<b style="font-size:13px; color:var(--accent-text);">Enrolled on this device ✓</b>'
+    : '<b style="font-size:13px; color:var(--muted);">Not enrolled on this device</b>';
+}
+$('saFingerprintEnrollBtn').addEventListener('click', async ()=>{
+  if(!superAdminUnlocked) return;
+  const ok = await enrollFingerprint({id: PLATFORM_ADMIN_FP_ID, name: superAdminName});
+  // Unlike a staff enrollment (action-gate only by default), enrolling HERE has one purpose —
+  // skipping the password on this screen — so it turns login-use on immediately, not off-by-default.
+  if(ok) await setFingerprintLoginEnabled(PLATFORM_ADMIN_FP_ID, true);
+  await refreshSaFingerprintPanel();
+});
+$('saFingerprintRemoveBtn').addEventListener('click', async ()=>{
+  await removeFingerprintEnrollment(PLATFORM_ADMIN_FP_ID);
+  await refreshSaFingerprintPanel();
 });
 $('saExitBtn').addEventListener('click', ()=>{
   $('superAdminView').style.display = 'none';
@@ -5678,7 +5748,11 @@ async function updateShopNameInBackend(name){
 async function lookupPinGlobally(pinValue){
   if(!backendLive()) return null;
   try{
-    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()});
+    // 5s, not the usual 12s default — this runs on the sign-in hot path, where a long hang
+    // before any feedback at all is exactly what reads as "frozen." A genuinely slow network
+    // can still succeed on the user's next keystroke/retry; failing fast here and saying so is
+    // far better than a silent multi-second wait with zero sign of life on screen.
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&active=eq.true&select=*`, {headers: sbHeaders()}, 5000);
     if(!res.ok) return null;
     const rows = await res.json();
     return (rows && rows.length) ? rows[0] : null;
@@ -5692,7 +5766,7 @@ async function lookupPinGlobally(pinValue){
 async function lookupPinForThisShop(pinValue){
   if(!backendLive() || !shopId) return null;
   try{
-    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&shop_id=eq.${shopId}&active=eq.true&select=*`, {headers: sbHeaders()});
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=eq.${encodeURIComponent(pinValue)}&shop_id=eq.${shopId}&active=eq.true&select=*`, {headers: sbHeaders()}, 5000);
     if(!res.ok) return null;
     const rows = await res.json();
     return (rows && rows.length) ? rows[0] : null;
@@ -5711,7 +5785,7 @@ async function pinPrefixExists(prefix){
   if(!(isOnline && backendLive())) return false;
   try{
     const scopeFilter = shopId ? `&shop_id=eq.${shopId}` : '';
-    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(prefix)}*${scopeFilter}&active=eq.true&select=id,pin`, {headers: sbHeaders()});
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(prefix)}*${scopeFilter}&active=eq.true&select=id,pin`, {headers: sbHeaders()}, 5000);
     if(!res.ok) return false;
     const rows = await res.json();
     return !!(rows && rows.some(r=>r.pin && r.pin.length>prefix.length));
@@ -6174,8 +6248,27 @@ async function updateFingerprintStatusLabel(){
   label.innerHTML = enrolled
     ? '<b style="font-size:13px; color:var(--accent-text);">Enrolled on this device ✓</b>'
     : '<b style="font-size:13px; color:var(--muted);">Not enrolled on this device</b>';
+  const loginToggle = $('fingerprintLoginToggle');
+  if(loginToggle){
+    const rec = await getDeviceSecurity(sel.value);
+    loginToggle.checked = !!(rec && rec.loginEnabled);
+    loginToggle.disabled = !enrolled;
+  }
 }
 $('fingerprintUserSelect').addEventListener('change', updateFingerprintStatusLabel);
+$('fingerprintLoginToggle').addEventListener('change', async (e)=>{
+  const sel = $('fingerprintUserSelect');
+  if(!sel.value){ e.target.checked = false; return; }
+  const enrolled = await fingerprintEnrolledFor(sel.value);
+  if(!enrolled){ toast('Enroll a fingerprint on this device for this person first'); e.target.checked = false; return; }
+  const ok = await setFingerprintLoginEnabled(sel.value, e.target.checked);
+  if(!ok){ e.target.checked = !e.target.checked; return; }
+  const user = (await getAll('users')).find(u=>u.id===sel.value);
+  toast(e.target.checked
+    ? 'Fingerprint sign-in turned on for '+(user?user.name:'this person')+' on this device'
+    : 'Fingerprint sign-in turned off for '+(user?user.name:'this person')+' on this device');
+  await updateLoginFingerprintButton(); // the login screen's own button reflects this immediately
+});
 $('fingerprintEnrollBtn').addEventListener('click', async ()=>{
   const sel = $('fingerprintUserSelect');
   if(!sel.value){ toast('No admin/supervisor to enroll'); return; }
@@ -6187,8 +6280,9 @@ $('fingerprintEnrollBtn').addEventListener('click', async ()=>{
 $('fingerprintRemoveBtn').addEventListener('click', async ()=>{
   const sel = $('fingerprintUserSelect');
   if(!sel.value) return;
-  await removeFingerprintEnrollment(sel.value);
+  await removeFingerprintEnrollment(sel.value); // also wipes any login-sign-in permission — nothing left to grant it with
   await updateFingerprintStatusLabel();
+  await updateLoginFingerprintButton();
 });
 async function saveVatSettings(showToast){
   const rate = parseFloat($('vatRateInput').value);
@@ -7096,11 +7190,18 @@ async function enrollFingerprint(user){
       }
     });
     if(!cred) return false;
+    // loginEnabled starts false even on a fresh enrollment — enrolling here only ever unlocks
+    // the sensitive-ACTION gate (refunds, instant removals) by default, same as before. Using
+    // this same fingerprint to skip PIN entry entirely at sign-in is a separate, explicit
+    // opt-in (see setFingerprintLoginEnabled) — two different levels of trust, so turning one
+    // on should never silently turn the other on too.
     await put('device_security', {
       userId: user.id,
+      name: user.name || null, // kept for recall where there's no local user record to re-look-up by id (Platform Administrator)
       credentialId: b64urlFromBuffer(cred.rawId),
       enrolledAt: new Date().toISOString(),
       deviceLabel: navigator.userAgent.slice(0,120),
+      loginEnabled: false,
     });
     toast('Fingerprint enrolled on this device for '+(user.name||'this account'));
     return true;
@@ -7111,6 +7212,16 @@ async function enrollFingerprint(user){
 }
 async function removeFingerprintEnrollment(userId){
   try{ await del('device_security', userId); toast('Fingerprint enrollment removed from this device'); }catch(e){}
+}
+// Turns the sign-in (skip-PIN) use of an already-enrolled fingerprint on or off, without
+// touching the enrollment itself. Read-modify-write on the existing record; does nothing (and
+// reports failure) if nothing's enrolled yet — there's no fingerprint to grant that power to.
+async function setFingerprintLoginEnabled(userId, enabled){
+  const rec = await getDeviceSecurity(userId);
+  if(!rec || !rec.credentialId) return false;
+  rec.loginEnabled = !!enabled;
+  await put('device_security', rec);
+  return true;
 }
 async function verifyFingerprint(user){
   const rec = await getDeviceSecurity(user.id);
@@ -7429,7 +7540,21 @@ let pinCheckTimer = null;
 // every await in this function, alongside `currentUser` (set the moment any login succeeds).
 let pinCheckGeneration = 0;
 async function tryPinCheckpoint(){
-  if(!PIN_LENGTHS.includes(pinBuffer.length)) return;
+  if(!PIN_LENGTHS.includes(pinBuffer.length)){
+    // 1, 2, 3, or 5 digits in: never a length any real PIN can be checked at (staff PINs are
+    // always exactly 4, Admin PINs always exactly 6), so there's nothing to look up yet — but
+    // it's still worth confirming the app is alive if someone pauses here, rather than only
+    // ever speaking up at 4 or 6 digits. Informational only: never clears what's been typed,
+    // since they're very likely still mid-entry.
+    if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
+    const attemptedPin = pinBuffer;
+    pinCheckTimer = setTimeout(()=>{
+      pinCheckTimer = null;
+      if(pinBuffer !== attemptedPin || currentUser) return;
+      setLoginHint(`Incomplete PIN — ${pinBuffer.length} digit(s) so far. Staff PINs are 4 digits, Admin PINs are 6.`, false);
+    }, 1200);
+    return;
+  }
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
   const myGeneration = ++pinCheckGeneration;
   const stale = () => myGeneration !== pinCheckGeneration || !!currentUser;
@@ -7593,7 +7718,7 @@ async function tryPinCheckpoint(){
         if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
         toast("That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on. Still typing a 6-digit Admin PIN? Just keep going.");
         setLoginHint("Not found on this device yet — connect once to bring it in, or keep typing a 6-digit Admin PIN.", false);
-      }, 4000);
+      }, 2200);
     } else {
       // Online: a 4-digit entry that matched nothing yet COULD still be the start of a 6-digit
       // Admin PIN being typed slowly — but it doesn't have to stay ambiguous. After a short
@@ -7617,7 +7742,7 @@ async function tryPinCheckpoint(){
           shakePinDots();
           pinBuffer=''; setTimeout(updatePinDots, 200);
         }
-      }, 1500);
+      }, 900);
     }
     return;
   }
@@ -7775,10 +7900,54 @@ function startSceneRotation(){
 }
 function stopSceneRotation(){ if(sceneTimer){ clearInterval(sceneTimer); sceneTimer=null; } }
 
+// Remembers, per device, the last person who actually signed in — deliberately NEVER cleared
+// by signing out/locking (unlike my_duka_session_uid, which exists only to auto-restore an
+// active session and IS cleared then). This is what lets the login screen offer "sign in with
+// fingerprint" for the right person before any PIN has been typed at all: there's no way to
+// know who's standing at the till otherwise. Purely a convenience pointer — every actual
+// permission check still goes through this device's own device_security record for that id.
+function rememberLastDeviceUser(userId){
+  try{ localStorage.setItem('my_duka_last_device_user', userId); }catch(e){}
+}
+async function updateLoginFingerprintButton(){
+  const btn = $('loginFingerprintBtn');
+  if(!btn) return;
+  btn.style.display = 'none';
+  btn.dataset.uid = '';
+  btn.textContent = '👆 Sign in with fingerprint';
+  if(!webauthnSupported()) return;
+  let lastUid = null;
+  try{ lastUid = localStorage.getItem('my_duka_last_device_user'); }catch(e){ return; }
+  if(!lastUid) return;
+  const user = cachedUsers.find(u=>u.id===lastUid && u.active!==false)
+    || (await getAll('users').catch(()=>[])).find(u=>u.id===lastUid && u.active!==false);
+  if(!user || (user.role!=='admin' && user.role!=='supervisor')) return; // cashiers were never offered this — see requireFingerprintGate's own role gate
+  const rec = await getDeviceSecurity(lastUid);
+  if(!rec || !rec.credentialId || !rec.loginEnabled) return;
+  btn.dataset.uid = lastUid;
+  btn.textContent = '👆 Sign in as '+user.name+' with fingerprint';
+  btn.style.display = 'block';
+}
+$('loginFingerprintBtn').addEventListener('click', async ()=>{
+  const uid = $('loginFingerprintBtn').dataset.uid;
+  if(!uid) return;
+  const user = cachedUsers.find(u=>u.id===uid) || (await getAll('users')).find(u=>u.id===uid);
+  if(!user){ toast('That account is no longer on this device'); await updateLoginFingerprintButton(); return; }
+  setLoginHint('Touch the fingerprint sensor…', false);
+  const ok = await verifyFingerprint(user);
+  if(!ok){
+    setLoginHint('Fingerprint not recognized — try again, or enter the PIN below.', true);
+    toast('Fingerprint not verified');
+    return;
+  }
+  setLoginHint('');
+  await attemptLogin(user);
+});
 function showLoginScreen(){
   $('loginScreen').classList.remove('hide');
   pinBuffer=''; updatePinDots();
   startSceneRotation();
+  updateLoginFingerprintButton();
 }
 async function attemptLogin(u){
   // Takes the already-matched user directly now, instead of re-querying IndexedDB for the
@@ -7808,7 +7977,7 @@ async function isShopActive(){
   if(!shopId) return {active:true}; // nothing to check yet — a device mid-setup isn't anyone's business to block
   if(!isOnline || !backendLive()) return {active:null};
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: mpesaFunctionHeaders()}, 5000);
     if(!res.ok) return {active:null};
     const rows = await res.json();
     if(!rows.length) return {active:null}; // shop record not found remotely — don't block on ambiguity
@@ -7816,13 +7985,12 @@ async function isShopActive(){
   }catch(e){ return {active:null}; }
 }
 async function completeSignIn(u, opts={}){
-  const shopStatus = await isShopActive();
-  if(shopStatus.active === false){
-    toast(shopStatus.note || 'This shop has been deactivated — contact your platform administrator');
-    logAudit('Sign-in blocked — shop deactivated', u.name);
-    showLoginScreen();
-    return;
-  }
+  // The shop-deactivation check used to run BEFORE anything on screen changed — meaning every
+  // single sign-in, online or off, waited on a full network round trip before the till screen
+  // ever appeared. On a weak connection that's exactly the multi-second "is it stuck?" delay
+  // Frank flagged. A deactivated shop is rare; a normal sign-in is not — so the till screen now
+  // shows immediately (the fast, synchronous part below), and the deactivation check runs
+  // afterward in the background, only kicking the person back out in the rare case it's needed.
   currentUser = u;
   $('loginScreen').classList.add('hide');
   $('setAdminPinScreen').classList.add('hide');
@@ -7840,6 +8008,7 @@ async function completeSignIn(u, opts={}){
     renderCart();
   }catch(e){ log('Cart resume failed: '+e.message, 'warn'); }
   try{ localStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
+  rememberLastDeviceUser(u.id); // separate from the line above — this one survives sign-out, see its own comment
   if(opts.isNewSetup){
     toast('Shop set up! Signed in as Admin.');
     setTimeout(()=>toast('Add cashiers and supervisors under Admin → Staff — just give them their PIN, they can sign in on their own phone, anywhere.'), 2600);
@@ -7854,6 +8023,20 @@ async function completeSignIn(u, opts={}){
   try{ await updateStockLowBadge(); }catch(e){ log('Low-stock badge failed: '+e.message, 'warn'); }
   try{ updateTableServiceVisibility(); }catch(e){ log('Table service visibility failed: '+e.message, 'warn'); }
   try{ scanInput.focus(); }catch(e){}
+  // Deactivation check, now deliberately AFTER the sign-in has already completed on screen —
+  // see the comment at the top of this function. Only acts if it genuinely comes back
+  // confirmed-deactivated; any offline/unreachable/ambiguous result (null) changes nothing,
+  // exactly as isShopActive() already guarantees — this is strictly additive safety, never a
+  // reason to hold up a sign-in that's already succeeded.
+  try{
+    const shopStatus = await isShopActive();
+    if(shopStatus.active === false && currentUser && currentUser.id === u.id){
+      toast(shopStatus.note || 'This shop has been deactivated — contact your platform administrator');
+      logAudit('Sign-in blocked — shop deactivated', u.name);
+      currentUser = null;
+      showLoginScreen();
+    }
+  }catch(e){ /* best-effort — never block or undo an already-successful sign-in over this */ }
 }
 async function updateStockTakeBanner(){
   const banner = $('stockTakeBanner');
