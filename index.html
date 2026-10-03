@@ -7311,6 +7311,15 @@ async function tryPinCheckpoint(){
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
   const myGeneration = ++pinCheckGeneration;
   const stale = () => myGeneration !== pinCheckGeneration || !!currentUser;
+  // Everything below this point used to be able to fail SILENTLY: an unexpected error from
+  // anything awaited here (a storage hiccup, a browser quirk, anything not already wrapped in
+  // its own try/catch) would reject this whole async function with nobody listening — it's
+  // called from a bare setTimeout(tryPinCheckpoint, 120) with no .catch(). The result looks
+  // exactly like a frozen app: dots filled in, nothing happens, no error anywhere visible,
+  // because the failure never reached the screen at all. Wrapping the whole body closes that
+  // off for good — from here on, ANY failure in this function surfaces as a real toast instead
+  // of invisible silence, whatever actually caused it.
+  try{
 
   // The default bootstrap trigger — only means anything on a device that's never been set up.
   if(pinBuffer.length===4 && pinBuffer==='1234' && !shopId){
@@ -7324,7 +7333,7 @@ async function tryPinCheckpoint(){
   const users = await getAll('users');
   if(stale()) return;
   const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
-  if(localMatch){ attemptLogin(); return; }
+  if(localMatch){ await attemptLogin(localMatch); return; }
 
   // Not found locally. If online, check the whole platform — this is what lets someone
   // type their own real PIN on a fresh device and be found automatically, no code needed.
@@ -7342,13 +7351,25 @@ async function tryPinCheckpoint(){
       try{
         await pullSpecificShop(remoteMatch.shop_id);
         if(stale()) return; // someone already signed in through a different, faster attempt meanwhile
-        attemptLogin(); // local data now has this person in it — try again
+        const freshUsers = await getAll('users');
+        const freshMatch = freshUsers.find(x => x.pin===pinBuffer && x.active!==false);
+        await attemptLogin(freshMatch); // local data now has this person in it — try again
       }catch(e){
         if(stale()) return;
         toast(e.message || 'Could not switch to that shop on this device');
         shakePinDots();
         pinBuffer=''; setTimeout(updatePinDots, 200);
       }
+      return;
+    }
+  } else if(isOnline && !backendLive()){
+    // Genuinely online, but this device has no backend configured at all — a 6-digit Admin PIN
+    // that was never typed on THIS device before can never be found this way. Worth saying
+    // once a full PIN is in, rather than silently falling through to "Incorrect PIN."
+    if(pinBuffer.length===MAX_PIN_LENGTH){
+      toast("This device isn't connected to the backend yet — an Admin PIN never used here before can't be found. Check Sync & Setup, or ask whoever set up this device.");
+      shakePinDots();
+      pinBuffer=''; setTimeout(updatePinDots, 200);
       return;
     }
   }
@@ -7382,6 +7403,14 @@ async function tryPinCheckpoint(){
   toast('Incorrect PIN');
   shakePinDots();
   pinBuffer=''; setTimeout(updatePinDots, 200);
+
+  }catch(e){
+    // Whatever actually broke, this is the one place in the login path guaranteed to run: say
+    // so out loud and reset, instead of leaving the screen sitting there looking frozen.
+    toast('Something went wrong checking that PIN: '+(e && e.message ? e.message : 'unknown error')+' — try again, or restart the app if it keeps happening.');
+    shakePinDots();
+    pinBuffer=''; setTimeout(updatePinDots, 200);
+  }
 }
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
@@ -7525,9 +7554,11 @@ function showLoginScreen(){
   pinBuffer=''; updatePinDots();
   startSceneRotation();
 }
-async function attemptLogin(){
-  const users = await getAll('users');
-  const u = users.find(x => x.pin===pinBuffer && x.active!==false);
+async function attemptLogin(u){
+  // Takes the already-matched user directly now, instead of re-querying IndexedDB for the
+  // exact same lookup tryPinCheckpoint() just did — one less async round-trip in the single
+  // most time-critical path in the app (sign-in), and one less place a second DB read could
+  // independently fail or hang after the first one already succeeded.
   if(!u){
     // Shouldn't normally be reached — tryPinCheckpoint() already confirms a match exists
     // before ever calling this — but kept as a safety net.
@@ -7573,8 +7604,15 @@ async function completeSignIn(u, opts={}){
   $('backofficeNav').classList.remove('show');
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-till').classList.add('active');
-  const resumedCart = opts.skipCartResume ? false : await resumeCartForUser(u.id);
-  renderCart();
+  // Everything from here down is "finishing touches" (cart resume, banners, badges, focus) —
+  // none of it should be able to undo a sign-in that has ALREADY succeeded (currentUser is set,
+  // the till screen is already showing). Each piece gets its own safety net so one broken piece
+  // can't take the whole sign-in down with it, or leave things in a half-finished, confusing state.
+  let resumedCart = false;
+  try{
+    resumedCart = opts.skipCartResume ? false : await resumeCartForUser(u.id);
+    renderCart();
+  }catch(e){ log('Cart resume failed: '+e.message, 'warn'); }
   try{ localStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
   if(opts.isNewSetup){
     toast('Shop set up! Signed in as Admin.');
@@ -7582,14 +7620,14 @@ async function completeSignIn(u, opts={}){
   } else {
     toast(resumedCart ? `Welcome back, ${u.name} — your cart is just as you left it` : 'Signed in as '+u.name);
   }
-  logAudit('Signed in', resumedCart ? `resumed a paused cart (${cart.length} item(s))` : (opts.isNewSetup ? 'new shop set up' : ''));
+  try{ logAudit('Signed in', resumedCart ? `resumed a paused cart (${cart.length} item(s))` : (opts.isNewSetup ? 'new shop set up' : '')); }catch(e){}
   if(u.role==='admin' && !businessProfile.storeName){
     setTimeout(()=>toast("Set up your business profile under Admin → Business"), opts.isNewSetup ? 3600 : 2200);
   }
-  await updateStockTakeBanner();
-  await updateStockLowBadge();
-  updateTableServiceVisibility();
-  scanInput.focus();
+  try{ await updateStockTakeBanner(); }catch(e){ log('Stock-take banner failed: '+e.message, 'warn'); }
+  try{ await updateStockLowBadge(); }catch(e){ log('Low-stock badge failed: '+e.message, 'warn'); }
+  try{ updateTableServiceVisibility(); }catch(e){ log('Table service visibility failed: '+e.message, 'warn'); }
+  try{ scanInput.focus(); }catch(e){}
 }
 async function updateStockTakeBanner(){
   const banner = $('stockTakeBanner');
