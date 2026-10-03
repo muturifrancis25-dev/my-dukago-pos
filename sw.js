@@ -4,10 +4,14 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v3';
+const CACHE_NAME = 'my-duka-pos-shell-v4';
 const SHELL_FILES = [
   './index.html',
-  './manifest.json'
+  './manifest.json',
+  './zxing.min.js' // the barcode-scanner library — vendored locally (not a CDN) specifically so
+  // it's cached offline from the very first visit, same as the app shell itself, and never
+  // depends on a browser's own native barcode support (which varies wildly across Android
+  // devices/browsers — see index.html's barcode scanner comments for why this replaced that).
 ];
 
 self.addEventListener('install', (event) => {

@@ -1381,9 +1381,9 @@
 </div>
 
 <!-- Live camera barcode scanner — a real barcode decode (UPC/EAN/Code128/QR), not the AI
-     photo-of-the-label reader above. Uses the browser's own BarcodeDetector where available
-     (Chrome/Edge on Android and desktop); where it isn't, this is honest about not working
-     rather than pretending to scan and silently doing nothing. Shared by both checkout
+     photo-of-the-label reader above. Runs on ZXing (vendored as zxing.min.js, see index.html's
+     openBarcodeScanner), a pure-JS decoder — not the browser's native BarcodeDetector, which
+     turned out to silently fail on a chunk of real Android devices. Shared by both checkout
      (adds straight to cart) and Feed Stock (fills the SKU field, and auto-fills the rest of
      the form from the matching product if one already exists, for a fast restock). -->
 <div class="modal-overlay" id="barcodeScanModal">
@@ -3230,72 +3230,62 @@ $('scanProductInput').addEventListener('change', async (e)=>{
 });
 
 // ---------- Live camera barcode scanner — real decode, shared by checkout + Feed Stock ----------
-let barcodeScanStream = null;
-let barcodeScanDetector = null;
-let barcodeScanRAF = null;
+// Deliberately NOT built on the browser's native BarcodeDetector API — that was the previous
+// approach, and it quietly failed on a chunk of real Android devices (detected nothing, ever,
+// with no visible error) because native support for it is inconsistent across Android OEMs and
+// browser forks. ZXing is a pure-JS barcode decoder vendored into this app as zxing.min.js (not
+// loaded from a CDN, so it works offline and isn't at the mercy of a third-party host) — it runs
+// its own pixel-level decoding identically on every browser, so there is no "does this phone's
+// browser happen to support it" question left to ask.
+let zxingLoadPromise = null;
+function loadZXing(){
+  if(window.ZXing) return Promise.resolve();
+  if(zxingLoadPromise) return zxingLoadPromise;
+  zxingLoadPromise = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'zxing.min.js';
+    s.onload = ()=> resolve();
+    s.onerror = ()=>{ zxingLoadPromise = null; reject(new Error('could not load the scanner library — needs internet the very first time, then it\'s cached for offline use')); };
+    document.head.appendChild(s);
+  });
+  return zxingLoadPromise;
+}
+let barcodeScanReader = null;
 let barcodeScanOnDetect = null;
-let barcodeScanCanvas = null; // offscreen — see note below on why detect() runs against this, not the <video> directly
-let barcodeScanFailCount = 0;
-function barcodeDetectionSupported(){ return 'BarcodeDetector' in window; }
 async function openBarcodeScanner(onDetect){
-  if(!barcodeDetectionSupported()){
-    toast('Live barcode scanning isn\'t supported in this browser — use a USB/Bluetooth barcode scanner instead, or type the code in by hand.');
-    return;
-  }
   barcodeScanOnDetect = onDetect;
-  barcodeScanFailCount = 0;
-  $('barcodeScanStatus').textContent = 'Point the camera at the barcode.';
+  $('barcodeScanStatus').textContent = 'Loading scanner…';
   $('barcodeScanModal').classList.add('show');
   try{
-    barcodeScanStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const video = $('barcodeScanVideo');
-    video.srcObject = barcodeScanStream;
-    await video.play();
-    barcodeScanDetector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code']});
-    if(!barcodeScanCanvas) barcodeScanCanvas = document.createElement('canvas');
-    const ctx = barcodeScanCanvas.getContext('2d', {willReadFrequently:true});
-    const scanFrame = async ()=>{
-      if(!barcodeScanStream) return; // scanner was closed mid-frame — stop the loop
-      try{
-        // Passing the live <video> element straight into detect() silently fails to find
-        // anything on some Chrome/Android builds — not an error, just zero detections forever,
-        // which looked exactly like "the scanner opens and does nothing no matter what you
-        // point it at." Drawing each frame to a plain canvas first and detecting against THAT
-        // is the path every BarcodeDetector implementation actually supports.
-        if(video.videoWidth>0){
-          barcodeScanCanvas.width = video.videoWidth;
-          barcodeScanCanvas.height = video.videoHeight;
-          ctx.drawImage(video, 0, 0, barcodeScanCanvas.width, barcodeScanCanvas.height);
-          const codes = await barcodeScanDetector.detect(barcodeScanCanvas);
-          if(codes.length>0){
-            const value = codes[0].rawValue;
-            closeBarcodeScanner();
-            if(barcodeScanOnDetect) barcodeScanOnDetect(value);
-            return;
-          }
-        }
-        barcodeScanFailCount = 0; // a clean frame with just no barcode in view — not a failure
-      }catch(e){
-        // A handful of bad frames in a row (not just one) is worth surfacing — this is what
-        // used to fail completely silently, forever, with no way to tell "still scanning"
-        // apart from "fundamentally broken on this device."
-        barcodeScanFailCount++;
-        if(barcodeScanFailCount===15){
-          $('barcodeScanStatus').textContent = 'Scanning isn\'t working on this device/browser (' + (e.message||'detect failed') + ') — try the photo-based "Scan product with camera" button instead, or type the code in by hand.';
-        }
+    await loadZXing();
+    $('barcodeScanStatus').textContent = 'Point the camera at the barcode.';
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.QR_CODE,
+    ]);
+    barcodeScanReader = new ZXing.BrowserMultiFormatReader(hints, 250);
+    await barcodeScanReader.decodeFromVideoDevice(undefined, $('barcodeScanVideo'), (result, err)=>{
+      // This callback fires on EVERY scan attempt (a few times a second) — err is a routine
+      // "nothing found in this frame" on almost every call while the camera is just pointed at
+      // a shelf or a hand, not a real failure, so it's deliberately ignored. Only a successful
+      // result is ever acted on.
+      if(result){
+        const value = result.getText();
+        closeBarcodeScanner();
+        if(barcodeScanOnDetect) barcodeScanOnDetect(value);
       }
-      barcodeScanRAF = requestAnimationFrame(scanFrame);
-    };
-    barcodeScanRAF = requestAnimationFrame(scanFrame);
+    });
   }catch(e){
     $('barcodeScanStatus').textContent = 'Could not open the camera: ' + (e.message || 'permission denied or no camera available') + '.';
   }
 }
 function closeBarcodeScanner(){
   $('barcodeScanModal').classList.remove('show');
-  if(barcodeScanRAF){ cancelAnimationFrame(barcodeScanRAF); barcodeScanRAF = null; }
-  if(barcodeScanStream){ barcodeScanStream.getTracks().forEach(t=>t.stop()); barcodeScanStream = null; }
-  $('barcodeScanVideo').srcObject = null;
+  try{ if(barcodeScanReader) barcodeScanReader.reset(); }catch(e){ /* already stopped — fine */ }
+  barcodeScanReader = null;
   barcodeScanOnDetect = null;
 }
 $('barcodeScanCancelBtn').addEventListener('click', closeBarcodeScanner);
