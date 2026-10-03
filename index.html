@@ -1767,8 +1767,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-shop-lockdown-5';
-const BUILD_DATE_LABEL = '03 Oct 2026, 15:20';
+const BUILD_VERSION = '2026-10-03-pin-not-found-6';
+const BUILD_DATE_LABEL = '03 Oct 2026, 15:35';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -7483,6 +7483,17 @@ async function tryPinCheckpoint(){
         }
         return;
       }
+      // A full PIN that matched nothing, anywhere on the whole platform, while genuinely
+      // online — that's a confirmed, specific answer, not just "incorrect": this PIN was
+      // never registered to any shop at all. Say so plainly instead of the generic
+      // "Incorrect PIN" below, same treatment as the wrong-shop case.
+      if(pinBuffer.length===MAX_PIN_LENGTH){
+        toast("This PIN doesn't exist — it isn't registered to any shop.");
+        setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
+        shakePinDots();
+        pinBuffer=''; setTimeout(updatePinDots, 200);
+        return;
+      }
     } else {
       // This device already belongs to a shop — only ever look for this PIN WITHIN that shop
       // (covers a new cashier added on another device of the same shop, not yet synced here).
@@ -7513,6 +7524,15 @@ async function tryPinCheckpoint(){
         if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
           toast('Wrong shop — this PIN belongs to a different shop.');
           setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
+          shakePinDots();
+          pinBuffer=''; setTimeout(updatePinDots, 200);
+          return;
+        }
+        if(!elsewhereMatch){
+          // Checked this shop, then the whole platform — truly nowhere. A confirmed, specific
+          // answer, not just "incorrect": this PIN was never registered to any shop at all.
+          toast("This PIN doesn't exist — it isn't registered to any shop.");
+          setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
           shakePinDots();
           pinBuffer=''; setTimeout(updatePinDots, 200);
           return;
