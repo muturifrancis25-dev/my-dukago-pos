@@ -1123,6 +1123,28 @@
     </div>
 
     <div class="panel">
+      <h3>Fingerprint security (this device)</h3>
+      <p class="hint">
+        A one-time fingerprint enrollment, per admin/supervisor, per physical device. Once enrolled, an instant
+        (unreviewed) item removal, a refund, and opening admin/settings with a PIN will all ask for this device's
+        fingerprint as well — if someone else has learnt a PIN, they still can't use it for these without also
+        having this device and this finger. This is stored only on this device (never synced online), so each
+        admin/supervisor enrolls separately on every device they actually use. Until enrolled on a given device,
+        those actions on that device are blocked, not PIN-only — enroll below to unlock them here.
+      </p>
+      <div class="form-row" style="grid-template-columns:1fr; margin-bottom:8px;">
+        <select id="fingerprintUserSelect"></select>
+      </div>
+      <div class="toggle-row">
+        <div id="fingerprintStatusLabel"><b style="font-size:13px;">Not checked yet</b></div>
+        <div style="display:flex; gap:8px;">
+          <button class="primary-btn" id="fingerprintEnrollBtn">Enroll on this device</button>
+          <button class="primary-btn" id="fingerprintRemoveBtn" style="background:var(--muted);">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <h3>Credit sales</h3>
       <p class="hint">Not every shop extends credit — off by default. Turn this on to let cashiers ring up a sale as "Credit" right at the till, tied to a real cart (so stock still deducts correctly), with an agreed payment date. It's recorded under Customer Credit, and counts toward revenue and profit the day it's actually paid, not the day it was sold.</p>
       <div class="toggle-row">
@@ -2110,9 +2132,14 @@ const $ = id => document.getElementById(id);
 // ---------- IndexedDB ----------
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('soko_pos_db_v1', 10);
+    const req = indexedDB.open('soko_pos_db_v1', 11);
     req.onupgradeneeded = e=>{
       const d = e.target.result;
+      // device_security: WebAuthn fingerprint enrollments. Deliberately NEVER pushed to
+      // queuePush/Supabase — a fingerprint credential is only ever meaningful on the exact
+      // device/browser that created it, so syncing it anywhere else would be actively wrong,
+      // unlike every other store here.
+      if(!d.objectStoreNames.contains('device_security')) d.createObjectStore('device_security',{keyPath:'userId'});
       if(!d.objectStoreNames.contains('products')) d.createObjectStore('products',{keyPath:'sku'});
       if(!d.objectStoreNames.contains('sales')) d.createObjectStore('sales',{keyPath:'id'});
       if(!d.objectStoreNames.contains('sync_queue')) d.createObjectStore('sync_queue',{keyPath:'id',autoIncrement:true});
@@ -2145,6 +2172,7 @@ function tx(store, mode='readonly'){ return db.transaction(store,mode).objectSto
 function getAll(store){ return new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function put(store,val){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').put(val); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function del(store,key){ return new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
+function getOne(store,key){ return new Promise((res,rej)=>{ const r=tx(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function getSetting(key){ return new Promise((res,rej)=>{ const r=tx('settings').get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 
 async function logAudit(action, details=''){
@@ -6008,7 +6036,45 @@ async function loadSettingsPanelValues(){
   }
   renderCart(); // if VAT changed on another device and just got pulled in, reflect it on an
                 // active till screen immediately — don't wait for the next unrelated cart edit
+  await refreshFingerprintPanel();
 }
+async function refreshFingerprintPanel(){
+  const sel = $('fingerprintUserSelect');
+  if(!sel) return;
+  const users = (await getAll('users')).filter(u => (u.role==='admin'||u.role==='supervisor') && u.active!==false);
+  const prevValue = sel.value;
+  sel.innerHTML = users.map(u => `<option value="${u.id}">${u.name} (${u.role})</option>`).join('');
+  if(prevValue && users.some(u=>u.id===prevValue)) sel.value = prevValue;
+  await updateFingerprintStatusLabel();
+}
+async function updateFingerprintStatusLabel(){
+  const sel = $('fingerprintUserSelect');
+  const label = $('fingerprintStatusLabel');
+  if(!sel || !label || !sel.value){ if(label) label.innerHTML = '<b style="font-size:13px;">No admin/supervisor on this shop yet</b>'; return; }
+  if(!webauthnSupported()){
+    label.innerHTML = '<b style="font-size:13px; color:var(--muted);">Not supported on this device/browser</b>';
+    return;
+  }
+  const enrolled = await fingerprintEnrolledFor(sel.value);
+  label.innerHTML = enrolled
+    ? '<b style="font-size:13px; color:var(--accent-text);">Enrolled on this device ✓</b>'
+    : '<b style="font-size:13px; color:var(--muted);">Not enrolled on this device</b>';
+}
+$('fingerprintUserSelect').addEventListener('change', updateFingerprintStatusLabel);
+$('fingerprintEnrollBtn').addEventListener('click', async ()=>{
+  const sel = $('fingerprintUserSelect');
+  if(!sel.value){ toast('No admin/supervisor to enroll'); return; }
+  const user = (await getAll('users')).find(u=>u.id===sel.value);
+  if(!user) return;
+  await enrollFingerprint(user);
+  await updateFingerprintStatusLabel();
+});
+$('fingerprintRemoveBtn').addEventListener('click', async ()=>{
+  const sel = $('fingerprintUserSelect');
+  if(!sel.value) return;
+  await removeFingerprintEnrollment(sel.value);
+  await updateFingerprintStatusLabel();
+});
 async function saveVatSettings(showToast){
   const rate = parseFloat($('vatRateInput').value);
   if(isNaN(rate) || rate<0 || rate>100){ toast('Enter a valid VAT rate between 0 and 100'); return; }
@@ -6843,6 +6909,10 @@ async function verifyPinModal(){
   if(pinModalMode==='admin_override') match = users.find(u=>(u.role==='admin'||u.role==='supervisor') && u.pin===entered && u.active!==false);
   else if(pinModalMode==='approval') match = users.find(u=>(u.role==='supervisor'||u.role==='admin') && u.pin===entered && u.active!==false);
   if(match){
+    if(pinModalMode==='admin_override' && !(await requireFingerprintGate(match, 'opening settings/admin controls'))){
+      $('pinInput').value=''; $('pinInput').focus();
+      return;
+    }
     $('pinModal').classList.remove('show');
     toast((pinModalMode==='approval'?'Approved by ':'Unlocked by ')+match.name);
     pendingApprovalAction && pendingApprovalAction(match.name);
@@ -6851,9 +6921,111 @@ async function verifyPinModal(){
     $('pinInput').value=''; $('pinInput').focus();
   }
 }
-// Fingerprint approval isn't wired up yet — WebAuthn needs each staff member's biometric
-// credential enrolled and verified against a real backend first, which is a project of its
-// own. PIN-only approval for now (see chat notes for what real fingerprint support needs).
+
+// ---------- Fingerprint (WebAuthn) second factor for admin/supervisor-only actions ----------
+// This is deliberately a LOCAL, per-device check only — there is no backend public-key
+// verification, because the point isn't to authenticate who-you-are-on-the-server (the PIN
+// already does that); it's a "prove it's really you, right now, on THIS device" gate before a
+// sensitive action, in case someone else has learnt a PIN. That's also why `device_security`
+// (see the IndexedDB upgrade above) is never pushed to Supabase: a fingerprint credential is
+// only ever meaningful on the exact device/browser that created it.
+function webauthnSupported(){
+  return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create && navigator.credentials.get);
+}
+function b64urlFromBuffer(buf){
+  const bytes = new Uint8Array(buf);
+  let str = '';
+  for(let i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function bufferFromB64url(b64url){
+  const pad = b64url.length % 4 === 0 ? '' : '='.repeat(4 - (b64url.length % 4));
+  const str = atob(b64url.replace(/-/g,'+').replace(/_/g,'/') + pad);
+  const bytes = new Uint8Array(str.length);
+  for(let i=0;i<str.length;i++) bytes[i] = str.charCodeAt(i);
+  return bytes;
+}
+async function getDeviceSecurity(userId){
+  try{ return await getOne('device_security', userId); }catch(e){ return null; }
+}
+async function fingerprintEnrolledFor(userId){
+  const rec = await getDeviceSecurity(userId);
+  return !!(rec && rec.credentialId);
+}
+async function enrollFingerprint(user){
+  if(!webauthnSupported()){
+    toast("This device/browser can't do fingerprint verification — try a newer browser.");
+    return false;
+  }
+  try{
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userIdBytes = crypto.getRandomValues(new Uint8Array(16));
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'My DukaGO POS' },
+        user: { id: userIdBytes, name: user.name || user.id, displayName: user.name || user.id },
+        pubKeyCredParams: [{ alg:-7, type:'public-key' }, { alg:-257, type:'public-key' }],
+        authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required' },
+        timeout: 60000,
+      }
+    });
+    if(!cred) return false;
+    await put('device_security', {
+      userId: user.id,
+      credentialId: b64urlFromBuffer(cred.rawId),
+      enrolledAt: new Date().toISOString(),
+      deviceLabel: navigator.userAgent.slice(0,120),
+    });
+    toast('Fingerprint enrolled on this device for '+(user.name||'this account'));
+    return true;
+  }catch(e){
+    toast('Fingerprint enrollment cancelled or failed: '+(e.message||e));
+    return false;
+  }
+}
+async function removeFingerprintEnrollment(userId){
+  try{ await del('device_security', userId); toast('Fingerprint enrollment removed from this device'); }catch(e){}
+}
+async function verifyFingerprint(user){
+  const rec = await getDeviceSecurity(user.id);
+  if(!rec || !rec.credentialId) return false;
+  if(!webauthnSupported()) return false;
+  try{
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        allowCredentials: [{ id: bufferFromB64url(rec.credentialId), type:'public-key' }],
+        userVerification: 'required',
+        timeout: 60000,
+      }
+    });
+    return !!assertion;
+  }catch(e){
+    return false;
+  }
+}
+// The gate itself: admin/supervisor only, used only at the sensitive-action call sites that
+// explicitly call it (refunds, instant/unreviewed removals, settings access) — never on
+// ordinary PIN login, and never for cashiers. If this exact device has no fingerprint enrolled
+// for this user yet, the elevated action is BLOCKED (not downgraded to PIN-only) — the caller
+// is expected to fall back to a safe, logged/reviewed path instead of silently proceeding.
+async function requireFingerprintGate(user, actionLabel){
+  if(!user || ROLE_RANK[user.role] < ROLE_RANK.supervisor) return true; // not a gated role
+  if(!webauthnSupported()){
+    toast("Fingerprint check unavailable on this device/browser for "+actionLabel+" — treating as unverified.");
+    return false;
+  }
+  const enrolled = await fingerprintEnrolledFor(user.id);
+  if(!enrolled){
+    toast('No fingerprint enrolled on this device for '+user.name+' — enroll it in Settings to unlock instant approval for '+actionLabel+'.');
+    return false;
+  }
+  const ok = await verifyFingerprint(user);
+  if(!ok) toast('Fingerprint not verified for '+actionLabel+'.');
+  return ok;
+}
 
 // ---------- Removing something from the sale: reason required, then approval if it's a cashier ----------
 let pendingReasonAction = null;
@@ -6898,9 +7070,28 @@ function requestCartRemoval(kind, itemInfo, doIt){
   openReasonModal(contextLabel, async (reason)=>{
     const requester = currentUser ? currentUser.name : 'Unknown';
     if(currentUser && ROLE_RANK[currentUser.role] >= ROLE_RANK.supervisor){
-      // Supervisor/admin already has the rights — no separate approval step, but it's still logged in full.
+      // Supervisor/admin skips the review queue — but that's exactly the elevated privilege a
+      // fingerprint gate exists to protect, in case someone else is operating on a stolen/shared
+      // PIN. The removal itself still goes through either way — this app never blocks a sale
+      // moving — but without a successful fingerprint check, it drops to the SAME pending-review
+      // path a cashier's removal takes, instead of silently granting the bypass.
+      const verified = await requireFingerprintGate(currentUser, 'an instant (unreviewed) removal');
       doIt();
-      logRemovalAudit(kind, itemInfo, reason, requester, null);
+      if(verified){
+        logRemovalAudit(kind, itemInfo, reason, requester, null);
+        toast('Removed');
+      } else {
+        const request = {
+          id: 'rmv_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+          kind, itemInfo, reason: reason + ' [fingerprint not verified — sent to review instead of an instant bypass]',
+          requestedBy: requester, requestedAt: new Date().toISOString(), status: 'pending',
+          reviewedBy: null, reviewedAt: null, reviewNote: null,
+        };
+        await put('removal_requests', request);
+        await queuePush('removal_upsert', request);
+        logAudit('Removal pending review — fingerprint not verified', `${requester} — ${contextLabel}`);
+        toast('Removed — fingerprint not verified, sent for review');
+      }
       return;
     }
     // A cashier's removal goes through differently — the sale keeps moving (this might be a
@@ -7564,6 +7755,7 @@ $('refundConfirmBtn').addEventListener('click', async ()=>{
   if(refundConfirmBusy){ toast('Already processing this refund — one moment'); return; }
   const amount = parseFloat($('refundAmountInput').value);
   if(isNaN(amount) || amount<=0){ toast('Enter a valid refund amount'); return; }
+  if(!(await requireFingerprintGate(currentUser, 'this refund'))) return;
   // Was only checked against the ORIGINAL sale total, not what's already been refunded — the
   // same sale could be refunded multiple times, each up to the full total again, with no cap
   // on the cumulative amount. Sum whatever's already been refunded for this sale and cap the
