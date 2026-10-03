@@ -1093,6 +1093,13 @@
       </div>
     </div>
 
+    <div class="panel">
+      <h3>Sales by staff — <span id="staffSalesPeriodLabel">today</span></h3>
+      <p class="hint">Who rang up what, by whoever was signed in at the till — the one breakdown that works the same way whether this shop sells stock (a duka) or sells time (a salon/kinyozi, a carwash, a pub). Useful for commission or performance pay without needing a separate system.</p>
+      <div class="table-scroll"><table><thead><tr><th>Staff</th><th>Sales</th><th>Items</th><th>Revenue</th><th>Avg. sale</th></tr></thead>
+      <tbody id="staffSalesTable"></tbody></table></div>
+    </div>
+
     <div class="panel" id="stockCompareWrap">
       <h3>Stock: this morning vs now</h3>
       <p class="hint">Only tracked for today — opening stock is captured once, the first time the counter is opened each day.</p>
@@ -1785,8 +1792,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-atomic-stock-10';
-const BUILD_DATE_LABEL = '03 Oct 2026, 18:10';
+const BUILD_VERSION = '2026-10-03-daily-stocktake-salon-11';
+const BUILD_DATE_LABEL = '03 Oct 2026, 20:15';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -1873,6 +1880,38 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'DETAIL-ENGINE', name:'Engine Bay Wash', price:500, stock:null, cat:'Detailing'},
       {sku:'ADDON-WAX', name:'Wax & Polish', price:600, stock:null, cat:'Add-ons'},
       {sku:'ADDON-TYRE', name:'Tyre Shine', price:100, stock:null, cat:'Add-ons'},
+    ]
+  },
+  salon: {
+    label:'Salon / Kinyozi', emoji:'💈',
+    desc:'Haircuts, braiding, nails, treatments — priced as services, plus a small retail shelf of haircare products.',
+    subtitle:'Salon / Kinyozi', unitLabel:'per service',
+    // Overwhelmingly a services business — a stylist's chair time is the product, not a shelf of
+    // stock — so almost everything here is stock:null, same treatment as Carwash's wash packages.
+    // "Retail Products" is the one stocked category (shampoo, relaxers, gel sold to take home),
+    // which is exactly why this business type still needs daily stock take: not for the
+    // services, but so that small retail shelf doesn't quietly walk out uncounted.
+    cats:['Haircuts & Grooming','Hair Styling & Braiding','Nails','Treatments','Retail Products','Other'],
+    colors:{'Haircuts & Grooming':'#4c7a52', 'Hair Styling & Braiding':'#b8862b', Nails:'#7a2f3f', Treatments:'#2f7a8c', 'Retail Products':'#5c6670', Other:'#8c6a4a'},
+    starter:[
+      {sku:'SALON-HAIRCUT-MEN', name:"Men's Haircut", price:200, stock:null, cat:'Haircuts & Grooming'},
+      {sku:'SALON-HAIRCUT-KIDS', name:"Kids' Haircut", price:150, stock:null, cat:'Haircuts & Grooming'},
+      {sku:'SALON-SHAVE', name:'Clean Shave / Beard Trim', price:150, stock:null, cat:'Haircuts & Grooming'},
+      {sku:'SALON-WASH-BLOWDRY', name:'Wash & Blow-dry', price:300, stock:null, cat:'Haircuts & Grooming'},
+      {sku:'SALON-BRAIDS-SMALL', name:'Box Braids (Small)', price:2500, stock:null, cat:'Hair Styling & Braiding'},
+      {sku:'SALON-BRAIDS-LARGE', name:'Box Braids (Large/Jumbo)', price:1200, stock:null, cat:'Hair Styling & Braiding'},
+      {sku:'SALON-CORNROWS', name:'Cornrows (Plain)', price:500, stock:null, cat:'Hair Styling & Braiding'},
+      {sku:'SALON-WEAVE-INSTALL', name:'Weave Install', price:1500, stock:null, cat:'Hair Styling & Braiding'},
+      {sku:'SALON-RELAX-TOUCHUP', name:'Relaxer Touch-up', price:1000, stock:null, cat:'Hair Styling & Braiding'},
+      {sku:'SALON-MANICURE', name:'Manicure', price:400, stock:null, cat:'Nails'},
+      {sku:'SALON-PEDICURE', name:'Pedicure', price:600, stock:null, cat:'Nails'},
+      {sku:'SALON-GEL-NAILS', name:'Gel Nails (Full Set)', price:1500, stock:null, cat:'Nails'},
+      {sku:'SALON-DEEP-COND', name:'Deep Conditioning Treatment', price:700, stock:null, cat:'Treatments'},
+      {sku:'SALON-SCALP-TREAT', name:'Scalp Treatment', price:600, stock:null, cat:'Treatments'},
+      {sku:'SALON-FACIAL', name:'Facial', price:1000, stock:null, cat:'Treatments'},
+      {sku:'RETAIL-SHAMPOO-500', name:'Shampoo 500ml', price:450, stock:12, cat:'Retail Products'},
+      {sku:'RETAIL-RELAXER-KIT', name:'Relaxer Kit', price:600, stock:8, cat:'Retail Products'},
+      {sku:'RETAIL-HAIR-GEL', name:'Hair Gel/Edge Control', price:300, stock:15, cat:'Retail Products'},
     ]
   },
   chemist: {
@@ -2117,18 +2156,35 @@ let SUPPLIERS = []; // registered suppliers — [{name, phone}], stored/synced t
 let PLATFORM_BUSINESS_TYPES = {}; // loaded fresh from the platform-wide table at boot —
 // business types the Super Admin has defined for every shop, not just one
 function allBusinessTypes(){ return {...BUILTIN_BUSINESS_TYPES, ...PLATFORM_BUSINESS_TYPES, ...CUSTOM_BUSINESS_TYPES}; }
-// Larger, higher-stock-risk businesses get a recurring stock take reminder every 3 days —
-// small dukas/fuel/carwash/gas/water don't carry enough SKUs for this to be worth enforcing.
-const STOCK_TAKE_REQUIRED_TYPES = ['supermarket','chemist','agrovet','liquor','pub','wholesaler'];
-const STOCK_TAKE_INTERVAL_DAYS = 3;
+// Stock take is now required EVERY business type, EVERY day, done before the shop opens — not
+// just the higher-risk types every 3 days as before. A fresh count each morning is what catches
+// shrinkage/theft/counting errors while they're still traceable to yesterday, for a duka exactly
+// as much as a supermarket; the old type-based exemption just meant most shops were never asked.
+// A stock take submitted with zero countable rows (an all-service business, a day nothing moved)
+// still satisfies the day — beginStockTakeCount() already skips stock:null service items, so
+// this is never a burden for a business with little or no physical stock to count.
+const STOCK_TAKE_DEADLINE_HOUR = 8; // local device time — "before opening the shop"
 function stockTakeRequiredForThisShop(){
-  return currentBusinessTypes.some(id => STOCK_TAKE_REQUIRED_TYPES.includes(id));
+  return true;
 }
 async function daysSinceLastStockTake(){
   const saved = await getSetting('last_stock_take_at');
   if(!saved || !saved.value) return null; // never done
   const ms = Date.now() - new Date(saved.value).getTime();
   return Math.floor(ms / (1000*60*60*24));
+}
+// "Daily, by 8am" means: done ANY time today → satisfied for today, whatever the clock says.
+// NOT done today yet → fine until today's 8am deadline passes, then overdue — the deadline is
+// a cutoff for TODAY's count, not a 24-hour countdown from whenever it was last done.
+async function isStockTakeOverdue(){
+  const saved = await getSetting('last_stock_take_at');
+  const now = new Date();
+  const todayDeadline = new Date(now.getFullYear(), now.getMonth(), now.getDate(), STOCK_TAKE_DEADLINE_HOUR, 0, 0, 0);
+  if(saved && saved.value){
+    const last = new Date(saved.value);
+    if(last.toDateString() === now.toDateString()) return false; // already done today
+  }
+  return now >= todayDeadline;
 }
 const ROLE_RANK = {cashier:1, supervisor:2, admin:3};
 
@@ -5046,6 +5102,7 @@ async function renderReports(){
   $('statSalesLabel').textContent = 'Sales — ' + periodLabel.toLowerCase();
   $('salesTableTitle').textContent = 'Sales — ' + periodLabel.toLowerCase();
   $('purchasesTableTitle').textContent = 'Stock received — ' + periodLabel.toLowerCase();
+  $('staffSalesPeriodLabel').textContent = periodLabel.toLowerCase();
   $('stockCompareWrap').style.display = reportPeriod==='today' ? 'block' : 'none';
 
   const allSales = await getAll('sales');
@@ -5226,6 +5283,32 @@ async function renderReports(){
         const tr = document.createElement('tr');
         tr.innerHTML = `<td class="name">${p.name}</td><td>${openQty}</td><td>${sold||'—'}</td><td>${received?('+'+received):'—'}</td><td>${p.stock}</td>`;
         cmpBody.appendChild(tr);
+      });
+    }
+  }
+
+  // Sales by staff — one breakdown that works identically whether revenue comes from stock
+  // (a duka ringing up groceries) or from time (a salon/kinyozi, carwash, pub charging per
+  // service) — it's grouped by whoever was signed in at the till, not by what was sold, so it
+  // needs no business-type-specific logic at all despite covering such different businesses.
+  {
+    const byStaff = {};
+    sales.forEach(s=>{
+      const name = s.cashier || 'Unknown';
+      if(!byStaff[name]) byStaff[name] = {count:0, items:0, revenue:0};
+      byStaff[name].count++;
+      byStaff[name].items += s.lines.reduce((a,l)=>a+l.qty,0);
+      byStaff[name].revenue += s.total;
+    });
+    const staffRows = Object.entries(byStaff).sort((a,b)=>b[1].revenue-a[1].revenue);
+    const staffBody = $('staffSalesTable'); staffBody.innerHTML='';
+    if(staffRows.length===0){
+      staffBody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);">No sales in this period.</td></tr>`;
+    } else {
+      staffRows.forEach(([name, s])=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="name">${name}</td><td>${s.count}</td><td>${s.items}</td><td>${fmtKsh(s.revenue)}</td><td>${fmtKsh(s.revenue/s.count)}</td>`;
+        staffBody.appendChild(tr);
       });
     }
   }
@@ -8133,12 +8216,12 @@ async function completeSignIn(u, opts={}){
 async function updateStockTakeBanner(){
   const banner = $('stockTakeBanner');
   if(!stockTakeRequiredForThisShop() || !currentUser){ banner.style.display = 'none'; return; }
-  const days = await daysSinceLastStockTake();
-  const isDue = days===null || days >= STOCK_TAKE_INTERVAL_DAYS;
+  const isDue = await isStockTakeOverdue();
   if(!isDue){ banner.style.display = 'none'; return; }
   banner.style.display = 'flex';
-  const whenText = days===null ? 'has never been done on this shop' : `was last done ${days} day(s) ago`;
-  $('stockTakeBannerText').textContent = `⚠️ Stock take overdue — ${whenText}. Required every ${STOCK_TAKE_INTERVAL_DAYS} days for this type of business.`;
+  const days = await daysSinceLastStockTake();
+  const whenText = days===null ? 'has never been done on this shop' : (days===0 ? "wasn't done before opening today" : `was last done ${days} day(s) ago`);
+  $('stockTakeBannerText').textContent = `⚠️ Stock take overdue — ${whenText}. Required daily, before opening (by ${STOCK_TAKE_DEADLINE_HOUR}am).`;
   const canAct = currentUser.role==='admin' || currentUser.role==='supervisor';
   $('stockTakeBannerBtn').style.display = canAct ? 'inline-block' : 'none';
 }
@@ -8152,17 +8235,9 @@ $('stockTakeBannerBtn').addEventListener('click', ()=>{
   }, 100);
 });
 
-// ---------- Stock take: required every 3 days for the types in STOCK_TAKE_REQUIRED_TYPES ----------
+// ---------- Stock take: required daily, before opening (by 8am), for every business type ----------
 async function renderStockTakePanel(){
   const panel = $('stockTakePanel');
-  if(!stockTakeRequiredForThisShop()){
-    // Built from STOCK_TAKE_REQUIRED_TYPES itself, not a hand-typed list — so this can't go
-    // stale again the next time a business type is added to that list (as liquor just was).
-    const types = allBusinessTypes();
-    const names = STOCK_TAKE_REQUIRED_TYPES.map(id => types[id] ? types[id].label : id).join(', ');
-    panel.innerHTML = `<h3>Stock take</h3><p class="hint">Not required for this business type — this is only enforced for ${names}, where enough SKUs move through that periodic counting genuinely matters.</p>`;
-    return;
-  }
   // Panel content only gets rebuilt from scratch once (first time it's actually needed) —
   // rebuilding it every render would wipe out an in-progress count.
   if(!$('startStockTakeBtn')){
@@ -8188,11 +8263,12 @@ async function renderStockTakePanel(){
     $('submitStockTakeBtn').addEventListener('click', submitStockTake);
   }
   const days = await daysSinceLastStockTake();
+  const overdue = await isStockTakeOverdue();
   $('stockTakeStatusLine').textContent = days===null
-    ? `Never done on this shop yet. Required every ${STOCK_TAKE_INTERVAL_DAYS} days for this business type.`
-    : (days >= STOCK_TAKE_INTERVAL_DAYS
-        ? `⚠️ Overdue — last done ${days} day(s) ago (every ${STOCK_TAKE_INTERVAL_DAYS} days required).`
-        : `Up to date — last done ${days} day(s) ago. Next one due in ${STOCK_TAKE_INTERVAL_DAYS-days} day(s).`);
+    ? (overdue ? `⚠️ Never done on this shop yet — required daily, before opening (by ${STOCK_TAKE_DEADLINE_HOUR}am).` : `Not done yet — required daily, before opening (by ${STOCK_TAKE_DEADLINE_HOUR}am). Still time today.`)
+    : (overdue
+        ? `⚠️ Overdue — ${days===0 ? "wasn't done before opening today" : `last done ${days} day(s) ago`} (required daily, by ${STOCK_TAKE_DEADLINE_HOUR}am).`
+        : `Up to date — ${days===0 ? 'done today' : `last done ${days} day(s) ago`}.`);
   await renderStockTakeHistory();
 }
 async function beginStockTakeCount(){
