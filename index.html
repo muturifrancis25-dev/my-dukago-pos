@@ -3234,6 +3234,8 @@ let barcodeScanStream = null;
 let barcodeScanDetector = null;
 let barcodeScanRAF = null;
 let barcodeScanOnDetect = null;
+let barcodeScanCanvas = null; // offscreen — see note below on why detect() runs against this, not the <video> directly
+let barcodeScanFailCount = 0;
 function barcodeDetectionSupported(){ return 'BarcodeDetector' in window; }
 async function openBarcodeScanner(onDetect){
   if(!barcodeDetectionSupported()){
@@ -3241,6 +3243,7 @@ async function openBarcodeScanner(onDetect){
     return;
   }
   barcodeScanOnDetect = onDetect;
+  barcodeScanFailCount = 0;
   $('barcodeScanStatus').textContent = 'Point the camera at the barcode.';
   $('barcodeScanModal').classList.add('show');
   try{
@@ -3249,17 +3252,38 @@ async function openBarcodeScanner(onDetect){
     video.srcObject = barcodeScanStream;
     await video.play();
     barcodeScanDetector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code']});
+    if(!barcodeScanCanvas) barcodeScanCanvas = document.createElement('canvas');
+    const ctx = barcodeScanCanvas.getContext('2d', {willReadFrequently:true});
     const scanFrame = async ()=>{
       if(!barcodeScanStream) return; // scanner was closed mid-frame — stop the loop
       try{
-        const codes = await barcodeScanDetector.detect(video);
-        if(codes.length>0){
-          const value = codes[0].rawValue;
-          closeBarcodeScanner();
-          if(barcodeScanOnDetect) barcodeScanOnDetect(value);
-          return;
+        // Passing the live <video> element straight into detect() silently fails to find
+        // anything on some Chrome/Android builds — not an error, just zero detections forever,
+        // which looked exactly like "the scanner opens and does nothing no matter what you
+        // point it at." Drawing each frame to a plain canvas first and detecting against THAT
+        // is the path every BarcodeDetector implementation actually supports.
+        if(video.videoWidth>0){
+          barcodeScanCanvas.width = video.videoWidth;
+          barcodeScanCanvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, barcodeScanCanvas.width, barcodeScanCanvas.height);
+          const codes = await barcodeScanDetector.detect(barcodeScanCanvas);
+          if(codes.length>0){
+            const value = codes[0].rawValue;
+            closeBarcodeScanner();
+            if(barcodeScanOnDetect) barcodeScanOnDetect(value);
+            return;
+          }
         }
-      }catch(e){ /* a single bad frame isn't worth surfacing — just try the next one */ }
+        barcodeScanFailCount = 0; // a clean frame with just no barcode in view — not a failure
+      }catch(e){
+        // A handful of bad frames in a row (not just one) is worth surfacing — this is what
+        // used to fail completely silently, forever, with no way to tell "still scanning"
+        // apart from "fundamentally broken on this device."
+        barcodeScanFailCount++;
+        if(barcodeScanFailCount===15){
+          $('barcodeScanStatus').textContent = 'Scanning isn\'t working on this device/browser (' + (e.message||'detect failed') + ') — try the photo-based "Scan product with camera" button instead, or type the code in by hand.';
+        }
+      }
       barcodeScanRAF = requestAnimationFrame(scanFrame);
     };
     barcodeScanRAF = requestAnimationFrame(scanFrame);
