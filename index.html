@@ -1321,7 +1321,7 @@
         <button type="button" id="bootErrorResetBtn" style="padding:6px 10px; border-radius:6px; border:1px solid var(--clay); background:var(--panel); color:var(--clay); font-weight:700; font-size:12px; cursor:pointer; margin-left:6px;">Reset local data on this device</button>
       </div>
     </div>
-    <p style="display:none; text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
+    <p style="text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
@@ -1758,7 +1758,7 @@ const OUTLET_ID = 'outlet_001';
 // Bumped by hand every time this file is updated — the one honest way to tell, at a glance,
 // whether a device is actually running the latest build or a stale cached/leftover copy.
 // If what you see on screen doesn't match this, that's the whole problem right there.
-const BUILD_VERSION = '2026-09-07-vat-diagnostics-1';
+const BUILD_VERSION = '2026-10-03-pin-crashproof-2';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -7283,6 +7283,21 @@ function updatePinDots(){
   const dots = document.querySelectorAll('#pinDots .pin-dot');
   dots.forEach((d,i)=> d.classList.toggle('filled', i < pinBuffer.length));
 }
+// The toast() at the bottom of the screen auto-dismisses after 1.8s — easy to miss entirely,
+// and gone by the time anyone takes a screenshot to show what happened. For PIN failures
+// specifically (where "I typed it and nothing happened" is THE recurring complaint), this
+// prints the same message to a line that sits right under the keypad and stays there —
+// impossible to miss, impossible to screenshot too late — until the next digit is pressed.
+function setLoginHint(msg, isError){
+  const el = $('loginHint');
+  if(!el) return;
+  el.textContent = msg || '';
+  // .login-hint's own color rule uses !important (it's styled to blend in as a quiet caption by
+  // default) — an ordinary el.style.color assignment loses to that no matter what, so an error
+  // here needs setProperty's own 'important' priority to actually show up in a different color.
+  el.style.setProperty('color', isError ? 'var(--clay)' : 'var(--muted)', 'important');
+  el.style.fontWeight = isError ? '700' : '400';
+}
 function shakePinDots(){
   document.querySelectorAll('#pinDots .pin-dot').forEach(d=>{
     d.classList.add('shake');
@@ -7357,6 +7372,7 @@ async function tryPinCheckpoint(){
       }catch(e){
         if(stale()) return;
         toast(e.message || 'Could not switch to that shop on this device');
+        setLoginHint(e.message || 'Could not switch to that shop on this device', true);
         shakePinDots();
         pinBuffer=''; setTimeout(updatePinDots, 200);
       }
@@ -7368,6 +7384,7 @@ async function tryPinCheckpoint(){
     // once a full PIN is in, rather than silently falling through to "Incorrect PIN."
     if(pinBuffer.length===MAX_PIN_LENGTH){
       toast("This device isn't connected to the backend yet — an Admin PIN never used here before can't be found. Check Sync & Setup, or ask whoever set up this device.");
+      setLoginHint("Not connected to the backend — an Admin PIN never used on this device can't be found yet.", true);
       shakePinDots();
       pinBuffer=''; setTimeout(updatePinDots, 200);
       return;
@@ -7395,12 +7412,14 @@ async function tryPinCheckpoint(){
         pinCheckTimer = null;
         if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
         toast("That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on. Still typing a 6-digit Admin PIN? Just keep going.");
+        setLoginHint("Not found on this device yet — connect once to bring it in, or keep typing a 6-digit Admin PIN.", false);
       }, 4000);
     }
     return;
   }
   // Nothing matched at either length, anywhere.
   toast('Incorrect PIN');
+  setLoginHint('Incorrect PIN — try again.', true);
   shakePinDots();
   pinBuffer=''; setTimeout(updatePinDots, 200);
 
@@ -7408,6 +7427,7 @@ async function tryPinCheckpoint(){
     // Whatever actually broke, this is the one place in the login path guaranteed to run: say
     // so out loud and reset, instead of leaving the screen sitting there looking frozen.
     toast('Something went wrong checking that PIN: '+(e && e.message ? e.message : 'unknown error')+' — try again, or restart the app if it keeps happening.');
+    setLoginHint('Error: '+(e && e.message ? e.message : 'unknown error')+' — try again, or restart the app.', true);
     shakePinDots();
     pinBuffer=''; setTimeout(updatePinDots, 200);
   }
@@ -7415,8 +7435,8 @@ async function tryPinCheckpoint(){
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
   const k = btn.dataset.k;
-  if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=''; updatePinDots(); return; }
-  if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); return; }
+  if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=''; updatePinDots(); setLoginHint(''); return; }
+  if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); return; }
   if(pinBuffer.length>=MAX_PIN_LENGTH) return;
   // Cancel any pending "give up on a 4-digit attempt" timer on EVERY keystroke, not only ones
   // that land on 4 or 6 digits. tryPinCheckpoint() itself only clears it at those two lengths —
@@ -7428,6 +7448,7 @@ $('loginKeypad').addEventListener('click', e=>{
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; }
   pinBuffer += k;
   updatePinDots();
+  setLoginHint('');
   setTimeout(tryPinCheckpoint, 120);
 });
 // A physical/USB numeric keypad or keyboard works too
@@ -7435,9 +7456,9 @@ document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){
     if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } // see the click handler's comment above
-    pinBuffer+=e.key; updatePinDots(); setTimeout(tryPinCheckpoint,120);
+    pinBuffer+=e.key; updatePinDots(); setLoginHint(''); setTimeout(tryPinCheckpoint,120);
   }
-  if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); }
+  if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); }
 });
 
 // ---------- Set Admin PIN screen — what "1234" on a fresh device leads into ----------
