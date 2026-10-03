@@ -1761,8 +1761,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-pin-crashproof-2';
-const BUILD_DATE_LABEL = '03 Oct 2026, 14:10';
+const BUILD_VERSION = '2026-10-03-pin-memcache-3';
+const BUILD_DATE_LABEL = '03 Oct 2026, 14:25';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2131,6 +2131,17 @@ let currentBusinessTypes = ['duka']; // array — supports combining multiple bu
 let currentUser = null; // {id, name, role}
 let pinModalMode = null; // 'login' | 'admin_override' | 'approval'
 let pendingApprovalAction = null;
+// A plain in-memory copy of this device's staff list, kept warm from the moment the app boots.
+// Checking a typed PIN against this array is pure, synchronous JavaScript — no database, no
+// transaction, no await, nothing that can ever queue behind something else or hang. This is
+// the actual fix for "a PIN saved on this device should just open, full stop": the database
+// read was always a reasonable fallback, but it should never have been on the hot path for
+// the single most common, most time-critical action in the whole app. refreshUserCache() keeps
+// it in sync with IndexedDB (itself the durable copy) every time staff data changes.
+let cachedUsers = [];
+async function refreshUserCache(){
+  try{ cachedUsers = await getAll('users'); }catch(e){ /* keep whatever we had — better than nothing */ }
+}
 const $ = id => document.getElementById(id);
 
 // ---------- IndexedDB ----------
@@ -5681,6 +5692,7 @@ async function clearLocalShopData(){
   for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_business_types','credit_sales_enabled','last_stock_take_at','table_view_enabled']){
     try{ await del('settings', key); }catch(e){ /* fine if it never existed locally */ }
   }
+  await refreshUserCache(); // the previous shop's staff must not linger in the fast PIN-check cache after a switch
 }
 async function pullSpecificShop(targetShopId){
   // This is called every time a typed PIN isn't in THIS device's local `users` store yet —
@@ -5798,6 +5810,7 @@ async function pullShopData(fullPull, force){
           }
         }
       }
+      await refreshUserCache(); // staff may have changed — keep the fast, database-free PIN check current
     }
     // Products / stock
     const prodRes = await fetchT(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
@@ -6819,6 +6832,8 @@ async function renderAttendanceTable(){
 
 async function renderStaffTable(){
   const users = await getAll('users');
+  await refreshUserCache(); // every staff add/edit/revoke/PIN-change re-renders this table —
+  // one place to keep the fast, database-free PIN-check cache current after any of them
   const body = $('staffTable'); body.innerHTML='';
   users.forEach(u=>{
     const revoked = u.active===false;
@@ -7366,11 +7381,21 @@ async function tryPinCheckpoint(){
     return;
   }
 
-  // This device's own local staff first — works instantly, works offline.
+  // This device's own local staff first — the actual fast path. cachedUsers is a plain
+  // in-memory array (warmed at boot, kept current by refreshUserCache() — see its own comment),
+  // so this match is synchronous: no database, no network, nothing that can stall or queue
+  // behind anything else. A PIN that's already on this device now logs in immediately, full
+  // stop, with nothing in between the tap and the till screen that could possibly hang.
+  const cacheMatch = cachedUsers.find(x => x.pin===pinBuffer && x.active!==false);
+  if(cacheMatch){ await attemptLogin(cacheMatch); return; }
+
+  // Not in the warm cache — fall back to reading IndexedDB directly, in case the cache just
+  // hasn't caught up yet with something very recent (should be rare; refreshUserCache() is
+  // called everywhere staff data changes, but this is the safety net if one was ever missed).
   const users = await getAll('users');
   if(stale()) return;
   const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
-  if(localMatch){ await attemptLogin(localMatch); return; }
+  if(localMatch){ cachedUsers = users; await attemptLogin(localMatch); return; }
 
   // Not found locally. If online, check the whole platform — this is what lets someone
   // type their own real PIN on a fresh device and be found automatically, no code needed.
@@ -7557,6 +7582,7 @@ async function handleSetPinDigit(k){
   const adminUser = {id:'u_admin_'+shopId, name:'Admin', role:'admin', pin:setPinFirstEntry, active:true, email: adminEmail || null};
   await put('users', adminUser);
   await queuePush('staff_upsert', adminUser);
+  await refreshUserCache();
   setPinBuffer=''; setPinFirstEntry='';
   await completeSignIn(adminUser, {isNewSetup:true, skipCartResume:true});
 }
@@ -7989,6 +8015,9 @@ async function init(){
   $('loginBuildTag').textContent = 'Updated: '+BUILD_DATE_LABEL; // visible even before signing in, on purpose
   relocatePlatformControlsToSuperAdminView(); // done once, every load — see the function's own comment
   db = await openDB();
+  await refreshUserCache(); // warm the in-memory staff/PIN list as early as physically possible —
+  // every moment before this line is a moment the PIN screen could be tapped before the fast,
+  // database-free login path is actually ready; everything else below can and does take longer.
   await loadShopIdentity();
   await seedIfEmpty();
   await ensureTodaySnapshot();
