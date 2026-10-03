@@ -5672,7 +5672,7 @@ async function pullShopData(fullPull, force){
             toast(shopRows[0].license_note || 'This shop has been deactivated — contact your platform administrator');
             logAudit('Signed out', 'shop deactivated remotely'+(shopRows[0].license_note ? ` — ${shopRows[0].license_note}` : ''));
             currentUser = null;
-            try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+            try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
             showLoginScreen();
           }
         }
@@ -5698,7 +5698,7 @@ async function pullShopData(fullPull, force){
             toast(rs.active===false ? 'Your account was deactivated — signing you out' : `Your role changed to ${rs.role} — signing you out, please log back in`);
             logAudit('Signed out', reason);
             currentUser = null;
-            try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+            try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
             showLoginScreen();
           }
         }
@@ -6330,7 +6330,7 @@ $('lockScreenBtn').addEventListener('click', async ()=>{
   await pauseCartForUser(uid);
   logAudit('Signed out', 'via Lock button' + (hadItems ? ` — cart paused (${cart.length} item(s))` : ''));
   currentUser=null;
-  try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+  try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
   showLoginScreen();
 });
 
@@ -7332,7 +7332,7 @@ async function completeSignIn(u, opts={}){
   $('view-till').classList.add('active');
   const resumedCart = opts.skipCartResume ? false : await resumeCartForUser(u.id);
   renderCart();
-  try{ sessionStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
+  try{ localStorage.setItem('my_duka_session_uid', u.id); }catch(e){}
   if(opts.isNewSetup){
     toast('Shop set up! Signed in as Admin.');
     setTimeout(()=>toast('Add cashiers and supervisors under Admin → Staff — just give them their PIN, they can sign in on their own phone, anywhere.'), 2600);
@@ -7578,18 +7578,24 @@ $('refundConfirmBtn').addEventListener('click', async ()=>{
 });
 
 async function tryRestoreSession(){
-  // If the browser silently reloaded this tab (very common on Android when backgrounded,
-  // to save memory) this brings the same person straight back to where they were signed
-  // in, instead of forcing them through the PIN screen again.
+  // Brings the same person straight back to where they were signed in — across a backgrounded
+  // tab the OS silently reloaded (common on Android to save memory), AND across the app being
+  // fully closed and reopened (swiped away from recent-apps, phone restarted). This used to be
+  // sessionStorage, which is wiped the instant the app is fully closed — meaning every cashier
+  // had to re-enter their PIN every single time the app wasn't just backgrounded, all day, every
+  // day, which is exactly what was being reported as "the app doesn't remember" even though
+  // nothing was actually wrong with the PIN or the Supabase connection. localStorage persists
+  // across a real close/reopen the same way the rest of this app's local data does, and an
+  // explicit Logout (or a shop being deactivated) still clears it immediately either way.
   let uid;
-  try{ uid = sessionStorage.getItem('my_duka_session_uid'); }catch(e){ return false; }
+  try{ uid = localStorage.getItem('my_duka_session_uid'); }catch(e){ return false; }
   if(!uid) return false;
   const users = await getAll('users');
   const u = users.find(x => x.id===uid && x.active!==false);
   if(!u) return false;
   const shopStatus = await isShopActive();
   if(shopStatus.active === false){
-    try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+    try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
     logAudit('Session restore blocked — shop deactivated', u.name);
     toast(shopStatus.note || 'This shop has been deactivated — contact your platform administrator');
     return false; // falls through to showLoginScreen() in init()
@@ -7610,7 +7616,7 @@ $('logoutBtn').addEventListener('click', async ()=>{
   await pauseCartForUser(uid); // never silently lose a mid-sale cart, however someone signs out
   logAudit('Signed out', hadItems ? `cart paused (${cart.length} item(s))` : '');
   currentUser=null;
-  try{ sessionStorage.removeItem('my_duka_session_uid'); }catch(e){}
+  try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
   showLoginScreen();
 });
 
