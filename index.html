@@ -1814,8 +1814,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-04-scan-manual-fallback-15';
-const BUILD_DATE_LABEL = '04 Oct 2026, 11:19';
+const BUILD_VERSION = '2026-10-04-pin-check-parallel-16';
+const BUILD_DATE_LABEL = '04 Oct 2026, 12:44';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -7867,7 +7867,18 @@ async function tryPinCheckpoint(){
     } else {
       // This device already belongs to a shop — only ever look for this PIN WITHIN that shop
       // (covers a new cashier added on another device of the same shop, not yet synced here).
-      const sameShopMatch = await lookupPinForThisShop(pinBuffer);
+      // For a COMPLETE 6-digit PIN, we may need a second, platform-wide check too (to tell
+      // "wrong shop" from "doesn't exist at all") — these two network calls used to run one
+      // after the other, so a PIN that matched neither could sit silent for up to ~10s on a
+      // slow connection (each lookup's own fetchT timeout is 5s) before any flag appeared at
+      // all. Firing both at once when we already know we'll likely need both cuts that worst
+      // case roughly in half — a direct fix for exactly that "it just sits there, not flagging
+      // anything" complaint on a weak signal.
+      const needsGlobalCheck = pinBuffer.length===MAX_PIN_LENGTH;
+      const [sameShopMatch, elsewhereMatch] = await Promise.all([
+        lookupPinForThisShop(pinBuffer),
+        needsGlobalCheck ? lookupPinGlobally(pinBuffer) : Promise.resolve(null),
+      ]);
       if(stale()) return;
       if(sameShopMatch){
         try{
@@ -7885,12 +7896,11 @@ async function tryPinCheckpoint(){
         }
         return;
       }
-      // Not found in THIS shop. For a completed PIN, check (read-only, no switch) whether it
-      // belongs to some OTHER shop on the platform, purely to give an honest, specific message
-      // instead of a generic "Incorrect PIN" when the real issue is "right PIN, wrong device."
-      if(pinBuffer.length===MAX_PIN_LENGTH){
-        const elsewhereMatch = await lookupPinGlobally(pinBuffer);
-        if(stale()) return;
+      // Not found in THIS shop. For a completed PIN, the parallel global check above already
+      // tells us (read-only, no switch) whether it belongs to some OTHER shop on the platform,
+      // purely to give an honest, specific message instead of a generic "Incorrect PIN" when
+      // the real issue is "right PIN, wrong device."
+      if(needsGlobalCheck){
         if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
           toast('Wrong shop — this PIN belongs to a different shop.');
           setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
