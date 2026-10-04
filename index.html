@@ -1804,8 +1804,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-03-no-password-manager-13';
-const BUILD_DATE_LABEL = '03 Oct 2026, 20:40';
+const BUILD_VERSION = '2026-10-04-biztype-timestamp-14';
+const BUILD_DATE_LABEL = '04 Oct 2026, 11:02';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2374,7 +2374,16 @@ async function applyBusinessTypes(typeIds, {announce=true, pushToBackend=true} =
   CAT_COLORS = mergedColors;
   activeCat = 'All';
   currentBusinessTypes = ids;
-  await put('settings', {key:'active_business_types', value: ids});
+  // Always stamp updated_at here, even on a pull-triggered call — this function's own put()
+  // used to write the record with NO updated_at at all, clobbering the real server timestamp
+  // that pullShopData had just stored moments earlier for the exact same key. A local record
+  // with no updated_at reads as "always stale" on the next freshness check, which happened to
+  // mask the bug rather than cause a visible failure — but it also meant the diagnostics panel
+  // could never show a real "last updated" time for this setting, and any future comparison
+  // that assumes updated_at is present would misbehave. A genuine local choice gets "now"; a
+  // value arriving from a pull should keep the server's own timestamp, not get a fresh local
+  // one (which would make this device look newer than it actually is on the very next pull).
+  await put('settings', {key:'active_business_types', value: ids, updated_at: pushToBackend ? new Date().toISOString() : (await getSetting('active_business_types'))?.updated_at});
   // Only push a REAL, deliberate choice — never the fallback default used when booting or
   // restoring, and never a value that just came FROM a pull. Pushing indiscriminately here
   // is what let a fresh device's temporary "duka" default silently overwrite a shop's real
