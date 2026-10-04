@@ -1440,6 +1440,16 @@
       <div style="position:absolute; inset:18%; border:2px solid var(--marigold); border-radius:8px; pointer-events:none;"></div>
     </div>
     <p id="barcodeScanStatus" class="hint" style="min-height:16px; margin:10px 0;">Point the camera at the barcode.</p>
+    <!-- Hidden until either the person asks for it or a few seconds pass with nothing detected
+         (see barcodeScanManualTimer in openBarcodeScanner) — a crumpled foil pack, bad lighting,
+         or a barcode printed small enough to blur is a real, common failure mode for ANY camera
+         scanner, not a bug to chase every time; typing the digits straight off the pack always
+         works, so this is the fallback, not a last resort buried in a different screen. -->
+    <p id="barcodeScanManualToggle" style="text-align:center; margin:0 0 10px; font-size:12px;"><span style="color:var(--muted); text-decoration:underline dotted; cursor:pointer;" id="barcodeScanManualToggleLink">Can't scan it? Type the code instead</span></p>
+    <div id="barcodeScanManualRow" style="display:none; gap:8px; margin:0 0 10px;">
+      <input id="barcodeScanManualInput" type="text" inputmode="numeric" placeholder="Type the barcode / SKU" style="flex:1; padding:10px; border-radius:8px; border:1.5px solid var(--line);">
+      <button class="primary-btn" id="barcodeScanManualBtn" style="flex:none; padding:10px 14px;">Use this</button>
+    </div>
     <button class="modal-cancel" id="barcodeScanCancelBtn" style="width:100%; padding:11px;">Cancel</button>
   </div>
 </div>
@@ -1804,8 +1814,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-04-biztype-timestamp-14';
-const BUILD_DATE_LABEL = '04 Oct 2026, 11:02';
+const BUILD_VERSION = '2026-10-04-scan-manual-fallback-15';
+const BUILD_DATE_LABEL = '04 Oct 2026, 11:19';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -3486,10 +3496,27 @@ function loadZXing(){
 }
 let barcodeScanReader = null;
 let barcodeScanOnDetect = null;
+// Auto-reveals the "type it instead" fallback a few seconds into a scan that hasn't found
+// anything yet — long enough to give a clean shot a real chance, short enough that nobody is
+// sitting there re-angling a crumpled foil pack for 30 seconds before discovering there was
+// always a way to just type the digits. The link above it is there from the start too, for
+// anyone who already knows the scan is going to struggle (bent pack, low light) and wants to
+// skip straight to typing.
+let barcodeScanManualTimer = null;
+function resetBarcodeScanManualUI(){
+  $('barcodeScanManualRow').style.display = 'none';
+  $('barcodeScanManualInput').value = '';
+}
 async function openBarcodeScanner(onDetect){
   barcodeScanOnDetect = onDetect;
   $('barcodeScanStatus').textContent = 'Loading scanner…';
   $('barcodeScanModal').classList.add('show');
+  resetBarcodeScanManualUI();
+  if(barcodeScanManualTimer) clearTimeout(barcodeScanManualTimer);
+  barcodeScanManualTimer = setTimeout(()=>{
+    barcodeScanManualTimer = null;
+    if($('barcodeScanModal').classList.contains('show')) $('barcodeScanManualRow').style.display = 'flex';
+  }, 6000);
   try{
     await loadZXing();
     $('barcodeScanStatus').textContent = 'Point the camera at the barcode.';
@@ -3521,8 +3548,25 @@ function closeBarcodeScanner(){
   try{ if(barcodeScanReader) barcodeScanReader.reset(); }catch(e){ /* already stopped — fine */ }
   barcodeScanReader = null;
   barcodeScanOnDetect = null;
+  if(barcodeScanManualTimer){ clearTimeout(barcodeScanManualTimer); barcodeScanManualTimer = null; }
 }
 $('barcodeScanCancelBtn').addEventListener('click', closeBarcodeScanner);
+$('barcodeScanManualToggleLink').addEventListener('click', ()=>{
+  if(barcodeScanManualTimer){ clearTimeout(barcodeScanManualTimer); barcodeScanManualTimer = null; }
+  $('barcodeScanManualRow').style.display = 'flex';
+  $('barcodeScanManualInput').focus();
+});
+function submitBarcodeScanManualEntry(){
+  const code = $('barcodeScanManualInput').value.trim();
+  if(!code) return;
+  const cb = barcodeScanOnDetect; // closeBarcodeScanner() clears this, so capture it first
+  closeBarcodeScanner();
+  if(cb) cb(code);
+}
+$('barcodeScanManualBtn').addEventListener('click', submitBarcodeScanManualEntry);
+$('barcodeScanManualInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); submitBarcodeScanManualEntry(); }
+});
 $('liveScanCheckoutBtn').addEventListener('click', ()=>{
   openBarcodeScanner((code)=>{
     addToCart(code); // exact SKU/barcode match — same path a hardware scanner uses
