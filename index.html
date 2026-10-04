@@ -819,13 +819,16 @@
           <button class="modal-cancel" id="liveScanStockBtn" title="Scan barcode with camera" style="flex:none; padding:0 12px;">📷</button>
         </div>
         <input id="newName" placeholder="Product name">
-        <select id="newCat">
-          <option value="Groceries">Groceries</option>
-          <option value="Drinks">Drinks</option>
-          <option value="Household">Household</option>
-          <option value="Airtime">Airtime</option>
-          <option value="Other">Other</option>
-        </select>
+        <div style="display:flex; gap:6px;">
+          <select id="newCat" style="flex:1;">
+            <option value="Groceries">Groceries</option>
+            <option value="Drinks">Drinks</option>
+            <option value="Household">Household</option>
+            <option value="Airtime">Airtime</option>
+            <option value="Other">Other</option>
+          </select>
+          <button type="button" class="modal-cancel" id="addCategoryBtn" title="Add a new category" style="flex:none; padding:0 12px;">+ Category</button>
+        </div>
         <input id="newQty" type="number" placeholder="Qty received (blank = no change / service if new)" min="1">
         <input id="newCost" type="number" placeholder="Cost price (KSh, optional)" min="0">
         <input id="newPrice" type="number" placeholder="Sell price (KSh)" min="0">
@@ -1814,32 +1817,55 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-04-pin-check-parallel-16';
-const BUILD_DATE_LABEL = '04 Oct 2026, 12:44';
+const BUILD_VERSION = '2026-10-04-full-category-list-17';
+const BUILD_DATE_LABEL = '04 Oct 2026, 13:20';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
 
+// Shared, comprehensive category list for a general duka/shop and a full supermarket — both
+// carry essentially the same range of goods, just at different scale, so they share one list
+// rather than maintaining two overlapping ones that drift apart. Covers what a real Kenyan
+// general retailer or supermarket actually stocks, not just the handful of categories a brand
+// new shop happens to start with — a shop can still add its own on top (Settings → Business →
+// "+ Category", or the same button next to the category field in Feed Stock).
+const GENERAL_RETAIL_CATS = [
+  'Fresh Produce','Bakery','Butchery & Meat','Dairy & Eggs','Cereals, Flour & Grains',
+  'Cooking Oil & Fats','Rice, Pasta & Legumes','Sugar, Salt & Spices','Snacks & Confectionery',
+  'Beverages','Alcohol & Beer','Frozen Foods','Household & Cleaning','Personal Care & Toiletries',
+  'Baby & Mother Care','Health & First Aid','Airtime & Mobile Money','Electronics & Accessories',
+  'Stationery & Books','Hardware & Kitchenware','Other',
+];
+const GENERAL_RETAIL_COLORS = {
+  'Fresh Produce':'#4c7a52', Bakery:'#e2a034', 'Butchery & Meat':'#b33f2e', 'Dairy & Eggs':'#8c6a4a',
+  'Cereals, Flour & Grains':'#5c6670', 'Cooking Oil & Fats':'#b8862b', 'Rice, Pasta & Legumes':'#4c7a52',
+  'Sugar, Salt & Spices':'#8c6a4a', 'Snacks & Confectionery':'#e2a034', Beverages:'#2f7a8c',
+  'Alcohol & Beer':'#7a2f3f', 'Frozen Foods':'#2f7a8c', 'Household & Cleaning':'#6a4c93',
+  'Personal Care & Toiletries':'#e2a034', 'Baby & Mother Care':'#b8862b', 'Health & First Aid':'#b33f2e',
+  'Airtime & Mobile Money':'#e2a034', 'Electronics & Accessories':'#4c7a52', 'Stationery & Books':'#2f7a8c',
+  'Hardware & Kitchenware':'#5c6670', Other:'#5c6670',
+};
+
 const BUILTIN_BUSINESS_TYPES = {
   duka: {
     label:'Duka / General Retail', emoji:'🛒',
-    desc:'Groceries, drinks, household goods, airtime.',
+    desc:'Groceries, drinks, household goods, airtime, and the full general-shop range.',
     subtitle:'General Retail', unitLabel:'stock',
-    cats:['Groceries','Drinks','Household','Airtime','Other'],
-    colors:{Groceries:'#4c7a52', Drinks:'#2f7a8c', Household:'#b33f2e', Airtime:'#e2a034', Other:'#5c6670'},
+    cats: GENERAL_RETAIL_CATS,
+    colors: GENERAL_RETAIL_COLORS,
     starter:[
-      {sku:'5000112637922', name:'Blueband 500g', price:210, stock:24, cat:'Groceries'},
-      {sku:'6161100810018', name:'Mumias Sugar 2kg', price:280, stock:15, cat:'Groceries'},
-      {sku:'6161000970012', name:'Unga Pembe 2kg', price:205, stock:6, cat:'Groceries'},
-      {sku:'8850006315056', name:'Kasuku Cooking Oil 1L', price:320, stock:11, cat:'Groceries'},
-      {sku:'6009880304018', name:'Coca-Cola 500ml', price:70, stock:48, cat:'Drinks'},
-      {sku:'5449000000996', name:'Milo 400g', price:390, stock:3, cat:'Drinks'},
-      {sku:'6161055501234', name:'Minute Maid 1L', price:180, stock:20, cat:'Drinks'},
-      {sku:'6161112211004', name:'Omo Detergent 1kg', price:250, stock:9, cat:'Household'},
-      {sku:'6161099887766', name:'Jik 500ml', price:120, stock:14, cat:'Household'},
-      {sku:'6009183350017', name:'Airtime Scratch KSh100', price:100, stock:60, cat:'Airtime'},
-      {sku:'6009183350024', name:'Airtime Scratch KSh250', price:250, stock:40, cat:'Airtime'},
-      {sku:'6161077665544', name:'Colgate 100ml', price:150, stock:2, cat:'Other'},
+      {sku:'5000112637922', name:'Blueband 500g', price:210, stock:24, cat:'Cooking Oil & Fats'},
+      {sku:'6161100810018', name:'Mumias Sugar 2kg', price:280, stock:15, cat:'Sugar, Salt & Spices'},
+      {sku:'6161000970012', name:'Unga Pembe 2kg', price:205, stock:6, cat:'Cereals, Flour & Grains'},
+      {sku:'8850006315056', name:'Kasuku Cooking Oil 1L', price:320, stock:11, cat:'Cooking Oil & Fats'},
+      {sku:'6009880304018', name:'Coca-Cola 500ml', price:70, stock:48, cat:'Beverages'},
+      {sku:'5449000000996', name:'Milo 400g', price:390, stock:3, cat:'Beverages'},
+      {sku:'6161055501234', name:'Minute Maid 1L', price:180, stock:20, cat:'Beverages'},
+      {sku:'6161112211004', name:'Omo Detergent 1kg', price:250, stock:9, cat:'Household & Cleaning'},
+      {sku:'6161099887766', name:'Jik 500ml', price:120, stock:14, cat:'Household & Cleaning'},
+      {sku:'6009183350017', name:'Airtime Scratch KSh100', price:100, stock:60, cat:'Airtime & Mobile Money'},
+      {sku:'6009183350024', name:'Airtime Scratch KSh250', price:250, stock:40, cat:'Airtime & Mobile Money'},
+      {sku:'6161077665544', name:'Colgate 100ml', price:150, stock:2, cat:'Personal Care & Toiletries'},
     ]
   },
   fuel: {
@@ -1966,29 +1992,29 @@ const BUILTIN_BUSINESS_TYPES = {
     label:'Supermarket', emoji:'🛒',
     desc:'Full grocery range — produce, bakery, butchery, household, beverages, and more than one till.',
     subtitle:'Supermarket', unitLabel:'stock',
-    cats:['Fresh Produce','Bakery','Butchery','Groceries','Beverages','Household','Personal Care','Frozen Foods','Electronics','Other'],
-    colors:{'Fresh Produce':'#4c7a52', Bakery:'#e2a034', Butchery:'#b33f2e', Groceries:'#5c6670', Beverages:'#2f7a8c', Household:'#6a4c93', 'Personal Care':'#e2a034', 'Frozen Foods':'#2f7a8c', Electronics:'#4c7a52', Other:'#5c6670'},
+    cats: GENERAL_RETAIL_CATS,
+    colors: GENERAL_RETAIL_COLORS,
     starter:[
       {sku:'SM-TOMATOES-KG', name:'Tomatoes (per kg)', price:120, stock:40, cat:'Fresh Produce'},
       {sku:'SM-ONIONS-KG', name:'Onions (per kg)', price:100, stock:40, cat:'Fresh Produce'},
       {sku:'SM-BANANAS-KG', name:'Bananas (per kg)', price:80, stock:30, cat:'Fresh Produce'},
       {sku:'SM-BREAD-WHITE', name:'White Bread 400g', price:65, stock:35, cat:'Bakery'},
       {sku:'SM-BREAD-BROWN', name:'Brown Bread 400g', price:70, stock:25, cat:'Bakery'},
-      {sku:'SM-BEEF-KG', name:'Beef (per kg)', price:650, stock:20, cat:'Butchery'},
-      {sku:'SM-CHICKEN-KG', name:'Chicken (per kg)', price:450, stock:20, cat:'Butchery'},
-      {sku:'SM-RICE-2KG', name:'Pishori Rice 2kg', price:280, stock:30, cat:'Groceries'},
-      {sku:'SM-MAIZEFLOUR-2KG', name:'Maize Flour 2kg', price:180, stock:40, cat:'Groceries'},
-      {sku:'SM-COOKINGOIL-2L', name:'Cooking Oil 2L', price:520, stock:25, cat:'Groceries'},
+      {sku:'SM-BEEF-KG', name:'Beef (per kg)', price:650, stock:20, cat:'Butchery & Meat'},
+      {sku:'SM-CHICKEN-KG', name:'Chicken (per kg)', price:450, stock:20, cat:'Butchery & Meat'},
+      {sku:'SM-RICE-2KG', name:'Pishori Rice 2kg', price:280, stock:30, cat:'Rice, Pasta & Legumes'},
+      {sku:'SM-MAIZEFLOUR-2KG', name:'Maize Flour 2kg', price:180, stock:40, cat:'Cereals, Flour & Grains'},
+      {sku:'SM-COOKINGOIL-2L', name:'Cooking Oil 2L', price:520, stock:25, cat:'Cooking Oil & Fats'},
       {sku:'SM-SODA-2L', name:'Soda 2L', price:150, stock:30, cat:'Beverages'},
       {sku:'SM-JUICE-1L', name:'Juice 1L', price:200, stock:20, cat:'Beverages'},
-      {sku:'SM-DETERGENT-1KG', name:'Washing Powder 1kg', price:280, stock:20, cat:'Household'},
-      {sku:'SM-TISSUE-PACK', name:'Toilet Tissue (4-pack)', price:220, stock:25, cat:'Household'},
-      {sku:'SM-TOOTHPASTE', name:'Toothpaste 100ml', price:150, stock:30, cat:'Personal Care'},
-      {sku:'SM-SOAP-BAR', name:'Bathing Soap Bar', price:90, stock:40, cat:'Personal Care'},
+      {sku:'SM-DETERGENT-1KG', name:'Washing Powder 1kg', price:280, stock:20, cat:'Household & Cleaning'},
+      {sku:'SM-TISSUE-PACK', name:'Toilet Tissue (4-pack)', price:220, stock:25, cat:'Household & Cleaning'},
+      {sku:'SM-TOOTHPASTE', name:'Toothpaste 100ml', price:150, stock:30, cat:'Personal Care & Toiletries'},
+      {sku:'SM-SOAP-BAR', name:'Bathing Soap Bar', price:90, stock:40, cat:'Personal Care & Toiletries'},
       {sku:'SM-ICECREAM-1L', name:'Ice Cream 1L', price:450, stock:12, cat:'Frozen Foods'},
       {sku:'SM-FROZEN-VEG', name:'Frozen Mixed Vegetables 500g', price:250, stock:15, cat:'Frozen Foods'},
-      {sku:'SM-PHONE-CHARGER', name:'Phone Charger (generic)', price:450, stock:15, cat:'Electronics'},
-      {sku:'SM-BATTERIES-AA', name:'AA Batteries (4-pack)', price:180, stock:20, cat:'Electronics'},
+      {sku:'SM-PHONE-CHARGER', name:'Phone Charger (generic)', price:450, stock:15, cat:'Electronics & Accessories'},
+      {sku:'SM-BATTERIES-AA', name:'AA Batteries (4-pack)', price:180, stock:20, cat:'Electronics & Accessories'},
     ]
   },
   agrovet: {
@@ -2382,6 +2408,16 @@ async function applyBusinessTypes(typeIds, {announce=true, pushToBackend=true} =
   });
   CATS = ['All', ...mergedCats];
   CAT_COLORS = mergedColors;
+  // Custom categories a shop added on top of its business type(s) (see addCustomCategory())
+  // live in their own setting, independent of which type(s) are active, so they survive a
+  // business-type switch or a resync instead of being wiped by the fresh CATS array above —
+  // this runs on every applyBusinessTypes call, including the silent ones a pull triggers.
+  customCategories.forEach(c=>{
+    if(!CATS.includes(c.name)){
+      CATS.push(c.name);
+      CAT_COLORS[c.name] = c.color;
+    }
+  });
   activeCat = 'All';
   currentBusinessTypes = ids;
   // Always stamp updated_at here, even on a pull-triggered call — this function's own put()
@@ -2435,10 +2471,19 @@ function log(msg, cls=''){
 }
 
 // ---------- Category chips ----------
-function populateCatSelect(){
+function populateCatSelect(ensureValue){
   const sel = $('newCat');
   const cats = CATS.filter(c=>c!=='All');
-  sel.innerHTML = cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  // A product's stored category can stop being one of the "live" options — a shop admin
+  // renamed/merged categories, or (as happened when the built-in duka/supermarket lists were
+  // expanded) a whole built-in list changed its category names. Without this, re-opening that
+  // product for editing would silently fail to select anything in the dropdown (the browser
+  // just shows it blank, there's no error), and saving unchanged would quietly blank out — not
+  // preserve — its real category. Appending the old value as its own option, clearly marked,
+  // keeps it visible and selected until someone deliberately picks a different one.
+  const extra = (ensureValue && !cats.includes(ensureValue)) ? [ensureValue] : [];
+  sel.innerHTML = cats.map(c=>`<option value="${c}">${c}</option>`).join('')
+    + extra.map(c=>`<option value="${c}">${c} (no longer a listed category)</option>`).join('');
 }
 function renderCatRow(){
   const row = $('catRow'); row.innerHTML='';
@@ -3583,7 +3628,7 @@ $('liveScanStockBtn').addEventListener('click', ()=>{
     const existing = products.find(p=>p.sku===code);
     if(existing){
       $('newName').value = existing.name;
-      populateCatSelect();
+      populateCatSelect(existing.cat);
       $('newCat').value = existing.cat;
       $('newPrice').value = existing.price;
       toast('Matched existing product: '+existing.name+' — enter quantity received and save');
@@ -3667,7 +3712,7 @@ function editProduct(sku){
     if(!p) return;
     $('newSku').value = p.sku;
     $('newName').value = p.name;
-    populateCatSelect();
+    populateCatSelect(p.cat);
     $('newCat').value = p.cat;
     $('newCost').value = p.cost || '';
     $('newPrice').value = p.price;
@@ -3853,6 +3898,43 @@ async function saveSuppliers(){
   await put('settings', {key:'suppliers', value: SUPPLIERS});
   await queuePush('settings_upsert', {key:'suppliers', value: SUPPLIERS});
 }
+
+// ---------- Custom categories — a shop's own additions on top of its business type's list ----------
+// The built-in duka/supermarket category list is comprehensive, but no fixed list covers every
+// shop's real inventory (a duka that also does photocopying, a chemist that stocks cosmetics,
+// etc.), so this lets any admin add one more category on the spot from Feed Stock, without
+// needing a code change here. Stored shop-wide (synced like suppliers/branding), independent of
+// which business type(s) are active — see the merge in applyBusinessTypes().
+let customCategories = []; // [{name, color}]
+const CUSTOM_CAT_COLOR_CYCLE = ['#4c7a52','#2f7a8c','#b33f2e','#e2a034','#6a4c93','#8c6a4a','#b8862b','#7a2f3f'];
+async function loadCustomCategories(){
+  const s = await getSetting('custom_categories');
+  customCategories = (s && Array.isArray(s.value)) ? s.value : [];
+}
+async function saveCustomCategories(){
+  await put('settings', {key:'custom_categories', value: customCategories, updated_at: new Date().toISOString()});
+  await queuePush('settings_upsert', {key:'custom_categories', value: customCategories});
+}
+async function addCustomCategory(){
+  const name = (prompt('New category name (e.g. "Pet Supplies", "Photocopy & Printing"):') || '').trim();
+  if(!name) return;
+  const existingNames = CATS.filter(c=>c!=='All').map(c=>c.toLowerCase());
+  if(existingNames.includes(name.toLowerCase())){
+    toast('That category already exists.');
+    populateCatSelect(); $('newCat').value = CATS.find(c=>c.toLowerCase()===name.toLowerCase());
+    return;
+  }
+  const color = CUSTOM_CAT_COLOR_CYCLE[customCategories.length % CUSTOM_CAT_COLOR_CYCLE.length];
+  customCategories.push({name, color});
+  await saveCustomCategories();
+  CATS.push(name);
+  CAT_COLORS[name] = color;
+  populateCatSelect();
+  $('newCat').value = name; // jump straight to it so the product being added can use it immediately
+  renderCatRow();
+  toast('Added category: '+name);
+}
+$('addCategoryBtn').addEventListener('click', addCustomCategory);
 // Keeps the visible <select> and the hidden #newSupplier bridge input in sync — addStock()
 // and editProduct() already read/write #newSupplier directly, so routing the dropdown
 // through that same hidden field means neither of them needed to change at all.
@@ -6015,7 +6097,7 @@ async function clearLocalShopData(){
     // error handling (tryPinCheckpoint's catch) surfaces it instead of quietly carrying on.
     await new Promise((res,rej)=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error||new Error('Could not clear '+store)); });
   }
-  for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_business_types','credit_sales_enabled','last_stock_take_at','table_view_enabled']){
+  for(const key of ['active_business_types','vat','business_profile','receipt','branding','suppliers','custom_categories','custom_business_types','credit_sales_enabled','last_stock_take_at','table_view_enabled']){
     try{ await del('settings', key); }catch(e){ /* fine if it never existed locally */ }
   }
   await refreshUserCache(); // the previous shop's staff must not linger in the fast PIN-check cache after a switch
@@ -6204,6 +6286,16 @@ async function pullShopData(fullPull, force){
       if(changedKeys.has('vat') || changedKeys.has('credit_sales_enabled') || changedKeys.has('table_view_enabled') || changedKeys.has('receipt')) await loadSettingsPanelValues();
       if(changedKeys.has('branding')) await loadBranding();
       if(changedKeys.has('suppliers')) await loadSuppliers();
+      // A category added on another device needs both a reload AND a re-merge into CATS/
+      // CAT_COLORS — reapplying the currently active business type(s) does both at once (see
+      // the customCategories merge inside applyBusinessTypes), without needing its own copy of
+      // that merge logic here. Skipped when pulledBusinessTypes already triggers the same
+      // rebuild below, so a category and a type change arriving in the same pull don't apply it
+      // twice.
+      if(changedKeys.has('custom_categories')){
+        await loadCustomCategories();
+        if(!pulledBusinessTypes) await applyBusinessTypes(currentBusinessTypes, {announce:false, pushToBackend:false});
+      }
       if(pulledBusinessTypes) await applyBusinessTypes(pulledBusinessTypes, {announce:false, pushToBackend:false});
     }
     // Sales from OTHER devices — so the admin can see a cashier's phone sales too.
@@ -8606,6 +8698,7 @@ async function init(){
   await seedIfEmpty();
   await ensureTodaySnapshot();
   await loadCustomBusinessTypes();
+  await loadCustomCategories(); // must land before applyBusinessTypes() below, which merges it in
   await loadSuppliers();
   await loadPlatformBusinessTypes();
   await loadSettingsPanelValues(); // VAT + receipt prefs, needed before the first sale can be rung up correctly
