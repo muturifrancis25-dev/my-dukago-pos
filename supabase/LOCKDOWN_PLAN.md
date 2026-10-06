@@ -41,3 +41,23 @@ A device can only touch rows whose `shop_id` matches its own verified session, o
 ## Risks
 - Old builds / devices offline since before the change stop syncing until they sign in online once.
 - A wrong policy shows up as silent sync failures; test sale, stock, M-Pesa, table orders, PO sync per step.
+
+## Design decisions (2026-10-07)
+- Sessions come from Supabase Auth (works whatever JWT signing the project uses). One auth user per staff
+  member: email `<staff_id>@staff.invalid`, password = HMAC-SHA256(SERVICE_ROLE_KEY, 'staff-pw:'+staff_id)
+  computed inside the edge function only (no new secret to manage). `app_metadata` = {shop_id, staff_id, role}.
+- `shop-auth` edge function, actions: `login` {pin, shopId?} -> {staff row, session} or {code:'not_found'|'other_shop'|'suspended'};
+  `prefix_exists` {pin prefix}; `pin_unique` {pin, excludeStaffId}; `register_shop` (new shop + first admin).
+- DB trigger on `staff`: when active/role changes, update auth.users (role claim, banned_until) so a
+  deactivated/demoted person's token stops working at its next refresh.
+- Platform Administrator: `super-admin-login` must return a signed, short-lived platform token and the
+  platform screens (shops list/patch, billing + shop_payments, admin PIN reset, platform_business_types)
+  must call an edge function with it. Fingerprint sign-in for the platform admin needs a re-verify step.
+
+## App touch-points that rely on the open anon key today (all must change in the app release)
+- Sign-in lookups: lookupPinGlobally, lookupPinForThisShop, pinPrefixExists, the PIN-uniqueness check (staff?pin=...).
+- Sync: pushToSupabase / pullShopData (every shop table), adjust_stock + next_po_number RPCs, shop active/licence checks.
+- Platform: shops list/PATCH, licence, billing, shop_payments, admin PIN reset (staff PATCH), platform_business_types, mpesa_c2b_payments.
+- M-Pesa: mpesa_requests status polling (read-only for the shop is enough).
+- Open design question: staff PINs are synced to every device of a shop for offline sign-in; hashing them
+  means offline checks compare a hash (salted with staff id) instead of the raw PIN.
