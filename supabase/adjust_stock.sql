@@ -15,16 +15,17 @@
 -- HOW TO APPLY: open this project's Supabase dashboard → SQL Editor → paste this whole file →
 -- Run. Safe to re-run (CREATE OR REPLACE).
 
-create or replace function adjust_stock(p_shop_id text, p_sku text, p_delta numeric)
+create or replace function public.adjust_stock(p_shop_id text, p_sku text, p_delta numeric)
 returns table(sku text, stock numeric)
 language plpgsql
+set search_path = public
 as $$
 begin
   return query
-    update products
-       set stock = coalesce(stock, 0) + p_delta,
+    update public.products
+       set stock = coalesce(products.stock, 0) + p_delta,
            updated_at = now()
-     where products.shop_id = p_shop_id
+     where products.shop_id = p_shop_id::uuid -- products.shop_id is uuid; the app sends it as text
        and products.sku = p_sku
     returning products.sku, products.stock;
 end;
@@ -40,4 +41,4 @@ $$;
 -- `create or replace function` line above and re-running this file — that widens ONLY this one
 -- narrow, parameterized operation (stock, by shop_id+sku, by a fixed delta), not general table
 -- access, so it stays safe to do even though it skips RLS.
-grant execute on function adjust_stock(text, text, numeric) to anon, authenticated;
+grant execute on function public.adjust_stock(text, text, numeric) to anon, authenticated;
