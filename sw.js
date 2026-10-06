@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v5-2026-10-03';
+const CACHE_NAME = 'my-duka-pos-shell-v6-2026-10-07';
 const SHELL_FILES = [
   './index.html',
   './manifest.json',
@@ -44,6 +44,11 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request, { cache: 'no-store' })
       .then((response) => {
+        // Only a genuine success is ever saved or served as "the app". A 404/5xx from the host
+        // (e.g. GitHub Pages being unpublished) is a successful *fetch* but not a usable page —
+        // caching it would overwrite the good offline copy and leave offline phones showing
+        // "File not found". Throwing sends it down the .catch below to the last good cached copy.
+        if(!response.ok && !response.redirected && response.type !== 'opaque') throw new Error('bad response '+response.status);
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
