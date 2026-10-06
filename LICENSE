@@ -1,0 +1,16 @@
+Copyright (c) 2026 Frank Muturi. All rights reserved.
+
+My DukaGO POS (the "Software") is proprietary. No permission is granted to
+copy, modify, distribute, sublicense, host, resell, or create derivative works
+of the Software, in whole or in part, without prior written permission from
+the copyright holder.
+
+Use of the Software by a shop or business is permitted only under a valid
+subscription or licence agreement with the copyright holder.
+
+The Software includes third-party components under their own licences:
+- ZXing-js (zxing.min.js), Apache License 2.0, https://github.com/zxing-js/library
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY ARISING FROM ITS USE.
