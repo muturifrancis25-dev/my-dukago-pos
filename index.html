@@ -375,7 +375,7 @@
   }
   .keypad button:active{background:var(--marigold-pale);}
   .keypad button.keypad-sub{font-family:var(--sans); font-size:11.5px; font-weight:600; color:var(--muted);}
-  .login-hint{margin-top:12px !important; font-size:10.5px !important; color:var(--muted) !important;}
+  .login-hint{margin-top:6px !important; font-size:12.5px !important; text-align:center; color:var(--muted) !important;}
 
   .modal-fingerprint{
     width:100%; background:var(--bg); border:1.5px dashed var(--line); color:var(--accent-text);
@@ -1148,6 +1148,12 @@
   <!-- ============ SYNC (admin) ============ -->
   <section class="view" id="view-sync">
     <div class="panel">
+      <h3>Shop Code</h3>
+      <p class="hint">Enter this once on any new phone or computer to connect it to this shop. Staff then sign in with their own PIN. Share it only with your own staff.</p>
+      <div id="shopCodeDisplay" style="font-family:var(--mono); font-size:26px; font-weight:700; letter-spacing:4px;">—</div>
+    </div>
+
+    <div class="panel">
       <h3>Tax (VAT)</h3>
       <p class="hint">Prices at the counter are tax-inclusive — VAT is already inside the price shown on each tile, not added at checkout. Turning this on just splits it out on the receipt and in reports so it's visible, without changing what the customer pays. The toggle applies immediately — no separate save needed.</p>
       <div class="toggle-row">
@@ -1366,16 +1372,24 @@
     <p style="text-align:center; font-size:9px; color:#c9beac; opacity:.6; margin:-4px 0 10px; font-family:var(--mono);" id="loginBuildTag"></p>
     <p style="text-align:center; font-size:10.5px; color:var(--muted); margin:0 0 10px;">&copy; 2026 My DukaGO POS. All rights reserved. · <a href="privacy.html" target="_blank" rel="noopener" style="color:inherit;">Privacy</a> · <a href="terms.html" target="_blank" rel="noopener" style="color:inherit;">Terms</a></p>
     <button type="button" class="primary-btn" id="loginFingerprintBtn" style="display:none; width:100%; margin:0 0 12px;">👆 Sign in with fingerprint</button>
+    <div id="shopCodeRow" style="display:none; margin:0 0 14px; text-align:center;">
+      <p style="font-size:12px; color:var(--muted); margin:0 0 6px;">New phone or computer? Enter your Shop Code once.</p>
+      <div style="display:flex; gap:6px; justify-content:center;">
+        <input id="shopCodeInput" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SHOP CODE" style="width:130px; text-align:center; letter-spacing:3px; font-family:var(--mono); font-weight:700; text-transform:uppercase; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--panel); color:var(--ink);">
+        <button type="button" class="primary-btn" id="shopCodeBtn" style="padding:8px 14px;">Connect</button>
+      </div>
+      <p style="font-size:11px; color:var(--muted); margin:6px 0 0;">Setting up a brand-new shop? Use PIN 1234 below.</p>
+    </div>
     <div class="pin-dots" id="pinDots">
       <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
     </div>
+    <p class="login-hint" id="loginHint" style="min-height:34px; margin:6px 0 10px;"></p>
     <div class="keypad" id="loginKeypad">
       <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
       <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
       <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
       <button data-k="clear" class="keypad-sub">Clear</button><button data-k="0">0</button><button data-k="back" class="keypad-sub">⌫</button>
     </div>
-    <p class="login-hint" id="loginHint"></p>
     <p id="platformAdminLinkWrap" style="text-align:center; margin:14px 0 0; padding:10px; cursor:pointer;"><span id="platformAdminLink" style="font-size:11px; color:var(--muted); opacity:.7; text-decoration:underline dotted;">Platform Administrator</span></p>
   </div>
 </div>
@@ -1879,8 +1893,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-pin-idle-clear-25';
-const BUILD_DATE_LABEL = '07 Oct 2026, 01:20';
+const BUILD_VERSION = '2026-10-07-shop-code-26';
+const BUILD_DATE_LABEL = '07 Oct 2026, 01:45';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2989,7 +3003,7 @@ async function loadAllShopsList(){
           <div>
             <b>${s.name || 'Unnamed shop'}</b> ${badgeColor ? `<span style="color:${badgeColor}; font-weight:700; font-size:10.5px;">· ${licenseStatus.toUpperCase()}</span>` : ''}<br>
             <span style="color:var(--muted); font-family:var(--mono); font-size:10.5px;">${s.id}</span><br>
-            <span style="color:var(--muted);">Set up ${created} · ${PLAN_INFO[s.plan] ? PLAN_INFO[s.plan].label+' (KSh '+PLAN_INFO[s.plan].price+')' : 'Small shop'}${s.license_expires_at ? ' · paid until '+new Date(s.license_expires_at).toLocaleDateString('en-KE') : ' · no expiry set'}</span>
+            <span style="color:var(--muted);">${s.shop_code ? 'Code <b style="font-family:var(--mono); letter-spacing:1px;">'+s.shop_code+'</b> · ' : ''}Set up ${created} · ${PLAN_INFO[s.plan] ? PLAN_INFO[s.plan].label+' (KSh '+PLAN_INFO[s.plan].price+')' : 'Small shop'}${s.license_expires_at ? ' · paid until '+new Date(s.license_expires_at).toLocaleDateString('en-KE') : ' · no expiry set'}</span>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px; flex:none;">
             <button class="${isActive ? 'modal-cancel' : 'primary-btn'}" data-toggle-shop="${s.id}" data-currently-active="${isActive}" style="font-size:11px; padding:6px 10px;">${isActive ? 'Deactivate' : 'Reactivate'}</button>
@@ -6194,7 +6208,73 @@ function makeShopId(){
 async function loadShopIdentity(){
   const savedId = await getSetting('shop_id');
   shopId = savedId ? savedId.value : null;
+  try{
+    const lk = await getSetting('pin_lockout');
+    if(lk && lk.value){ pinFails = lk.value.fails||0; pinLockedUntil = lk.value.until||0; }
+  }catch(e){}
+  refreshShopCodeRow();
 }
+// ---------- Wrong-PIN lockout: 5 wrong entries pause sign-in on this device for 3 minutes ----------
+const PIN_MAX_FAILS = 5, PIN_LOCK_MS = 3*60*1000;
+let pinFails = 0, pinLockedUntil = 0;
+function persistPinLockout(){ put('settings', {key:'pin_lockout', value:{fails:pinFails, until:pinLockedUntil}}).catch(()=>{}); }
+function isPinLocked(){
+  if(Date.now() >= pinLockedUntil) return false;
+  const sec = Math.ceil((pinLockedUntil-Date.now())/1000);
+  setLoginHint(`Too many wrong PINs. Try again in ${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}.`, true);
+  return true;
+}
+function noteWrongPin(){
+  pinFails++;
+  if(pinFails >= PIN_MAX_FAILS){
+    pinLockedUntil = Date.now()+PIN_LOCK_MS; pinFails = 0;
+    try{ logAudit('Sign-in paused after repeated wrong PINs', 'this device, 3 minutes'); }catch(e){}
+    setTimeout(isPinLocked, 40);
+  }
+  persistPinLockout();
+}
+function noteGoodPin(){ if(pinFails){ pinFails = 0; persistPinLockout(); } }
+// ---------- Shop Code: a new device attaches itself to a shop once, then only PINs are typed ----------
+function refreshShopCodeRow(){ const r=$('shopCodeRow'); if(r) r.style.display = shopId ? 'none' : 'block'; }
+async function connectWithShopCode(){
+  const input = $('shopCodeInput');
+  const code = (input.value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(isPinLocked()) return;
+  if(code.length!==5){ setLoginHint('A Shop Code is 5 letters and numbers.', true); return; }
+  if(!(isOnline && backendLive())){ setLoginHint('Connect to the internet to enter a Shop Code.', true); return; }
+  setLoginHint('Checking Shop Code…', false);
+  try{
+    const res = await fetchT(`${supaUrl}/rest/v1/shops?shop_code=eq.${code}&select=id,name,active`, {headers: sbHeaders()}, 8000);
+    const rows = res.ok ? await res.json() : null;
+    if(!rows){ setLoginHint('Could not check the code — try again.', true); return; }
+    if(!rows.length){ noteWrongPin(); setLoginHint('No shop has that code. Check it and try again.', true); shakePinDots(); return; }
+    if(rows[0].active===false){ setLoginHint('This shop is switched off. Contact My DukaGO support.', true); return; }
+    await pullSpecificShop(rows[0].id);
+    await put('settings', {key:'shop_code', value:code});
+    input.value = '';
+    refreshShopCodeRow();
+    noteGoodPin();
+    setLoginHint(`Connected to ${rows[0].name||'your shop'}. Now enter your PIN.`, false);
+  }catch(e){
+    setLoginHint('Could not connect: '+(e&&e.message?e.message:'try again'), true);
+  }
+}
+async function loadShopCodeDisplay(){
+  const el = $('shopCodeDisplay'); if(!el) return;
+  try{ const c = await getSetting('shop_code'); if(c && c.value) el.textContent = c.value; }catch(e){}
+  if(!shopId || !(isOnline && backendLive())) return;
+  try{
+    const res = await fetchT(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=shop_code`, {headers: sbHeaders()}, 5000);
+    if(!res.ok) return;
+    const rows = await res.json();
+    if(rows && rows[0] && rows[0].shop_code){ el.textContent = rows[0].shop_code; put('settings', {key:'shop_code', value:rows[0].shop_code}).catch(()=>{}); }
+  }catch(e){}
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const b=$('shopCodeBtn'), i=$('shopCodeInput');
+  if(b) b.addEventListener('click', connectWithShopCode);
+  if(i) i.addEventListener('keydown', e=>{ if(e.key==='Enter') connectWithShopCode(); });
+});
 // Creates the shop record itself. Does NOT create any user — that only happens once the new
 // admin PIN is confirmed (see the setAdminPinScreen flow), so a half-finished setup never
 // leaves a real, usable "1234" account sitting in the database.
@@ -6343,6 +6423,7 @@ async function pullSpecificShop(targetShopId){
   await clearLocalShopData();
   await pullShopData(true, true); // force=true — a genuine first-time shop adoption must always trust the server completely, never a stale local timestamp comparison
   logAudit('Joined shop via PIN lookup', 'first shop on this device');
+  refreshShopCodeRow();
 }
 // Checked before saving ANY new or changed PIN — local first (works offline), then the whole
 // platform if online. A PIN must be unique everywhere, not just within one shop, since a PIN
@@ -8092,7 +8173,7 @@ function switchBackofficeView(viewName){
   if(viewName==='reports') renderReports();
   if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
   if(viewName==='audit') renderAuditTable();
-  if(viewName==='sync') loadSettingsPanelValues();
+  if(viewName==='sync'){ loadSettingsPanelValues(); loadShopCodeDisplay(); }
 }
 document.querySelectorAll('.backoffice-nav button[data-view]').forEach(b=>{
   b.addEventListener('click', ()=>switchBackofficeView(b.dataset.view));
@@ -8237,6 +8318,7 @@ async function tryPinCheckpoint(){
   }
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
   disarmPinIdleClear();
+  if(isPinLocked()){ pinBuffer=''; setTimeout(updatePinDots, 200); return; }
   const myGeneration = ++pinCheckGeneration;
   const stale = () => myGeneration !== pinCheckGeneration || !!currentUser;
   // Everything below this point used to be able to fail SILENTLY: an unexpected error from
@@ -8272,6 +8354,15 @@ async function tryPinCheckpoint(){
   if(stale()) return;
   const localMatch = users.find(x => x.pin===pinBuffer && x.active!==false);
   if(localMatch){ cachedUsers = users; await attemptLogin(localMatch); return; }
+
+  // A device with no shop yet no longer searches the whole platform by PIN: it must be attached
+  // with a Shop Code first (the code row above the keypad).
+  if(!shopId){
+    setLoginHint("This phone isn't connected to a shop yet. Enter your Shop Code above first.", true);
+    shakePinDots();
+    pinBuffer=''; setTimeout(updatePinDots, 200);
+    return;
+  }
 
   // Not found locally. If online, check the backend — but WHICH check depends on whether this
   // device already belongs to a shop. A brand-new device (no shopId yet) is allowed to find
@@ -8372,6 +8463,7 @@ async function tryPinCheckpoint(){
       // the real issue is "right PIN, wrong device."
       if(needsGlobalCheck){
         if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
+          noteWrongPin();
           toast('Wrong shop — this PIN belongs to a different shop.');
           setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
           shakePinDots();
@@ -8386,6 +8478,7 @@ async function tryPinCheckpoint(){
         if(!elsewhereMatch){
           // Checked this shop, then the whole platform — truly nowhere. A confirmed, specific
           // answer, not just "incorrect": this PIN was never registered to any shop at all.
+          noteWrongPin();
           toast("This PIN doesn't exist — it isn't registered to any shop.");
           setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
           shakePinDots();
@@ -8417,6 +8510,7 @@ async function tryPinCheckpoint(){
     return;
   }
   // Nothing matched at either length, anywhere.
+  noteWrongPin();
   toast('Incorrect PIN');
   setLoginHint('Incorrect PIN — try again.', true);
   shakePinDots();
@@ -8454,6 +8548,7 @@ $('loginKeypad').addEventListener('click', e=>{
 // A physical/USB numeric keypad or keyboard works too
 document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
+  if(e.target && e.target.id==='shopCodeInput') return; // typing a Shop Code must not feed the PIN pad
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){
     if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } // see the click handler's comment above
     disarmPinIdleClear();
@@ -8635,6 +8730,7 @@ async function attemptLogin(u){
     return;
   }
   pinBuffer='';
+  noteGoodPin();
   stopSceneRotation();
   await completeSignIn(u);
 }
