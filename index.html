@@ -1879,8 +1879,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-billing-20';
-const BUILD_DATE_LABEL = '07 Oct 2026, 09:40';
+const BUILD_VERSION = '2026-10-07-faster-pin-flags-21';
+const BUILD_DATE_LABEL = '07 Oct 2026, 10:10';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -8180,7 +8180,7 @@ async function tryPinCheckpoint(){
       pinCheckTimer = null;
       if(pinBuffer !== attemptedPin || currentUser) return;
       setLoginHint(`Incomplete PIN — ${pinBuffer.length} digit(s) so far. Staff PINs are 4 digits, Admin PINs are 6.`, false);
-    }, 1200);
+    }, 700);
     return;
   }
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
@@ -8233,7 +8233,7 @@ async function tryPinCheckpoint(){
     // of premature feedback that caused confusion before. A finished entry checking the network
     // is worth saying out loud, especially now that it can take up to several seconds on a weak
     // connection before timing out — silence during that wait is what reads as "not responding."
-    if(pinBuffer.length===MAX_PIN_LENGTH) toast('Checking…');
+    if(pinBuffer.length===MAX_PIN_LENGTH){ toast('Checking…'); setLoginHint('Checking this PIN…', false); }
 
     if(!shopId){
       // Brand-new device — find this PIN's shop anywhere on the platform, same as before.
@@ -8372,17 +8372,21 @@ async function tryPinCheckpoint(){
       pinCheckTimer = setTimeout(async ()=>{
         pinCheckTimer = null;
         if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return;
-        const couldStillBeTyping = await pinPrefixExists(attemptedPin);
+        setLoginHint('Checking this PIN…', false);
+        // Both questions are asked at once (they used to run one after the other, so a slow
+        // connection paid for two full round trips before any answer): "does anything here start
+        // with these digits?" and "does this exact PIN belong to some other shop?". The second
+        // is only acted on if the first says nothing could still be being typed.
+        const [couldStillBeTyping, elsewhereMatch] = await Promise.all([
+          pinPrefixExists(attemptedPin),
+          lookupPinGlobally(attemptedPin),
+        ]);
         if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return; // stale by the time the check returned
         if(!couldStillBeTyping){
-          // pinPrefixExists is deliberately scoped to THIS shop once a device has one — but that
-          // means "nothing in this shop starts with these 4 digits" does NOT by itself mean the
-          // PIN doesn't exist anywhere: it could be a complete, valid, active 4-digit PIN that
-          // simply belongs to a different shop (same wrong-shop case the 6-digit path already
-          // handles). One more check, platform-wide, before calling it nonexistent — otherwise
-          // a cashier on the wrong device would be told their real PIN "doesn't exist" at all.
-          const elsewhereMatch = await lookupPinGlobally(attemptedPin);
-          if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return;
+          // pinPrefixExists is deliberately scoped to THIS shop once a device has one — so "nothing
+          // in this shop starts with these 4 digits" does NOT by itself mean the PIN doesn't exist
+          // anywhere: it could be a complete, valid 4-digit PIN that belongs to a different shop
+          // (the same wrong-shop case the 6-digit path handles).
           if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
             toast('Wrong shop — this PIN belongs to a different shop.');
             setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
@@ -8392,8 +8396,10 @@ async function tryPinCheckpoint(){
           }
           shakePinDots();
           pinBuffer=''; setTimeout(updatePinDots, 200);
+        } else {
+          setLoginHint('', false); // could still be a longer PIN — back to quietly waiting
         }
-      }, 900);
+      }, 600);
     }
     return;
   }
@@ -8429,14 +8435,14 @@ $('loginKeypad').addEventListener('click', e=>{
   pinBuffer += k;
   updatePinDots();
   setLoginHint('');
-  setTimeout(tryPinCheckpoint, 120);
+  setTimeout(tryPinCheckpoint, 60);
 });
 // A physical/USB numeric keypad or keyboard works too
 document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){
     if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } // see the click handler's comment above
-    pinBuffer+=e.key; updatePinDots(); setLoginHint(''); setTimeout(tryPinCheckpoint,120);
+    pinBuffer+=e.key; updatePinDots(); setLoginHint(''); setTimeout(tryPinCheckpoint,60);
   }
   if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); }
 });
