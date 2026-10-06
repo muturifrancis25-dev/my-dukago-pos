@@ -1879,8 +1879,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-instant-pin-verdicts-23';
-const BUILD_DATE_LABEL = '07 Oct 2026, 10:45';
+const BUILD_VERSION = '2026-10-07-single-sync-pass-24';
+const BUILD_DATE_LABEL = '07 Oct 2026, 11:20';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2530,7 +2530,9 @@ function initials(name){ return name.split(' ').map(w=>w[0]).slice(0,2).join('')
 function log(msg, cls=''){
   const el=$('syncLog'); const time=new Date().toLocaleTimeString('en-KE',{hour12:false});
   const line=document.createElement('div'); line.innerHTML=`<span style="opacity:.6">[${time}]</span> <span class="${cls}">${msg}</span>`;
-  el.appendChild(line); el.scrollTop = el.scrollHeight;
+  el.appendChild(line);
+  while(el.childElementCount>300) el.removeChild(el.firstChild); // the log used to grow forever, one line per retry, all day
+  el.scrollTop = el.scrollHeight;
 }
 
 // ---------- Category chips ----------
@@ -6127,7 +6129,22 @@ async function pushStockAdjust(sku, delta){
   if(!delta) return; // nothing actually changed — don't queue a no-op network call
   await queuePush('stock_adjust', {sku, delta});
 }
-async function runSyncLoop(){
+// One sync pass at a time. There used to be NO guard: the 6-second timer, every queuePush() and the
+// "lock back office" button each started their own pass, and a pass is many sequential requests
+// (push each queued item, then ~15 pulls) — on a slow connection one pass easily outlasts 6 seconds,
+// so passes piled up on top of each other. That (a) saturated the connection so PIN look-ups sat
+// behind a queue of sync requests (the "screen goes unresponsive after a minute" report), and
+// (b) let two passes read the same queue and push the same item twice — harmless for upserts, but a
+// stock adjustment is a delta, so it could be applied twice. Callers that want the result just
+// await the pass that is already running.
+let syncLoopPromise = null;
+function runSyncLoop(){
+  if(!isOnline || !shopId) return Promise.resolve();
+  if(syncLoopPromise) return syncLoopPromise;
+  syncLoopPromise = runSyncLoopInner().catch(e=>{ try{ log('Sync pass failed: '+(e&&e.message||e), 'warn'); }catch(_){} }).finally(()=>{ syncLoopPromise = null; });
+  return syncLoopPromise;
+}
+async function runSyncLoopInner(){
   if(!isOnline || !shopId) return;
   const queue = await getAll('sync_queue');
   const live = backendLive();
