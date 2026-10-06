@@ -1879,8 +1879,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-single-sync-pass-24';
-const BUILD_DATE_LABEL = '07 Oct 2026, 11:20';
+const BUILD_VERSION = '2026-10-07-pin-idle-clear-25';
+const BUILD_DATE_LABEL = '07 Oct 2026, 01:20';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -8191,6 +8191,23 @@ function shakePinDots(){
 // a correct PIN was being rejected as "Incorrect PIN" when the actual cause was "not on this
 // device, and we can't check further because we're offline."
 let pinCheckTimer = null;
+// An entry that is still incomplete (1-3 or 5 digits, or 4 digits that only start a 6-digit Admin
+// PIN) is wiped on its own after a few idle seconds, so the next person never inherits a half-typed
+// PIN. Armed only where the verdict is "incomplete / keep typing"; every keystroke, Clear and
+// Backspace disarms it, so it can never cut into someone who is still typing.
+let pinIdleTimer = null;
+const PIN_IDLE_CLEAR_MS = 5000;
+function disarmPinIdleClear(){ if(pinIdleTimer){ clearTimeout(pinIdleTimer); pinIdleTimer=null; } }
+function armPinIdleClear(){
+  disarmPinIdleClear();
+  pinIdleTimer = setTimeout(()=>{
+    pinIdleTimer = null;
+    if(currentUser || !pinBuffer || pinBuffer.length>=MAX_PIN_LENGTH) return;
+    pinCheckGeneration++;
+    pinBuffer=''; updatePinDots();
+    setLoginHint('Incomplete PIN cleared. Staff PINs are 4 digits, Admin PINs are 6.', false);
+  }, PIN_IDLE_CLEAR_MS);
+}
 // Bumped on every call to tryPinCheckpoint (i.e. every keystroke) and captured at the start of
 // each call. A slow lookup for an EARLIER, now-abandoned attempt (e.g. someone typed 4 digits,
 // nothing matched fast enough, so they kept typing and a different PIN already logged them in
@@ -8214,10 +8231,12 @@ async function tryPinCheckpoint(){
       setLoginHint(pinBuffer.length<4
         ? `Incomplete PIN — ${pinBuffer.length} digit(s) so far. Staff PINs are 4 digits, Admin PINs are 6.`
         : `Incomplete PIN — 5 digits so far. Admin PINs are 6 digits.`, false);
+      armPinIdleClear();
     }
     return;
   }
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
+  disarmPinIdleClear();
   const myGeneration = ++pinCheckGeneration;
   const stale = () => myGeneration !== pinCheckGeneration || !!currentUser;
   // Everything below this point used to be able to fail SILENTLY: an unexpected error from
@@ -8301,6 +8320,7 @@ async function tryPinCheckpoint(){
         // Not a complete PIN anywhere, but a 6-digit Admin PIN does start with these 4 digits —
         // so this is most likely someone mid-way through typing it. Say so; never erase it.
         setLoginHint('Keep typing — these 4 digits start a 6-digit Admin PIN.', false);
+        armPinIdleClear();
         return;
       }
       if(pinBuffer.length===MAX_PIN_LENGTH || pinBuffer.length===4){
@@ -8360,6 +8380,7 @@ async function tryPinCheckpoint(){
         }
         if(!elsewhereMatch && pinBuffer.length===4 && prefixAnywhere){
           setLoginHint('Keep typing — these 4 digits start a 6-digit Admin PIN.', false);
+          armPinIdleClear();
           return;
         }
         if(!elsewhereMatch){
@@ -8392,6 +8413,7 @@ async function tryPinCheckpoint(){
     // this device hasn't synced yet, or the start of a 6-digit Admin PIN — so it only INFORMS, at
     // once, and never erases what was typed.
     setLoginHint("Not found on this device yet. If it's a 4-digit PIN, connect once to bring it in; if it's a 6-digit Admin PIN, keep typing.", false);
+    armPinIdleClear();
     return;
   }
   // Nothing matched at either length, anywhere.
@@ -8412,9 +8434,10 @@ async function tryPinCheckpoint(){
 $('loginKeypad').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-k]'); if(!btn) return;
   const k = btn.dataset.k;
-  if(k==='clear'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=''; updatePinDots(); setLoginHint(''); return; }
-  if(k==='back'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); return; }
+  if(k==='clear'){ disarmPinIdleClear(); if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=''; updatePinDots(); setLoginHint(''); return; }
+  if(k==='back'){ disarmPinIdleClear(); if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer = pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); return; }
   if(pinBuffer.length>=MAX_PIN_LENGTH) return;
+  disarmPinIdleClear();
   // Cancel any pending "give up on a 4-digit attempt" timer on EVERY keystroke, not only ones
   // that land on 4 or 6 digits. tryPinCheckpoint() itself only clears it at those two lengths —
   // a 5th digit lands in between and used to fall straight through a `return` before ever
@@ -8433,9 +8456,10 @@ document.addEventListener('keydown', e=>{
   if($('loginScreen').classList.contains('hide')) return;
   if(/^[0-9]$/.test(e.key) && pinBuffer.length<MAX_PIN_LENGTH){
     if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } // see the click handler's comment above
+    disarmPinIdleClear();
     pinBuffer+=e.key; updatePinDots(); setLoginHint(''); setTimeout(tryPinCheckpoint,60);
   }
-  if(e.key==='Backspace'){ if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); }
+  if(e.key==='Backspace'){ disarmPinIdleClear(); if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer=null; } pinCheckGeneration++; pinBuffer=pinBuffer.slice(0,-1); updatePinDots(); setLoginHint(''); }
 });
 
 // ---------- Set Admin PIN screen — what "1234" on a fresh device leads into ----------
