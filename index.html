@@ -617,6 +617,7 @@
 
   <!-- ============ TILL (default / cashier) VIEW ============ -->
   <section class="view active" id="view-till">
+    <div id="licenseBanner" style="display:none; background:var(--marigold-pale); border-bottom:2px solid var(--clay); padding:10px 18px; font-size:12.5px; font-weight:600;"></div>
     <div id="stockTakeBanner" style="display:none; background:var(--marigold-pale); border-bottom:2px solid var(--marigold); padding:10px 18px; font-size:12.5px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
       <span id="stockTakeBannerText" style="font-weight:600;"></span>
       <button class="primary-btn" id="stockTakeBannerBtn" style="padding:6px 14px; font-size:11.5px; display:none;">Start stock take</button>
@@ -1768,6 +1769,24 @@
     <h3 style="text-align:center;">Manage shop</h3>
     <p class="hint" id="manageShopName" style="text-align:center; margin:0 0 14px;">—</p>
 
+    <h3 style="font-size:13.5px;">Plan &amp; billing</h3>
+    <p class="hint">Monthly subscription. Setup is free. When the paid-until date passes by more than 7 days the shop is suspended automatically (hourly check); recording a payment reactivates it. A shop with no paid-until date is never auto-suspended.</p>
+    <div id="manageShopBillingStatus" style="font-size:12.5px; margin-bottom:8px;">Loading…</div>
+    <label>Plan</label>
+    <select id="manageShopPlan" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 8px;">
+      <option value="small">Small shop — KSh 500 / month</option>
+      <option value="medium">Medium (chemist, wholesale…) — KSh 1,000 / month</option>
+      <option value="large">Supermarket / restaurant — KSh 1,500 / month</option>
+    </select>
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <div style="flex:1;"><label>Months paid</label><input id="manageShopPayMonths" type="number" min="1" value="1" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line);"></div>
+      <div style="flex:1;"><label>Amount (KSh)</label><input id="manageShopPayAmount" type="number" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line);"></div>
+    </div>
+    <input id="manageShopPayRef" placeholder="M-Pesa code / reference (optional)" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-bottom:8px;">
+    <button class="primary-btn" id="manageShopRecordPaymentBtn" style="width:100%; margin-bottom:6px;">Record payment &amp; extend</button>
+    <button class="modal-cancel" id="manageShopSavePlanBtn" style="width:100%; margin-bottom:8px;">Save plan only (no payment)</button>
+    <div id="manageShopPaymentsList" style="font-size:11.5px; color:var(--muted); margin-bottom:18px;"></div>
+
     <h3 style="font-size:13.5px;">License</h3>
     <p class="hint">Controls whether this shop can sign in and sync at all. Suspending or cancelling signs out every device at that shop within moments of it next going online — data stays intact and picks up again the moment you reactivate.</p>
     <select id="manageShopLicenseStatus" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin-bottom:8px;">
@@ -1860,8 +1879,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-staff-cash-19';
-const BUILD_DATE_LABEL = '07 Oct 2026, 09:00';
+const BUILD_VERSION = '2026-10-07-billing-20';
+const BUILD_DATE_LABEL = '07 Oct 2026, 09:40';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2968,7 +2987,7 @@ async function loadAllShopsList(){
           <div>
             <b>${s.name || 'Unnamed shop'}</b> ${badgeColor ? `<span style="color:${badgeColor}; font-weight:700; font-size:10.5px;">· ${licenseStatus.toUpperCase()}</span>` : ''}<br>
             <span style="color:var(--muted); font-family:var(--mono); font-size:10.5px;">${s.id}</span><br>
-            <span style="color:var(--muted);">Set up ${created}</span>
+            <span style="color:var(--muted);">Set up ${created} · ${PLAN_INFO[s.plan] ? PLAN_INFO[s.plan].label+' (KSh '+PLAN_INFO[s.plan].price+')' : 'Small shop'}${s.license_expires_at ? ' · paid until '+new Date(s.license_expires_at).toLocaleDateString('en-KE') : ' · no expiry set'}</span>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px; flex:none;">
             <button class="${isActive ? 'modal-cancel' : 'primary-btn'}" data-toggle-shop="${s.id}" data-currently-active="${isActive}" style="font-size:11px; padding:6px 10px;">${isActive ? 'Deactivate' : 'Reactivate'}</button>
@@ -3019,11 +3038,117 @@ $('saRefreshShopsBtn').addEventListener('click', loadAllShopsList);
 
 // ---------- Manage Shop — Super Admin remote controls ----------
 let manageShopTargetId = null;
+
+// ---------- Plan & billing (Platform Administrator) ----------
+const PLAN_INFO = {
+  small:  {label:'Small shop', price:500},
+  medium: {label:'Medium', price:1000},
+  large:  {label:'Supermarket / restaurant', price:1500},
+};
+const BILLING_GRACE_DAYS = 7; // keep in step with suspend_expired_shops() in the database
+function addMonthsIso(fromDate, months){
+  const d = new Date(fromDate.getTime());
+  const day = d.getDate();
+  d.setDate(1); d.setMonth(d.getMonth()+months);
+  const last = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  d.setDate(Math.min(day,last));
+  return d;
+}
+function daysUntil(iso){ return Math.ceil((new Date(iso).getTime()-Date.now())/86400000); }
+function syncManageShopPayAmount(){
+  const plan = $('manageShopPlan').value;
+  const months = Math.max(1, parseInt($('manageShopPayMonths').value)||1);
+  $('manageShopPayAmount').value = PLAN_INFO[plan].price * months;
+}
+$('manageShopPlan').addEventListener('change', syncManageShopPayAmount);
+$('manageShopPayMonths').addEventListener('input', syncManageShopPayAmount);
+async function renderManageShopBilling(targetShopId){
+  $('manageShopBillingStatus').textContent = 'Loading…';
+  $('manageShopPaymentsList').innerHTML = '';
+  try{
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=plan,license_expires_at,license_status,active`, {headers: mpesaFunctionHeaders()});
+    if(!res.ok) throw new Error('shop');
+    const rows = await res.json();
+    const sh = rows[0] || {};
+    $('manageShopPlan').value = sh.plan || 'small';
+    syncManageShopPayAmount();
+    if(sh.license_expires_at){
+      const d = daysUntil(sh.license_expires_at);
+      const when = new Date(sh.license_expires_at).toLocaleDateString('en-KE');
+      $('manageShopBillingStatus').innerHTML = d>=0
+        ? `Paid until <b>${when}</b> (${d} day${d===1?'':'s'} left)`
+        : `<span style="color:var(--clay);"><b>Expired ${when}</b> — ${-d} day(s) ago${-d>BILLING_GRACE_DAYS ? ' (past grace period)' : ' (in grace period)'}</span>`;
+    } else {
+      $('manageShopBillingStatus').textContent = 'No paid-until date set — this shop is never auto-suspended.';
+    }
+    const pres = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_payments?shop_id=eq.${targetShopId}&select=*&order=paid_at.desc&limit=8`, {headers: mpesaFunctionHeaders()});
+    if(pres.ok){
+      const pays = await pres.json();
+      $('manageShopPaymentsList').innerHTML = pays.length
+        ? '<b>Recent payments</b><br>' + pays.map(x=>`${new Date(x.paid_at).toLocaleDateString('en-KE')} — KSh ${Number(x.amount).toLocaleString()} for ${x.months} mo${x.reference ? ' · '+String(x.reference).replace(/</g,'&lt;') : ''}`).join('<br>')
+        : 'No payments recorded yet.';
+    }
+  }catch(e){
+    $('manageShopBillingStatus').textContent = 'Could not load billing — check the connection';
+  }
+}
+let manageShopBillingBusy = false;
+$('manageShopSavePlanBtn').addEventListener('click', async ()=>{
+  if(!manageShopTargetId) return;
+  try{
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+      method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({plan: $('manageShopPlan').value}),
+    });
+    if(!res.ok){ toast('Could not save the plan'); return; }
+    logAudit('Set shop plan (Platform Administrator)', `${$('manageShopName').textContent} → ${$('manageShopPlan').value}`);
+    toast('Plan saved');
+    loadAllShopsList();
+  }catch(e){ toast('Could not save — check the connection'); }
+});
+$('manageShopRecordPaymentBtn').addEventListener('click', async ()=>{
+  if(!manageShopTargetId || manageShopBillingBusy) return;
+  const months = parseInt($('manageShopPayMonths').value);
+  const amount = parseFloat($('manageShopPayAmount').value);
+  const plan = $('manageShopPlan').value;
+  const reference = $('manageShopPayRef').value.trim();
+  if(!months || months<1){ toast('Enter how many months were paid'); return; }
+  if(!amount || amount<=0){ toast('Enter the amount received'); return; }
+  manageShopBillingBusy = true;
+  try{
+    const cur = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}&select=license_expires_at`, {headers: mpesaFunctionHeaders()});
+    if(!cur.ok) throw new Error('read');
+    const curRow = (await cur.json())[0] || {};
+    const now = new Date();
+    const base = (curRow.license_expires_at && new Date(curRow.license_expires_at) > now) ? new Date(curRow.license_expires_at) : now;
+    const newExpiry = addMonthsIso(base, months);
+    if(!confirm(`Record KSh ${amount.toLocaleString()} for ${months} month(s) on ${$('manageShopName').textContent}? Paid until becomes ${newExpiry.toLocaleDateString('en-KE')}.`)) return;
+    const payRes = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_payments`, {
+      method:'POST', headers: mpesaFunctionHeaders({'Prefer':'return=minimal'}),
+      body: JSON.stringify({shop_id: manageShopTargetId, amount, months, plan, reference: reference||null, recorded_by: superAdminName, extends_to: newExpiry.toISOString()}),
+    });
+    if(!payRes.ok){ toast('Could not record the payment — nothing was changed'); return; }
+    const upd = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+      method:'PATCH', headers: mpesaFunctionHeaders(),
+      body: JSON.stringify({plan, license_expires_at: newExpiry.toISOString(), active:true, license_status:'active', license_note:null}),
+    });
+    if(!upd.ok){ toast('Payment saved, but the shop could not be updated — check the connection and retry'); return; }
+    logAudit('Recorded shop payment (Platform Administrator)', `${$('manageShopName').textContent} — KSh ${amount} for ${months} month(s), paid until ${newExpiry.toLocaleDateString('en-KE')}`);
+    toast(`Recorded. Paid until ${newExpiry.toLocaleDateString('en-KE')}`);
+    $('manageShopPayRef').value = '';
+    renderManageShopBilling(manageShopTargetId);
+    renderManageShopLicense(manageShopTargetId);
+    loadAllShopsList();
+  }catch(e){
+    toast('Could not record the payment — check the connection');
+  } finally { manageShopBillingBusy = false; }
+});
+
 async function openManageShopModal(shopId, shopName){
   manageShopTargetId = shopId;
   $('manageShopName').textContent = shopName;
   $('manageShopNewPin').value = '';
   $('manageShopModal').classList.add('show');
+  await renderManageShopBilling(shopId);
   await renderManageShopLicense(shopId);
   await renderManageShopBizTypes(shopId);
   await renderManageShopAdminInfo(shopId);
@@ -8547,6 +8672,7 @@ async function completeSignIn(u, opts={}){
     setTimeout(()=>toast("Set up your business profile under Admin → Business"), opts.isNewSetup ? 3600 : 2200);
   }
   try{ await updateStockTakeBanner(); }catch(e){ log('Stock-take banner failed: '+e.message, 'warn'); }
+  refreshLicenseBanner();
   try{ await updateStockLowBadge(); }catch(e){ log('Low-stock badge failed: '+e.message, 'warn'); }
   try{ updateTableServiceVisibility(); }catch(e){ log('Table service visibility failed: '+e.message, 'warn'); }
   try{ scanInput.focus(); }catch(e){}
@@ -8565,6 +8691,34 @@ async function completeSignIn(u, opts={}){
     }
   }catch(e){ /* best-effort — never block or undo an already-successful sign-in over this */ }
 }
+
+// ---------- Subscription reminder banner (shop side) ----------
+// Shows from 7 days before the paid-until date, and during the grace period after it. Display only —
+// the actual suspension is done by the database (hourly), so an old or tampered app can't skip it.
+async function refreshLicenseBanner(){
+  const el = $('licenseBanner');
+  if(!el) return;
+  el.style.display = 'none';
+  if(!currentUser || !shopId || !backendLive()) return;
+  try{
+    const res = await fetchT(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=license_expires_at,plan`, {headers: sbHeaders()}, 6000);
+    if(!res.ok) return;
+    const row = (await res.json())[0];
+    if(!row || !row.license_expires_at) return;
+    const d = daysUntil(row.license_expires_at);
+    const price = PLAN_INFO[row.plan] ? PLAN_INFO[row.plan].price : null;
+    const priceTxt = price ? ` (KSh ${price.toLocaleString()}/month)` : '';
+    if(d < 0){
+      const left = Math.max(0, BILLING_GRACE_DAYS + d);
+      el.textContent = `⚠️ Your subscription expired ${-d} day(s) ago. Please renew${priceTxt} — the shop will be suspended in ${left} day(s).`;
+    } else if(d <= 7){
+      el.textContent = `Your subscription renews in ${d} day(s)${priceTxt}. Please pay on time to avoid interruption.`;
+    } else return;
+    el.style.display = 'block';
+  }catch(e){ /* best-effort */ }
+}
+setInterval(()=>{ refreshLicenseBanner(); }, 30*60*1000);
+
 async function updateStockTakeBanner(){
   const banner = $('stockTakeBanner');
   if(!stockTakeRequiredForThisShop() || !currentUser){ banner.style.display = 'none'; return; }
