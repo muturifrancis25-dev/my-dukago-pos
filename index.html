@@ -604,6 +604,7 @@
     <button data-view="payables">Payables</button>
     <button data-view="debts" id="navCustomerCreditBtn">Customer Credit</button>
     <button data-view="removals">Removals</button>
+    <button data-view="staffcash">Staff Cash</button>
     <button data-view="reports">Reports</button>
     <button data-view="staff" class="admin-only-tab">Staff</button>
     <button data-view="audit" class="admin-only-tab">Audit Log</button>
@@ -672,6 +673,7 @@
         <div class="action-row" style="margin-bottom:8px;">
           <button class="modal-cancel" id="quickPayableBtn" style="flex:1; padding:9px; font-size:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="6" y="4" width="12" height="17" rx="1.5"/><path d="M9 2.5h6a1 1 0 0 1 1 1V5H8V3.5a1 1 0 0 1 1-1Z"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="13.5" x2="15" y2="13.5"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Log invoice</button>
           <button class="modal-cancel" id="quickDebtBtn" style="flex:1; padding:9px; font-size:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="9.5" x2="22" y2="9.5"/><line x1="5.5" y1="14.5" x2="9.5" y2="14.5"/></svg>Customer credit</button>
+          <button class="modal-cancel" id="quickCashOutBtn" style="flex:1; padding:9px; font-size:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/></svg>Cash out</button>
         </div>
         <div class="action-row">
           <button class="btn-lock" id="lockScreenBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="vertical-align:-2px; margin-right:3px;"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Lock</button>
@@ -978,6 +980,25 @@
       <div class="panel">
         <h3>Reviewed — history</h3>
         <div id="removalsReviewedList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STAFF CASH (cash taken from the business by staff) ============ -->
+  <section class="view" id="view-staffcash">
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Balance owed by staff</h3>
+        <p class="hint">Cash an employee took from the business (advance, float, own use) minus what they have repaid. Anyone can log a cash-out from the till; it goes through with a reason and lands here for an admin or supervisor to review.</p>
+        <div class="stat-card" style="margin-bottom:14px;"><div class="slabel">Total owed by staff</div><div class="sval" id="staffCashTotalOwed">KSh 0</div></div>
+        <div id="staffCashBalances"></div>
+        <button class="primary-btn" id="staffCashAddBtn" style="width:100%; margin-top:10px;">Record cash taken / repayment</button>
+      </div>
+      <div class="panel">
+        <h3>Awaiting review <span id="staffCashPendingCount" style="color:var(--muted); font-weight:600;"></span></h3>
+        <div id="staffCashPendingList"></div>
+        <h3 style="margin-top:18px;">History</h3>
+        <div id="staffCashHistoryList"></div>
       </div>
     </div>
   </section>
@@ -1546,6 +1567,27 @@
     </div>
   </div>
 </div>
+<div class="modal-overlay" id="staffCashModal">
+  <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
+    <h3>Staff cash</h3>
+    <label>Who</label>
+    <select id="scStaff" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--sans); font-size:13px; background:var(--panel); color:var(--ink);"></select>
+    <label>Type</label>
+    <select id="scKind" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px; font-family:var(--sans); font-size:13px; background:var(--panel); color:var(--ink);">
+      <option value="advance">Took cash from the business</option>
+      <option value="repayment">Repaid cash</option>
+    </select>
+    <label>Amount (KSh)</label>
+    <input id="scAmount" type="number" placeholder="0" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 10px;">
+    <label>Reason</label>
+    <input id="scReason" placeholder="e.g. transport, salary advance, emergency" style="width:100%; padding:10px; border-radius:8px; border:1.5px solid var(--line); margin:4px 0 4px;">
+    <p class="hint" id="scError" style="color:var(--clay); min-height:16px; margin:0 0 8px;"></p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="scCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="scSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="quickDebtModal">
   <div class="modal-box" style="width:min(90vw,340px); text-align:left;">
     <h3>Record customer credit</h3>
@@ -1818,8 +1860,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-06-legal-footer-18';
-const BUILD_DATE_LABEL = '06 Oct 2026, 09:45';
+const BUILD_VERSION = '2026-10-07-staff-cash-19';
+const BUILD_DATE_LABEL = '07 Oct 2026, 09:00';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2283,7 +2325,7 @@ const $ = id => document.getElementById(id);
 // ---------- IndexedDB ----------
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('soko_pos_db_v1', 11);
+    const req = indexedDB.open('soko_pos_db_v1', 12);
     req.onupgradeneeded = e=>{
       const d = e.target.result;
       // device_security: WebAuthn fingerprint enrollments. Deliberately NEVER pushed to
@@ -2306,6 +2348,7 @@ function openDB(){
       if(!d.objectStoreNames.contains('removal_requests')) d.createObjectStore('removal_requests',{keyPath:'id'});
       if(!d.objectStoreNames.contains('purchase_orders')) d.createObjectStore('purchase_orders',{keyPath:'id'});
       if(!d.objectStoreNames.contains('open_orders')) d.createObjectStore('open_orders',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('staff_cash')) d.createObjectStore('staff_cash',{keyPath:'id'});
     };
     req.onsuccess = e=>resolve(e.target.result);
     req.onerror = e=>reject(e);
@@ -5854,6 +5897,16 @@ async function pushToSupabase(item){
       reviewed_by:p.reviewedBy, reviewed_at:p.reviewedAt, review_note:p.reviewNote,
     };
   }
+  else if(item.type==='staff_cash_upsert'){
+    table='staff_cash'; prefer='resolution=merge-duplicates,return=minimal';
+    const p = item.payload;
+    body = {
+      id:p.id, shop_id:shopId, staff_id:p.staffId, staff_name:p.staffName, kind:p.kind, amount:p.amount,
+      reason:p.reason, recorded_by:p.recordedBy, recorded_by_id:p.recordedById||null, ts:p.ts, status:p.status,
+      reviewed_by:p.reviewedBy||null, reviewed_at:p.reviewedAt||null, review_note:p.reviewNote||null,
+      updated_at:p.updated_at || new Date().toISOString(),
+    };
+  }
   else if(item.type==='po_upsert'){
     table='purchase_orders'; prefer='resolution=merge-duplicates,return=minimal';
     const p = item.payload;
@@ -6089,7 +6142,7 @@ async function pinPrefixExists(prefix){
 async function clearLocalShopData(){
   const storesToClear = [
     'products','users','sales','stock_movements','daily_snapshots','stock_takes',
-    'refunds','payables','customer_debts','removal_requests','purchase_orders','audit_log','open_orders'
+    'refunds','payables','customer_debts','removal_requests','purchase_orders','audit_log','open_orders','staff_cash'
   ];
   for(const store of storesToClear){
     // A failed clear() used to resolve as if it succeeded, so a shop switch could silently
@@ -6364,6 +6417,18 @@ async function pullShopData(fullPull, force){
         const localChanged = lr ? (lr.reviewedAt || lr.requestedAt) : null;
         if(!lr || !localChanged || new Date(remoteChanged) > new Date(localChanged)){
           await put('removal_requests', {id:rr.id, kind:rr.kind, itemInfo:rr.item_info, reason:rr.reason, requestedBy:rr.requested_by, requestedAt:rr.requested_at, status:rr.status, reviewedBy:rr.reviewed_by, reviewedAt:rr.reviewed_at, reviewNote:rr.review_note});
+        }
+      }
+    }
+    // Staff cash — merge by updated_at, since a review edits a record after it's created.
+    const scRes = await fetchT(`${supaUrl}/rest/v1/staff_cash?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    if(scRes.ok){
+      const remoteSc = await scRes.json();
+      const localSc = await getAll('staff_cash');
+      for(const rs of remoteSc){
+        const ls = localSc.find(x=>x.id===rs.id);
+        if(!ls || !ls.updated_at || new Date(rs.updated_at) > new Date(ls.updated_at)){
+          await put('staff_cash', {id:rs.id, staffId:rs.staff_id, staffName:rs.staff_name, kind:rs.kind, amount:Number(rs.amount), reason:rs.reason, recordedBy:rs.recorded_by, recordedById:rs.recorded_by_id||null, ts:rs.ts, status:rs.status, reviewedBy:rs.reviewed_by, reviewedAt:rs.reviewed_at, reviewNote:rs.review_note, updated_at:rs.updated_at});
         }
       }
     }
@@ -7729,6 +7794,124 @@ async function renderRemovalsList(){
   });
 }
 
+
+// ---------- Staff cash — cash an employee takes from the business, and what they repay ----------
+// Common in hotels/pubs: staff draw cash (advance, float, own use). Anyone can log one from the
+// till and it goes through immediately with a required reason, then waits for an admin or
+// supervisor to review — the same trust model as cart removals. Balance owed per person =
+// cash taken minus repayments. Repayments can only be logged by a supervisor/admin, since
+// that's money coming back in and a cashier shouldn't be able to zero their own balance.
+function scEsc(t){ return String(t==null?'':t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function scIsManager(){ return !!(currentUser && ROLE_RANK[currentUser.role] >= ROLE_RANK.supervisor); }
+async function openStaffCashModal(){
+  if(!currentUser) return;
+  const users = (await getAll('users')).filter(u=>u.active!==false);
+  const sel = $('scStaff');
+  sel.innerHTML = users.map(u=>`<option value="${scEsc(u.id)}">${scEsc(u.name)} (${scEsc(u.role)})</option>`).join('');
+  sel.value = currentUser.id;
+  sel.disabled = !scIsManager(); // a cashier can only log cash against themselves
+  $('scKind').value = 'advance';
+  $('scKind').querySelector('option[value="repayment"]').disabled = !scIsManager();
+  $('scAmount').value = ''; $('scReason').value = ''; $('scError').textContent = '';
+  $('staffCashModal').classList.add('show');
+  $('scAmount').focus();
+}
+$('quickCashOutBtn').addEventListener('click', openStaffCashModal);
+$('staffCashAddBtn').addEventListener('click', openStaffCashModal);
+$('scCancelBtn').addEventListener('click', ()=> $('staffCashModal').classList.remove('show'));
+let staffCashSaveBusy = false;
+$('scSaveBtn').addEventListener('click', async ()=>{
+  if(staffCashSaveBusy || !currentUser) return;
+  const amount = parseFloat($('scAmount').value);
+  const reason = $('scReason').value.trim();
+  const kind = $('scKind').value;
+  const staffId = scIsManager() ? $('scStaff').value : currentUser.id;
+  if(!amount || amount<=0){ $('scError').textContent = 'Enter a valid amount'; return; }
+  if(reason.length<3){ $('scError').textContent = 'Enter a short reason (at least 3 characters)'; return; }
+  if(kind==='repayment' && !scIsManager()){ $('scError').textContent = 'Only a supervisor or admin can record a repayment'; return; }
+  const staff = (await getAll('users')).find(u=>u.id===staffId);
+  if(!staff){ $('scError').textContent = 'Pick a staff member'; return; }
+  staffCashSaveBusy = true;
+  try{
+    const now = new Date().toISOString();
+    // The owner's (admin's) own entries need no one else's sign-off; everything else waits for review.
+    const selfAuthorised = currentUser.role==='admin';
+    const rec = {
+      id: 'sc_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+      staffId: staff.id, staffName: staff.name, kind, amount, reason,
+      recordedBy: currentUser.name, recordedById: currentUser.id, ts: now,
+      status: selfAuthorised ? 'cleared' : 'pending',
+      reviewedBy: selfAuthorised ? currentUser.name : null, reviewedAt: selfAuthorised ? now : null, reviewNote: null,
+    };
+    await put('staff_cash', rec);
+    await queuePush('staff_cash_upsert', rec);
+    logAudit(kind==='advance' ? 'Staff cash taken' : 'Staff cash repaid', `${staff.name} — ${fmtKsh(amount)} — "${reason}" — recorded by ${currentUser.name}`);
+    $('staffCashModal').classList.remove('show');
+    toast(kind==='advance' ? `Recorded ${fmtKsh(amount)} taken by ${staff.name}` : `Recorded ${fmtKsh(amount)} repaid by ${staff.name}`);
+    if($('view-staffcash').classList.contains('active')) renderStaffCash();
+  } finally { staffCashSaveBusy = false; }
+});
+
+async function renderStaffCash(){
+  const all = (await getAll('staff_cash')).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  const owed = {};
+  all.forEach(r=>{
+    const o = owed[r.staffId] || (owed[r.staffId] = {name:r.staffName, balance:0});
+    o.name = r.staffName;
+    o.balance += (r.kind==='repayment' ? -1 : 1) * r.amount;
+  });
+  const rows = Object.values(owed).sort((a,b)=>b.balance-a.balance);
+  $('staffCashTotalOwed').textContent = fmtKsh(rows.reduce((t,r)=>t+Math.max(0,r.balance),0));
+  $('staffCashBalances').innerHTML = rows.length
+    ? rows.map(r=>`<div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;"><span>${scEsc(r.name)}</span><b style="color:${r.balance>0?'var(--clay)':'var(--sage-dark)'};">${r.balance>0 ? fmtKsh(r.balance)+' owed' : (r.balance<0 ? fmtKsh(-r.balance)+' overpaid' : 'Settled')}</b></div>`).join('')
+    : `<p style="color:var(--muted); font-size:12.5px;">No staff cash recorded yet.</p>`;
+
+  const describe = r => `${r.kind==='repayment' ? 'Repaid' : 'Took'} ${fmtKsh(r.amount)} — ${scEsc(r.staffName)}`;
+  const pending = all.filter(r=>r.status==='pending');
+  $('staffCashPendingCount').textContent = pending.length ? `(${pending.length})` : '';
+  const pBox = $('staffCashPendingList'); pBox.innerHTML = '';
+  if(!pending.length) pBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing waiting on review.</p>`;
+  pending.forEach(r=>{
+    const when = new Date(r.ts).toLocaleString('en-KE',{hour12:false});
+    const own = currentUser && r.recordedById===currentUser.id;
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;';
+    row.innerHTML = `<b>${describe(r)}</b><br>
+      <span style="font-size:12px; color:var(--muted);">Reason: "${scEsc(r.reason)}"</span><br>
+      <span style="font-size:11.5px; color:var(--muted);">Recorded by ${scEsc(r.recordedBy)} · ${when}</span>
+      ${own ? `<p class="hint" style="margin:8px 0 0;">You recorded this — another supervisor or the admin must review it.</p>` : `
+      <div class="modal-actions" style="margin-top:10px;">
+        <button class="modal-cancel" data-sc-flag="${scEsc(r.id)}" style="font-size:11.5px;">Flag for follow-up</button>
+        <button class="primary-btn" data-sc-clear="${scEsc(r.id)}" style="font-size:11.5px;">Approve</button>
+      </div>`}`;
+    pBox.appendChild(row);
+  });
+  pBox.querySelectorAll('button[data-sc-clear], button[data-sc-flag]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.scClear || btn.dataset.scFlag;
+      const r = pending.find(x=>x.id===id);
+      if(!r || !currentUser || r.recordedById===currentUser.id) return;
+      r.status = btn.dataset.scClear ? 'cleared' : 'flagged';
+      r.reviewedBy = currentUser.name; r.reviewedAt = new Date().toISOString();
+      await put('staff_cash', r);
+      await queuePush('staff_cash_upsert', r);
+      logAudit(r.status==='cleared' ? 'Staff cash approved' : 'Staff cash flagged for follow-up', `${r.staffName} — ${fmtKsh(r.amount)} — recorded by ${r.recordedBy}, reviewed by ${currentUser.name}`);
+      toast(r.status==='cleared' ? 'Approved' : 'Flagged for follow-up');
+      renderStaffCash();
+    });
+  });
+  const hBox = $('staffCashHistoryList'); hBox.innerHTML = '';
+  const done = all.filter(r=>r.status!=='pending').slice(0,60);
+  if(!done.length) hBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing reviewed yet.</p>`;
+  done.forEach(r=>{
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:8px 0; border-bottom:1px solid var(--line); font-size:12px;';
+    const color = r.status==='cleared' ? 'var(--sage-dark)' : 'var(--clay)';
+    row.innerHTML = `<span>${describe(r)} <span style="color:var(--muted);">— "${scEsc(r.reason)}", ${new Date(r.ts).toLocaleDateString('en-KE')}, by ${scEsc(r.recordedBy)}</span></span><br><span style="color:${color}; font-weight:600; font-size:11px; text-transform:uppercase;">${r.status}${r.reviewedBy ? ' · '+scEsc(r.reviewedBy) : ''}</span>`;
+    hBox.appendChild(row);
+  });
+}
+
 // ---------- Admin back office gate ----------
 const ADMIN_ONLY_VIEWS = ['staff','audit']; // account management & the audit trail — real Admin session only, no override
 function switchBackofficeView(viewName){
@@ -7748,6 +7931,7 @@ function switchBackofficeView(viewName){
   if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
   if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
   if(viewName==='removals') renderRemovalsList();
+  if(viewName==='staffcash') renderStaffCash();
   if(viewName==='reports') renderReports();
   if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
   if(viewName==='audit') renderAuditTable();
