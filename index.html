@@ -1879,8 +1879,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-faster-pin-flags-22';
-const BUILD_DATE_LABEL = '07 Oct 2026, 10:10';
+const BUILD_VERSION = '2026-10-07-instant-pin-verdicts-23';
+const BUILD_DATE_LABEL = '07 Oct 2026, 10:45';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -6256,6 +6256,21 @@ async function pinPrefixExists(prefix){
     return !!(rows && rows.some(r=>r.pin && r.pin.length>prefix.length));
   }catch(e){ return false; }
 }
+// Platform-wide version of the above, for the instant 4-digit verdict: PINs are globally unique and
+// no PIN may be the start of another (enforced when staff are created), so "some 6-digit PIN anywhere
+// starts with these 4 digits" means the person is probably still typing an Admin PIN, while "nothing
+// does, and no 4-digit PIN matches either" means it genuinely isn't registered.
+async function pinPrefixExistsAnywhere(prefix){
+  const localHit = cachedUsers.some(u=>u.active!==false && u.pin && u.pin.length>prefix.length && u.pin.startsWith(prefix));
+  if(localHit) return true;
+  if(!(isOnline && backendLive())) return false;
+  try{
+    const res = await fetchT(`${supaUrl}/rest/v1/staff?pin=like.${encodeURIComponent(prefix)}*&active=eq.true&select=id,pin&limit=5`, {headers: sbHeaders()}, 5000);
+    if(!res.ok) return false;
+    const rows = await res.json();
+    return !!(rows && rows.some(r=>r.pin && r.pin.length>prefix.length));
+  }catch(e){ return false; }
+}
 // Pulls one specific shop's data down by shop_id — used once a global PIN lookup reveals
 // which shop a person belongs to.
 // Wipes every shop-scoped local store before this device adopts a different shop's
@@ -8175,12 +8190,14 @@ async function tryPinCheckpoint(){
     // ever speaking up at 4 or 6 digits. Informational only: never clears what's been typed,
     // since they're very likely still mid-entry.
     if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
-    const attemptedPin = pinBuffer;
-    pinCheckTimer = setTimeout(()=>{
-      pinCheckTimer = null;
-      if(pinBuffer !== attemptedPin || currentUser) return;
-      setLoginHint(`Incomplete PIN — ${pinBuffer.length} digit(s) so far. Staff PINs are 4 digits, Admin PINs are 6.`, false);
-    }, 700);
+    pinCheckGeneration++; // any network check still running for an earlier, longer entry no longer applies
+    if(pinBuffer.length>0 && !currentUser){
+      // Said straight away, no pause: this is purely local, and it's the answer the person is
+      // waiting for ("is it still going?") — a delay here is what reads as the app being asleep.
+      setLoginHint(pinBuffer.length<4
+        ? `Incomplete PIN — ${pinBuffer.length} digit(s) so far. Staff PINs are 4 digits, Admin PINs are 6.`
+        : `Incomplete PIN — 5 digits so far. Admin PINs are 6 digits.`, false);
+    }
     return;
   }
   if(pinCheckTimer){ clearTimeout(pinCheckTimer); pinCheckTimer = null; }
@@ -8233,11 +8250,15 @@ async function tryPinCheckpoint(){
     // of premature feedback that caused confusion before. A finished entry checking the network
     // is worth saying out loud, especially now that it can take up to several seconds on a weak
     // connection before timing out — silence during that wait is what reads as "not responding."
-    if(pinBuffer.length===MAX_PIN_LENGTH){ toast('Checking…'); setLoginHint('Checking this PIN…', false); }
+    setLoginHint('Checking this PIN…', false);
+    if(pinBuffer.length===MAX_PIN_LENGTH) toast('Checking…');
 
     if(!shopId){
       // Brand-new device — find this PIN's shop anywhere on the platform, same as before.
-      const remoteMatch = await lookupPinGlobally(pinBuffer);
+      const [remoteMatch, prefixAnywhere0] = await Promise.all([
+        lookupPinGlobally(pinBuffer),
+        pinBuffer.length===4 ? pinPrefixExistsAnywhere(pinBuffer) : Promise.resolve(false),
+      ]);
       if(stale()) return;
       if(remoteMatch){
         try{
@@ -8259,7 +8280,13 @@ async function tryPinCheckpoint(){
       // online — that's a confirmed, specific answer, not just "incorrect": this PIN was
       // never registered to any shop at all. Say so plainly instead of the generic
       // "Incorrect PIN" below, same treatment as the wrong-shop case.
-      if(pinBuffer.length===MAX_PIN_LENGTH){
+      if(pinBuffer.length===4 && prefixAnywhere0){
+        // Not a complete PIN anywhere, but a 6-digit Admin PIN does start with these 4 digits —
+        // so this is most likely someone mid-way through typing it. Say so; never erase it.
+        setLoginHint('Keep typing — these 4 digits start a 6-digit Admin PIN.', false);
+        return;
+      }
+      if(pinBuffer.length===MAX_PIN_LENGTH || pinBuffer.length===4){
         toast("This PIN doesn't exist — it isn't registered to any shop.");
         setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
         shakePinDots();
@@ -8276,10 +8303,14 @@ async function tryPinCheckpoint(){
       // all. Firing both at once when we already know we'll likely need both cuts that worst
       // case roughly in half — a direct fix for exactly that "it just sits there, not flagging
       // anything" complaint on a weak signal.
-      const needsGlobalCheck = pinBuffer.length===MAX_PIN_LENGTH;
-      const [sameShopMatch, elsewhereMatch] = await Promise.all([
+      // Both a complete 4-digit and a complete 6-digit entry are checked against the platform right
+      // away (no waiting to see whether more digits follow): the answer for 4 digits is decided by
+      // whether any 6-digit PIN anywhere starts with them — see pinPrefixExistsAnywhere.
+      const needsGlobalCheck = true;
+      const [sameShopMatch, elsewhereMatch, prefixAnywhere] = await Promise.all([
         lookupPinForThisShop(pinBuffer),
-        needsGlobalCheck ? lookupPinGlobally(pinBuffer) : Promise.resolve(null),
+        lookupPinGlobally(pinBuffer),
+        pinBuffer.length===4 ? pinPrefixExistsAnywhere(pinBuffer) : Promise.resolve(false),
       ]);
       if(stale()) return;
       if(sameShopMatch){
@@ -8310,6 +8341,10 @@ async function tryPinCheckpoint(){
           pinBuffer=''; setTimeout(updatePinDots, 200);
           return;
         }
+        if(!elsewhereMatch && pinBuffer.length===4 && prefixAnywhere){
+          setLoginHint('Keep typing — these 4 digits start a 6-digit Admin PIN.', false);
+          return;
+        }
         if(!elsewhereMatch){
           // Checked this shop, then the whole platform — truly nowhere. A confirmed, specific
           // answer, not just "incorrect": this PIN was never registered to any shop at all.
@@ -8335,72 +8370,11 @@ async function tryPinCheckpoint(){
   }
 
   if(pinBuffer.length < MAX_PIN_LENGTH){
-    // A 4-digit entry that matches nothing yet is genuinely ambiguous — it's either a finished,
-    // wrong cashier/supervisor PIN, or someone still mid-way through a 6-digit Admin PIN who
-    // simply paused. There is NO way to tell these apart from the digits alone, so this build
-    // no longer GUESSES with a timer at all. Guessing wrong (twice now) is what caused every
-    // "PIN/password not working" report: a real 6-digit PIN got silently erased mid-entry
-    // because the app assumed a pause meant "finished and wrong." The only states that are ever
-    // unambiguous are: (a) it matches something right now — handled above, instantly — or
-    // (b) all 6 digits are in and NOTHING matches anywhere — handled below. Everything in
-    // between is just "still typing," so it does nothing and waits, online or off.
-    //
-    // The one exception: fully offline, with nothing to check against but this device's own
-    // cache, a 4-digit entry that goes nowhere for a while is worth a hint, since it may be a
-    // real PIN this device just hasn't synced yet — but even then it only informs, never erases.
-    const wasOffline = !(isOnline && backendLive());
-    if(wasOffline){
-      const attemptedPin = pinBuffer;
-      pinCheckTimer = setTimeout(()=>{
-        pinCheckTimer = null;
-        if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
-        toast("That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on. Still typing a 6-digit Admin PIN? Just keep going.");
-        setLoginHint("Not found on this device yet — connect once to bring it in, or keep typing a 6-digit Admin PIN.", false);
-      }, 1200);
-    } else {
-      // Online: a 4-digit entry that matched nothing yet COULD still be the start of a 6-digit
-      // Admin PIN being typed slowly — but it doesn't have to stay ambiguous. After a short
-      // pause with nothing further typed, ask a narrower question than "is this PIN correct":
-      // does ANYTHING this device can see actually start with these 4 digits? If nothing does,
-      // this was never going anywhere — a real 6-digit PIN always has a real prefix on record
-      // somewhere, so "no prefix match" conclusively means this 4-digit entry is not registered
-      // to any shop, not just "maybe still being typed." Previously this case sat silent forever
-      // when online (the old offline-only timer above never covered it), which is exactly what
-      // the "stuck at 4 dots, nothing happens" report was.
-      const attemptedPin = pinBuffer;
-      const myGeneration = pinCheckGeneration;
-      pinCheckTimer = setTimeout(async ()=>{
-        pinCheckTimer = null;
-        if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return;
-        setLoginHint('Checking this PIN…', false);
-        // Both questions are asked at once (they used to run one after the other, so a slow
-        // connection paid for two full round trips before any answer): "does anything here start
-        // with these digits?" and "does this exact PIN belong to some other shop?". The second
-        // is only acted on if the first says nothing could still be being typed.
-        const [couldStillBeTyping, elsewhereMatch] = await Promise.all([
-          pinPrefixExists(attemptedPin),
-          lookupPinGlobally(attemptedPin),
-        ]);
-        if(pinBuffer !== attemptedPin || myGeneration !== pinCheckGeneration || currentUser) return; // stale by the time the check returned
-        if(!couldStillBeTyping){
-          // pinPrefixExists is deliberately scoped to THIS shop once a device has one — so "nothing
-          // in this shop starts with these 4 digits" does NOT by itself mean the PIN doesn't exist
-          // anywhere: it could be a complete, valid 4-digit PIN that belongs to a different shop
-          // (the same wrong-shop case the 6-digit path handles).
-          if(elsewhereMatch && elsewhereMatch.shop_id !== shopId){
-            toast('Wrong shop — this PIN belongs to a different shop.');
-            setLoginHint("Wrong shop — that PIN is registered to a different shop, not this one.", true);
-          } else {
-            toast("This PIN doesn't exist — it isn't registered to any shop.");
-            setLoginHint("PIN does not exist — it isn't registered to any shop on the platform.", true);
-          }
-          shakePinDots();
-          pinBuffer=''; setTimeout(updatePinDots, 200);
-        } else {
-          setLoginHint('', false); // could still be a longer PIN — back to quietly waiting
-        }
-      }, 600);
-    }
+    // Only reachable for a 4-digit entry that nothing on this device matches and that couldn't be
+    // checked against the platform (offline, or no backend). It is genuinely ambiguous — a staff PIN
+    // this device hasn't synced yet, or the start of a 6-digit Admin PIN — so it only INFORMS, at
+    // once, and never erases what was typed.
+    setLoginHint("Not found on this device yet. If it's a 4-digit PIN, connect once to bring it in; if it's a 6-digit Admin PIN, keep typing.", false);
     return;
   }
   // Nothing matched at either length, anywhere.
