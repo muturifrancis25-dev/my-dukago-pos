@@ -1879,7 +1879,7 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-faster-pin-flags-21';
+const BUILD_VERSION = '2026-10-07-faster-pin-flags-22';
 const BUILD_DATE_LABEL = '07 Oct 2026, 10:10';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
@@ -8356,7 +8356,7 @@ async function tryPinCheckpoint(){
         if(pinBuffer !== attemptedPin) return; // they kept typing — this stale check no longer applies
         toast("That PIN isn't stored on this device yet — connect to the internet once to bring it in, then it'll work offline from then on. Still typing a 6-digit Admin PIN? Just keep going.");
         setLoginHint("Not found on this device yet — connect once to bring it in, or keep typing a 6-digit Admin PIN.", false);
-      }, 2200);
+      }, 1200);
     } else {
       // Online: a 4-digit entry that matched nothing yet COULD still be the start of a 6-digit
       // Admin PIN being typed slowly — but it doesn't have to stay ambiguous. After a short
