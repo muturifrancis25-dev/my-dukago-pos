@@ -1,6 +1,7 @@
 # Security lockdown plan (Supabase)
 
-Status: planned, not started. Written 2026-10-07.
+Status (2026-10-07): policies written and passing 33 local isolation tests (supabase/tests/rls_isolation_test.mjs).
+NOT applied to the live database. Still to build: `shop-login` / `shop-register` edge functions and the app release that uses them.
 
 ## Problem
 Every shop table has an `allow all for anon` policy (`USING (true)`), and the anon key ships in
