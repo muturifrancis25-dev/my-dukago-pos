@@ -1151,6 +1151,8 @@
       <h3>Shop Code</h3>
       <p class="hint">Enter this once on any new phone or computer to connect it to this shop. Staff then sign in with their own PIN. Share it only with your own staff.</p>
       <div id="shopCodeDisplay" style="font-family:var(--mono); font-size:26px; font-weight:700; letter-spacing:4px;">—</div>
+      <button class="modal-cancel" id="changeShopCodeBtn" style="margin-top:8px; font-size:12px;">Change Shop Code</button>
+      <p class="hint" style="margin-top:6px;">Use this if the code has leaked. Phones already connected stay connected; only new phones need the new code.</p>
     </div>
 
     <div class="panel">
@@ -1781,7 +1783,9 @@
 <div class="modal-overlay" id="manageShopModal" style="z-index:270;">
   <div class="modal-box" style="width:min(92vw,420px); text-align:left; max-height:80vh; overflow-y:auto;">
     <h3 style="text-align:center;">Manage shop</h3>
-    <p class="hint" id="manageShopName" style="text-align:center; margin:0 0 14px;">—</p>
+    <p class="hint" id="manageShopName" style="text-align:center; margin:0 0 8px;">—</p>
+    <div style="text-align:center; margin:0 0 14px; font-size:12.5px;">Shop Code: <b id="manageShopCode" style="font-family:var(--mono); letter-spacing:2px; font-size:15px;">—</b>
+      <button class="modal-cancel" id="manageShopChangeCodeBtn" style="font-size:11px; padding:5px 9px; margin-left:6px;">Change code</button></div>
 
     <h3 style="font-size:13.5px;">Plan &amp; billing</h3>
     <p class="hint">Monthly subscription. Setup is free. When the paid-until date passes by more than 7 days the shop is suspended automatically (hourly check); recording a payment reactivates it. A shop with no paid-until date is never auto-suspended.</p>
@@ -1893,8 +1897,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-shop-code-26';
-const BUILD_DATE_LABEL = '07 Oct 2026, 01:45';
+const BUILD_VERSION = '2026-10-07-shop-code-change-27';
+const BUILD_DATE_LABEL = '07 Oct 2026, 02:05';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -3082,11 +3086,12 @@ async function renderManageShopBilling(targetShopId){
   $('manageShopBillingStatus').textContent = 'Loading…';
   $('manageShopPaymentsList').innerHTML = '';
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=plan,license_expires_at,license_status,active`, {headers: mpesaFunctionHeaders()});
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=plan,license_expires_at,license_status,active,shop_code`, {headers: mpesaFunctionHeaders()});
     if(!res.ok) throw new Error('shop');
     const rows = await res.json();
     const sh = rows[0] || {};
     $('manageShopPlan').value = sh.plan || 'small';
+    $('manageShopCode').textContent = sh.shop_code || '—';
     syncManageShopPayAmount();
     if(sh.license_expires_at){
       const d = daysUntil(sh.license_expires_at);
@@ -6259,6 +6264,42 @@ async function connectWithShopCode(){
     setLoginHint('Could not connect: '+(e&&e.message?e.message:'try again'), true);
   }
 }
+const SHOP_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function genClientShopCode(){
+  let c=''; const buf = new Uint32Array(5); crypto.getRandomValues(buf);
+  for(let i=0;i<5;i++) c += SHOP_CODE_ALPHABET[buf[i] % SHOP_CODE_ALPHABET.length];
+  return c;
+}
+// Gives a shop a fresh code (retries on the rare clash with another shop's code). Returns the new code or null.
+async function changeShopCode(targetShopId, headers, baseUrl){
+  for(let i=0;i<6;i++){
+    const code = genClientShopCode();
+    const res = await fetchT(`${baseUrl}/rest/v1/shops?id=eq.${targetShopId}`, {method:'PATCH', headers, body: JSON.stringify({shop_code: code})}, 8000);
+    if(res.ok) return code;
+    if(res.status!==409) return null;
+  }
+  return null;
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const a=$('changeShopCodeBtn'), m=$('manageShopChangeCodeBtn');
+  if(a) a.addEventListener('click', async ()=>{
+    if(!shopId || !(isOnline && backendLive())){ toast('Connect to the internet to change the Shop Code'); return; }
+    if(!confirm('Change this shop\'s code? The old code stops working for new phones straight away.')) return;
+    const code = await changeShopCode(shopId, sbHeaders(), supaUrl);
+    if(!code){ toast('Could not change the code — try again'); return; }
+    $('shopCodeDisplay').textContent = code; put('settings',{key:'shop_code',value:code}).catch(()=>{});
+    logAudit('Shop Code changed', 'by shop admin'); toast('New Shop Code: '+code);
+  });
+  if(m) m.addEventListener('click', async ()=>{
+    if(!manageShopTargetId) return;
+    if(!confirm('Change the Shop Code for '+$('manageShopName').textContent+'? The old code stops working for new phones straight away.')) return;
+    const code = await changeShopCode(manageShopTargetId, mpesaFunctionHeaders(), PLATFORM_SUPABASE_URL);
+    if(!code){ toast('Could not change the code — try again'); return; }
+    $('manageShopCode').textContent = code;
+    logAudit('Shop Code changed (Platform Administrator)', $('manageShopName').textContent); toast('New Shop Code: '+code);
+    if(typeof loadAllShopsList==='function') loadAllShopsList();
+  });
+});
 async function loadShopCodeDisplay(){
   const el = $('shopCodeDisplay'); if(!el) return;
   try{ const c = await getSetting('shop_code'); if(c && c.value) el.textContent = c.value; }catch(e){}
