@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-platform-pass-34';
-const BUILD_DATE_LABEL = '07 Oct 2026, 15:00';
+const BUILD_VERSION = '2026-10-07-shop-upsert-fix-35';
+const BUILD_DATE_LABEL = '07 Oct 2026, 16:45';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -6179,7 +6179,7 @@ async function pushToSupabase(item){
     // once (e.g. a later name update, or a retry after a first attempt that actually did land).
     table='shops'; prefer='resolution=merge-duplicates,return=minimal';
     const p = item.payload;
-    body = { id:p.id, name:p.name, updated_at:p.updated_at || new Date().toISOString() };
+    body = { id:p.id, name:p.name }; // the shops table has no updated_at column — sending one made every shop_upsert fail with PGRST204
   }
   else {
     // Every recognized item.type has its own explicit branch above — reaching this means a
@@ -6661,6 +6661,7 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
 // Last-write-wins by updated_at. Known, disclosed limitation: two devices changing the exact
 // same record at nearly the same moment can have one silently overwrite the other — reasonable
 // for a first real version, not yet the "reconciled" approach a very large deployment may want.
+let shopNameSyncQueued = false;
 async function pullShopData(fullPull, force){
   if(!backendLive() || !shopId) return;
   try{
@@ -6676,7 +6677,8 @@ async function pullShopData(fullPull, force){
         if(shopRes.ok){
           const shopRows = await shopRes.json();
           // Shops set up before the name was synced stay called "New shop" in the backend — fix that once an admin is signed in.
-          if(shopRows.length && currentUser && currentUser.role==='admin' && businessProfile && businessProfile.storeName && shopRows[0].name!==businessProfile.storeName){
+          if(!shopNameSyncQueued && shopRows.length && currentUser && currentUser.role==='admin' && businessProfile && businessProfile.storeName && shopRows[0].name!==businessProfile.storeName){
+            shopNameSyncQueued = true; // once per app session, not on every pull cycle
             updateShopNameInBackend(businessProfile.storeName).catch(()=>{});
           }
           if(shopRows.length && shopRows[0].active===false){
