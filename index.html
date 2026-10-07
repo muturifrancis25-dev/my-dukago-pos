@@ -1152,6 +1152,8 @@
       <p class="hint">Enter this once on any new phone or computer to connect it to this shop. Staff then sign in with their own PIN. Share it only with your own staff.</p>
       <div id="shopCodeDisplay" style="font-family:var(--mono); font-size:26px; font-weight:700; letter-spacing:4px;">—</div>
       <button class="modal-cancel" id="changeShopCodeBtn" style="margin-top:8px; font-size:12px;">Change Shop Code</button>
+      <button class="modal-cancel" id="testSecureLoginBtn" style="margin-top:8px; font-size:12px;">Test secure sign-in</button>
+      <pre id="testSecureLoginOut" style="font-size:11px; white-space:pre-wrap; margin:6px 0 0; color:var(--muted);"></pre>
       <p class="hint" style="margin-top:6px;">Use this if the code has leaked. Phones already connected stay connected; only new phones need the new code.</p>
     </div>
 
@@ -1897,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-shop-code-change-27';
-const BUILD_DATE_LABEL = '07 Oct 2026, 02:05';
+const BUILD_VERSION = '2026-10-07-secure-login-test-28';
+const BUILD_DATE_LABEL = '07 Oct 2026, 10:25';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -6281,6 +6283,20 @@ async function changeShopCode(targetShopId, headers, baseUrl){
   return null;
 }
 document.addEventListener('DOMContentLoaded', ()=>{
+  const t=$('testSecureLoginBtn');
+  if(t) t.addEventListener('click', async ()=>{
+    const out=$('testSecureLoginOut');
+    if(!currentUser || !currentUser.pin || !shopId){ out.textContent='Sign in with your PIN first.'; return; }
+    if(!(isOnline && backendLive())){ out.textContent='Needs internet.'; return; }
+    out.textContent='Testing…';
+    try{
+      const res = await fetchT(`${supaUrl}/functions/v1/shop-auth`, {method:'POST', headers: sbHeaders(), body: JSON.stringify({action:'login', pin: currentUser.pin, shopId})}, 15000);
+      const j = await res.json().catch(()=>({}));
+      if(!j.ok){ out.textContent = 'Failed: '+(j.code||res.status)+(j.detail?' — '+j.detail:''); return; }
+      const claims = JSON.parse(atob(j.session.access_token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+      out.textContent = 'OK. Signed in as '+j.staff.name+' ('+claims.app_metadata.role+') for '+j.shop.name+'. Token expires in '+Math.round((j.session.expires_at*1000-Date.now())/60000)+' min. Shop claim matches: '+(claims.app_metadata.shop_id===shopId);
+    }catch(e){ out.textContent='Error: '+(e&&e.message?e.message:e); }
+  });
   const a=$('changeShopCodeBtn'), m=$('manageShopChangeCodeBtn');
   if(a) a.addEventListener('click', async ()=>{
     if(!shopId || !(isOnline && backendLive())){ toast('Connect to the internet to change the Shop Code'); return; }
