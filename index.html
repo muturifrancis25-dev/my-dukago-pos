@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-pin-via-function-31';
-const BUILD_DATE_LABEL = '07 Oct 2026, 13:20';
+const BUILD_VERSION = '2026-10-07-db-reopen-32';
+const BUILD_DATE_LABEL = '07 Oct 2026, 13:45';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2389,11 +2389,31 @@ function openDB(){
       if(!d.objectStoreNames.contains('open_orders')) d.createObjectStore('open_orders',{keyPath:'id'});
       if(!d.objectStoreNames.contains('staff_cash')) d.createObjectStore('staff_cash',{keyPath:'id'});
     };
-    req.onsuccess = e=>resolve(e.target.result);
+    req.onsuccess = e=>{ const d=e.target.result; attachDbHandlers(d); resolve(d); };
     req.onerror = e=>reject(e);
   });
 }
-function tx(store, mode='readonly'){ return db.transaction(store,mode).objectStore(store); }
+// Android can close an IndexedDB connection behind the app's back (memory pressure, the app being
+// frozen in the background). Every later read then failed with "The database connection is closing"
+// until the app was restarted. Now the connection is reopened automatically.
+let dbReopening = null;
+function reopenDB(){
+  if(dbReopening) return dbReopening;
+  dbReopening = openDB().then(d=>{ db = d; return d; }).finally(()=>{ dbReopening = null; });
+  return dbReopening;
+}
+function attachDbHandlers(d){
+  d.onclose = ()=>{ reopenDB().catch(()=>{}); };
+  d.onversionchange = ()=>{ try{ d.close(); }catch(e){} reopenDB().catch(()=>{}); };
+}
+async function ensureDbOpen(){
+  try{ db.transaction('settings'); }catch(e){ await reopenDB(); }
+}
+function tx(store, mode='readonly'){
+  try{ return db.transaction(store,mode).objectStore(store); }
+  catch(e){ if(e && e.name==='InvalidStateError'){ reopenDB().catch(()=>{}); } throw e; }
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && db){ ensureDbOpen().catch(()=>{}); } });
 // A `fetch()` at least fails on its own eventually (and now has a hard timeout too, see
 // fetchT below in the sync code) — but a raw IndexedDB request has no such guarantee. If its
 // transaction never gets to run (queued behind another transaction that itself never finishes
@@ -8469,6 +8489,7 @@ async function tryPinCheckpoint(){
   // off for good — from here on, ANY failure in this function surfaces as a real toast instead
   // of invisible silence, whatever actually caused it.
   try{
+  await ensureDbOpen(); // a connection the phone closed in the background is reopened before any lookup
 
   // The default bootstrap trigger — only means anything on a device that's never been set up.
   if(pinBuffer.length===4 && pinBuffer==='1234' && !shopId){
@@ -8680,6 +8701,12 @@ async function tryPinCheckpoint(){
   pinBuffer=''; setTimeout(updatePinDots, 200);
 
   }catch(e){
+    if(e && (e.name==='InvalidStateError' || /connection is closing/i.test(e.message||''))){
+      try{ await reopenDB(); }catch(_){}
+      setLoginHint('Reconnected to this device\'s storage — please enter the PIN again.', false);
+      pinBuffer=''; setTimeout(updatePinDots, 200);
+      return;
+    }
     // Whatever actually broke, this is the one place in the login path guaranteed to run: say
     // so out loud and reset, instead of leaving the screen sitting there looking frozen.
     toast('Something went wrong checking that PIN: '+(e && e.message ? e.message : 'unknown error')+' — try again, or restart the app if it keeps happening.');
