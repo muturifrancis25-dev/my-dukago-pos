@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-lockdown-prep-36';
-const BUILD_DATE_LABEL = '07 Oct 2026, 17:30';
+const BUILD_VERSION = '2026-10-07-platform-login-timeout-37';
+const BUILD_DATE_LABEL = '07 Oct 2026, 17:00';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2956,7 +2956,7 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
   try{
     const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/super-admin-login`, {
       method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify({pin}),
-    }, 7000);
+    }, 20000); // the first call after a quiet spell can take several seconds to wake the service
     const data = await res.json().catch(()=>({}));
     if(!res.ok || !data.ok){
       $('saLoginError').textContent = data.error || 'Incorrect PIN';
@@ -2966,7 +2966,7 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
     logAudit('Platform Administrator verified on this device', data.name || 'Platform Admin');
     enterSuperAdminView(data.name);
   }catch(e){
-    $('saLoginError').textContent = 'Could not reach the platform admin service — check your connection';
+    $('saLoginError').textContent = 'Could not reach the platform admin service — check your connection and try again ('+((e&&e.name)||'error')+')';
   }
 });
 // Fingerprint, as an alternative to the password above — same local, device-only trust model as
