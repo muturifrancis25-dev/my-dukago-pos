@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-shop-upsert-fix-35';
-const BUILD_DATE_LABEL = '07 Oct 2026, 16:45';
+const BUILD_VERSION = '2026-10-07-lockdown-prep-36';
+const BUILD_DATE_LABEL = '07 Oct 2026, 17:30';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -3405,6 +3405,13 @@ $('saAddBizTypeBtn').addEventListener('click', async ()=>{
 function mpesaFunctionHeaders(extra){
   return Object.assign({'Content-Type':'application/json', 'Authorization':'Bearer '+PLATFORM_SUPABASE_KEY, 'apikey':PLATFORM_SUPABASE_KEY}, extra||{});
 }
+// Calls a shop-auth action with the current secure session (or the anon key when none).
+async function shopAuthCall(payload, ms){
+  const res = await fetchT(`${supaUrl}/functions/v1/shop-auth`, {method:'POST', headers: sbHeaders(), body: JSON.stringify(payload)}, ms||8000);
+  const j = await res.json().catch(()=>null);
+  return {res, j};
+}
+function mpesaRestHeaders(){ return sbHeaders(); }
 async function triggerStkPush(phone, amount){
   const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/mpesa-initiate`, {
     method:'POST', headers: mpesaFunctionHeaders(),
@@ -3427,7 +3434,7 @@ async function pollStkStatus(checkoutRequestId){
     if(mpesaStkCancelled) return {status:'cancelled'};
     try{
       const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_requests?checkout_request_id=eq.${encodeURIComponent(checkoutRequestId)}&select=status,mpesa_receipt,result_desc`, {
-        headers: mpesaFunctionHeaders(),
+        headers: mpesaRestHeaders(),
       });
       if(res.ok){
         const rows = await res.json();
@@ -3502,12 +3509,10 @@ async function loadC2bMatchList(){
   const list = $('mpesaC2bList');
   list.innerHTML = '<p style="text-align:center; color:var(--muted); font-size:12px; padding:14px 0;">Checking for recent payments…</p>';
   try{
-    const since = new Date(Date.now() - 20*60*1000).toISOString();
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?matched=eq.false&created_at=gt.${encodeURIComponent(since)}&order=created_at.desc&limit=15`, {
-      headers: mpesaFunctionHeaders(),
-    });
-    if(!res.ok) throw new Error('Could not reach the payment backend');
-    const rows = await res.json();
+    await ensureShopSession();
+    const {res, j} = await shopAuthCall({action:'c2b_list'}, 10000);
+    if(!res.ok || !j || !j.ok) throw new Error('Could not reach the payment backend');
+    const rows = j.rows;
     if(!rows.length){
       list.innerHTML = '<p style="text-align:center; color:var(--muted); font-size:12px; padding:14px 0;">No unmatched payments in the last 20 minutes. If they just paid, wait a few seconds and check again.</p>';
       return;
@@ -3530,10 +3535,7 @@ async function confirmC2bMatch(payment){
   if(!mpesaPending) return;
   const {subtotal, tax, total} = mpesaPending;
   try{
-    await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/mpesa_c2b_payments?trans_id=eq.${encodeURIComponent(payment.trans_id)}`, {
-      method:'PATCH', headers: mpesaFunctionHeaders(),
-      body: JSON.stringify({matched:true}),
-    });
+    await shopAuthCall({action:'c2b_match', trans_id: payment.trans_id}, 8000);
   }catch(e){ /* even if this lock-out write fails, still complete the sale — don't block a real payment over it */ }
   logAudit('M-Pesa direct payment matched', `${fmtKsh(payment.trans_amount)} — ${payment.trans_id}`);
   mpesaPending = null;
@@ -6357,7 +6359,14 @@ async function connectWithShopCode(){
     if(!rows){ setLoginHint('Could not check the code — try again.', true); return; }
     if(!rows.length){ noteWrongPin(); setLoginHint('No shop has that code. Check it and try again.', true); shakePinDots(); return; }
     if(rows[0].active===false){ setLoginHint('This shop is switched off. Contact My DukaGO support.', true); return; }
-    await pullSpecificShop(rows[0].id);
+    if(shopId && shopId!==rows[0].id){ setLoginHint('This phone already belongs to another shop. Use Change Shop Code in Settings first.', true); return; }
+    if(!shopId){
+      // Attach only. The shop's data comes down after the first PIN sign-in, which is what earns the secure session.
+      shopId = rows[0].id;
+      await put('settings', {key:'shop_id', value:shopId});
+      await clearLocalShopData();
+      logAudit('Joined shop via Shop Code', 'data pulls after first PIN sign-in');
+    }
     await put('settings', {key:'shop_code', value:code});
     input.value = '';
     refreshShopCodeRow();
@@ -7465,9 +7474,10 @@ async function loadCustomBusinessTypes(){
 async function loadPlatformBusinessTypes(){
   PLATFORM_BUSINESS_TYPES = {};
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types?select=*`, {headers: mpesaFunctionHeaders()});
-    if(res.ok){
-      const rows = await res.json();
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/shop-auth`, {method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify({action:'business_types'})});
+    const bj = res.ok ? await res.json().catch(()=>null) : null;
+    if(bj && bj.ok){
+      const rows = bj.rows;
       rows.forEach(r => {
         PLATFORM_BUSINESS_TYPES[r.id] = {
           label:r.label, emoji:r.emoji, desc:r.description, cats:r.cats, colors:r.colors,
@@ -8968,7 +8978,7 @@ async function isShopActive(){
   if(!shopId) return {active:true}; // nothing to check yet — a device mid-setup isn't anyone's business to block
   if(!isOnline || !backendLive()) return {active:null};
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: mpesaFunctionHeaders()}, 5000);
+    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: sbHeaders()}, 5000);
     if(!res.ok) return {active:null};
     const rows = await res.json();
     if(!rows.length) return {active:null}; // shop record not found remotely — don't block on ambiguity

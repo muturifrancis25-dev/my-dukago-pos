@@ -7,6 +7,8 @@
 // Actions (POST JSON):
 //   shop_by_code { code }                    -> { ok, shop:{id,name,active} } | { ok:false, code:'not_found' }
 //   pin_unique { pin, excludeStaffId? }      -> { ok, unique }
+//   business_types {}                        -> { ok, rows }
+//   c2b_list {} / c2b_match { trans_id }      -> (needs staff token) unmatched M-Pesa payments / mark one used
 //   login { pin, shopCode? , shopId? }       -> { ok, staff, shop, session } | { ok:false, code, ... }
 //        codes: bad_request | not_found | prefix | other_shop | suspended | locked
 //
@@ -88,6 +90,33 @@ Deno.serve(async (req) => {
       const { data: clash, error } = await q.limit(1);
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
       return json({ ok: true, unique: !(clash && clash.length) });
+    }
+
+
+    if (action === 'business_types') {
+      // Platform-wide list of business types (not shop data) — readable before anyone has signed in.
+      const { data, error } = await admin.from('platform_business_types').select('*');
+      if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      return json({ ok: true, rows: data || [] });
+    }
+
+    if (action === 'c2b_list' || action === 'c2b_match') {
+      // Unmatched direct M-Pesa payments. Needs a signed-in staff token (the one shop-auth issued).
+      const tok = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+      const { data: u } = await admin.auth.getUser(tok);
+      const md = (u?.user?.app_metadata || {}) as { shop_id?: string; role?: string };
+      if (!u?.user || !md.shop_id) return json({ ok: false, code: 'unauthorized' }, 401);
+      if (action === 'c2b_list') {
+        const since = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+        const { data, error } = await admin.from('mpesa_c2b_payments').select('*').eq('matched', false).gt('created_at', since).order('created_at', { ascending: false }).limit(15);
+        if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+        return json({ ok: true, rows: data || [] });
+      }
+      const transId = String(body.trans_id || '');
+      if (!transId) return json({ ok: false, code: 'bad_request' }, 400);
+      const { error } = await admin.from('mpesa_c2b_payments').update({ matched: true }).eq('trans_id', transId).eq('matched', false);
+      if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      return json({ ok: true });
     }
 
     if (action !== 'login') return json({ ok: false, code: 'bad_request' }, 400);
