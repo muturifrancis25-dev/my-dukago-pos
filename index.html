@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-db-reopen-32';
-const BUILD_DATE_LABEL = '07 Oct 2026, 13:45';
+const BUILD_VERSION = '2026-10-07-shop-name-sync-33';
+const BUILD_DATE_LABEL = '07 Oct 2026, 14:05';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -6645,9 +6645,13 @@ async function pullShopData(fullPull, force){
     // the same way: sign the open session out the moment this device learns about it.
     if(currentUser){
       try{
-        const shopRes = await fetchT(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=active,license_note`, {headers: sbHeaders()});
+        const shopRes = await fetchT(`${supaUrl}/rest/v1/shops?id=eq.${shopId}&select=active,license_note,name`, {headers: sbHeaders()});
         if(shopRes.ok){
           const shopRows = await shopRes.json();
+          // Shops set up before the name was synced stay called "New shop" in the backend — fix that once an admin is signed in.
+          if(shopRows.length && currentUser && currentUser.role==='admin' && businessProfile && businessProfile.storeName && shopRows[0].name!==businessProfile.storeName){
+            updateShopNameInBackend(businessProfile.storeName).catch(()=>{});
+          }
           if(shopRows.length && shopRows[0].active===false){
             await pauseCartForUser(currentUser.id); // don't drop an in-progress cart just because the license changed mid-sale
             toast(shopRows[0].license_note || 'This shop has been deactivated — contact your platform administrator');
