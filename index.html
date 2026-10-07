@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-secure-login-test-28';
-const BUILD_DATE_LABEL = '07 Oct 2026, 10:25';
+const BUILD_VERSION = '2026-10-07-secure-session-29';
+const BUILD_DATE_LABEL = '07 Oct 2026, 12:20';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -5947,9 +5947,54 @@ function fetchT(url, opts, timeoutMs){
   const mergedOpts = Object.assign({}, opts, {signal: controller.signal});
   return fetch(url, mergedOpts).finally(()=> clearTimeout(timer));
 }
+// ---------- Shop session: a signed pass from the shop-auth function, tied to this shop + person ----------
+// While the database still has open policies the pass is optional: if there is none (offline, the function
+// is down, expired) requests simply carry the public key as before, so nothing can stop syncing.
+let shopSession = null; // {access, refresh, expires (unix s), staffId}
+let shopSessionPromise = null;
+function sessionValid(){ return !!(shopSession && shopSession.access && shopSession.expires - Date.now()/1000 > 30); }
 function sbHeaders(extra){
-  return Object.assign({'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, extra||{});
+  const bearer = sessionValid() ? shopSession.access : supaKey;
+  return Object.assign({'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${bearer}`}, extra||{});
 }
+async function loadShopSession(){
+  try{ const r = await getSetting('shop_session'); shopSession = (r && r.value) || null; }catch(e){ shopSession = null; }
+}
+function saveShopSession(){ if(shopSession) put('settings', {key:'shop_session', value:shopSession}).catch(()=>{}); }
+function clearShopSession(){ shopSession = null; try{ del('settings','shop_session').catch(()=>{}); }catch(e){} }
+async function refreshShopSession(){
+  if(!shopSession || !shopSession.refresh) return false;
+  try{
+    const res = await fetchT(`${supaUrl}/auth/v1/token?grant_type=refresh_token`, {method:'POST', headers:{'Content-Type':'application/json','apikey':supaKey}, body: JSON.stringify({refresh_token: shopSession.refresh})}, 8000);
+    if(!res.ok) return false;
+    const j = await res.json();
+    if(!j.access_token) return false;
+    shopSession = {access:j.access_token, refresh:j.refresh_token, expires:j.expires_at || (Date.now()/1000 + (j.expires_in||3600)), staffId: shopSession.staffId};
+    saveShopSession();
+    return true;
+  }catch(e){ return false; }
+}
+// Gets or renews the pass. Safe to call often: it returns at once when there is plenty of time left,
+// only one attempt runs at a time, and any failure just means "carry on with the public key".
+function ensureShopSession(){
+  if(!isOnline || !backendLive() || !shopId) return Promise.resolve();
+  if(shopSessionPromise) return shopSessionPromise;
+  shopSessionPromise = (async()=>{
+    if(shopSession && currentUser && shopSession.staffId && shopSession.staffId!==currentUser.id) clearShopSession(); // never keep someone else's pass
+    if(shopSession && shopSession.expires - Date.now()/1000 > 600) return;
+    if(shopSession && await refreshShopSession()) return;
+    if(!(currentUser && currentUser.pin)) return;
+    const res = await fetchT(`${supaUrl}/functions/v1/shop-auth`, {method:'POST', headers:{'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, body: JSON.stringify({action:'login', pin: currentUser.pin, shopId})}, 10000);
+    const j = await res.json().catch(()=>null);
+    if(j && j.ok && j.session){
+      shopSession = {access:j.session.access_token, refresh:j.session.refresh_token, expires:j.session.expires_at, staffId:j.staff.id};
+      saveShopSession();
+      log('Secure session started','ok');
+    }
+  })().catch(e=>{ try{ log('Secure session not started: '+(e&&e.message||e),'warn'); }catch(_){} }).finally(()=>{ shopSessionPromise = null; });
+  return shopSessionPromise;
+}
+setInterval(()=>{ try{ if(currentUser) ensureShopSession(); }catch(e){} }, 5*60*1000);
 async function pushToSupabase(item){
   if(item.type==='product_delete'){
     const res = await fetchT(`${supaUrl}/rest/v1/products?shop_id=eq.${shopId}&sku=eq.${encodeURIComponent(item.payload.sku)}`, {
@@ -6166,6 +6211,7 @@ function runSyncLoop(){
   return syncLoopPromise;
 }
 async function runSyncLoopInner(){
+  ensureShopSession(); // keeps the pass fresh; the pass is optional, so this never holds up a sync pass
   if(!isOnline || !shopId) return;
   const queue = await getAll('sync_queue');
   const live = backendLive();
@@ -6215,6 +6261,7 @@ function makeShopId(){
 async function loadShopIdentity(){
   const savedId = await getSetting('shop_id');
   shopId = savedId ? savedId.value : null;
+  await loadShopSession();
   try{
     const lk = await getSetting('pin_lockout');
     if(lk && lk.value){ pinFails = lk.value.fails||0; pinLockedUntil = lk.value.until||0; }
@@ -7309,6 +7356,7 @@ $('lockScreenBtn').addEventListener('click', async ()=>{
   await pauseCartForUser(uid);
   logAudit('Signed out', 'via Lock button' + (hadItems ? ` — cart paused (${cart.length} item(s))` : ''));
   currentUser=null;
+  clearShopSession();
   try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
   showLoginScreen();
 });
@@ -8817,6 +8865,7 @@ async function completeSignIn(u, opts={}){
   // shows immediately (the fast, synchronous part below), and the deactivation check runs
   // afterward in the background, only kicking the person back out in the rare case it's needed.
   currentUser = u;
+  ensureShopSession(); // background: start (or keep) this person's secure session; never blocks the till
   const mySignInGeneration = ++signInGeneration;
   $('loginScreen').classList.add('hide');
   $('setAdminPinScreen').classList.add('hide');
@@ -9141,6 +9190,7 @@ async function tryRestoreSession(){
     return false; // falls through to showLoginScreen() in init()
   }
   currentUser = u;
+  ensureShopSession();
   $('cashierChip').textContent = `${u.name} · ${u.role}`;
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('view-till').classList.add('active');
@@ -9156,6 +9206,7 @@ $('logoutBtn').addEventListener('click', async ()=>{
   await pauseCartForUser(uid); // never silently lose a mid-sale cart, however someone signs out
   logAudit('Signed out', hadItems ? `cart paused (${cart.length} item(s))` : '');
   currentUser=null;
+  clearShopSession();
   try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
   showLoginScreen();
 });
