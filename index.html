@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-secure-session-29';
-const BUILD_DATE_LABEL = '07 Oct 2026, 12:20';
+const BUILD_VERSION = '2026-10-07-pull-resilient-30';
+const BUILD_DATE_LABEL = '07 Oct 2026, 12:50';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -6713,7 +6713,9 @@ async function pullShopData(fullPull, force){
       }
     }
     // Refunds from OTHER devices too — same reasoning and same fix as sales above
-    const refundsRes = await fetchT(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
+    // A failure here (e.g. the table missing on the backend) must never stop everything pulled after it.
+    let refundsRes = {ok:false};
+    try{ refundsRes = await fetchT(`${supaUrl}/rest/v1/refunds?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()}); }catch(e){ log('Refunds not pulled this cycle: '+e.message,'warn'); }
     if(refundsRes.ok){
       const remoteRefunds = await refundsRes.json();
       for(const rr of remoteRefunds){

@@ -38,7 +38,7 @@ declare t text;
 begin
   foreach t in array array[
     'cart_removal_requests','customer_debts','payables','po_number_counters','products',
-    'purchase_orders','sales','shop_settings','staff_cash','stock_movements','stock_takes','table_orders'
+    'purchase_orders','refunds','sales','shop_settings','staff_cash','stock_movements','stock_takes','table_orders'
   ] loop
     execute format('alter table public.%I enable row level security', t);
     execute format($p$create policy shop_isolation on public.%I for all to authenticated
