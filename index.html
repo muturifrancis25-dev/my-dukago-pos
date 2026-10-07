@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-shop-name-sync-33';
-const BUILD_DATE_LABEL = '07 Oct 2026, 14:05';
+const BUILD_VERSION = '2026-10-07-platform-pass-34';
+const BUILD_DATE_LABEL = '07 Oct 2026, 15:00';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2847,6 +2847,30 @@ $('mpesaSendBtn').addEventListener('click', async ()=>{
 // resets on every reload and requires re-authenticating each time. That's a safety feature,
 // not an inconvenience: this is the one login in the whole app that should never be "stay
 // signed in."
+// ---------- Platform Administrator token: every platform-level read/write goes through the platform-rest function ----------
+let platformToken = null; // {token, exp}
+async function getPlatformToken(){
+  if(platformToken && platformToken.exp - Date.now()/1000 > 60) return platformToken.token;
+  // Signed in with a fingerprint (device-only), or the 2-hour pass ran out: ask for the PIN once.
+  const pin = window.prompt('Enter your Platform Administrator PIN to continue');
+  if(!pin) throw new Error('Platform Administrator PIN needed');
+  const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/super-admin-login`, {method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify({pin:pin.trim()})}, 8000);
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok || !data.ok || !data.token) throw new Error(data.error || 'Incorrect PIN');
+  platformToken = {token:data.token, exp:data.exp};
+  return platformToken.token;
+}
+// Same shape as fetch(): platformFetch('shops?select=*', {method, headers:{Prefer}, body}) -> Response
+async function platformFetch(path, init){
+  init = init || {};
+  const token = await getPlatformToken();
+  const payload = {token, method: init.method || 'GET', path};
+  if(init.body) payload.body = (typeof init.body==='string') ? JSON.parse(init.body) : init.body;
+  if(init.headers && init.headers['Prefer']) payload.prefer = init.headers['Prefer'];
+  const res = await fetchT(`${PLATFORM_SUPABASE_URL}/functions/v1/platform-rest`, {method:'POST', headers: mpesaFunctionHeaders(), body: JSON.stringify(payload)}, 15000);
+  if(res.status===401) platformToken = null; // pass expired — next call asks for the PIN again
+  return res;
+}
 let superAdminUnlocked = false;
 let superAdminName = null;
 
@@ -2938,6 +2962,7 @@ $('saVerifyBtn').addEventListener('click', async ()=>{
       $('saLoginError').textContent = data.error || 'Incorrect PIN';
       return;
     }
+    if(data.token) platformToken = {token:data.token, exp:data.exp};
     logAudit('Platform Administrator verified on this device', data.name || 'Platform Admin');
     enterSuperAdminView(data.name);
   }catch(e){
@@ -3011,7 +3036,7 @@ async function loadAllShopsList(){
   const box = $('saShopsList');
   box.innerHTML = 'Loading…';
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?select=*&order=created_at.desc`, {headers: mpesaFunctionHeaders()});
+    const res = await platformFetch(`shops?select=*&order=created_at.desc`, {headers: mpesaFunctionHeaders()});
     if(!res.ok){ box.innerHTML = '<p class="hint">Could not load — check the connection.</p>'; return; }
     const shops = await res.json();
     $('saShopCount').textContent = shops.length;
@@ -3050,7 +3075,7 @@ async function loadAllShopsList(){
         const verb = currentlyActive ? 'deactivate' : 'reactivate';
         if(!confirm(`${verb.charAt(0).toUpperCase()+verb.slice(1)} "${shopName}"? ${currentlyActive ? 'Its admin and staff will be signed out and blocked from signing back in until reactivated. Their data stays intact.' : 'This shop will be able to sign in and sync again.'}`)) return;
         try{
-          let res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+          let res = await platformFetch(`shops?id=eq.${targetShopId}`, {
             method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive, license_status: currentlyActive ? 'suspended' : 'active'}),
           });
           if(!res.ok){
@@ -3059,7 +3084,7 @@ async function loadAllShopsList(){
             // the unknown columns, which would otherwise take the basic Activate/Deactivate
             // control down with it. Fall back to the plain `active` flag alone so this core
             // moderation control keeps working regardless of migration status.
-            res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}`, {
+            res = await platformFetch(`shops?id=eq.${targetShopId}`, {
               method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !currentlyActive}),
             });
             if(!res.ok){ toast('Could not update — check the connection'); return; }
@@ -3108,7 +3133,7 @@ async function renderManageShopBilling(targetShopId){
   $('manageShopBillingStatus').textContent = 'Loading…';
   $('manageShopPaymentsList').innerHTML = '';
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=plan,license_expires_at,license_status,active,shop_code`, {headers: mpesaFunctionHeaders()});
+    const res = await platformFetch(`shops?id=eq.${targetShopId}&select=plan,license_expires_at,license_status,active,shop_code`, {headers: mpesaFunctionHeaders()});
     if(!res.ok) throw new Error('shop');
     const rows = await res.json();
     const sh = rows[0] || {};
@@ -3124,7 +3149,7 @@ async function renderManageShopBilling(targetShopId){
     } else {
       $('manageShopBillingStatus').textContent = 'No paid-until date set — this shop is never auto-suspended.';
     }
-    const pres = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_payments?shop_id=eq.${targetShopId}&select=*&order=paid_at.desc&limit=8`, {headers: mpesaFunctionHeaders()});
+    const pres = await platformFetch(`shop_payments?shop_id=eq.${targetShopId}&select=*&order=paid_at.desc&limit=8`, {headers: mpesaFunctionHeaders()});
     if(pres.ok){
       const pays = await pres.json();
       $('manageShopPaymentsList').innerHTML = pays.length
@@ -3139,7 +3164,7 @@ let manageShopBillingBusy = false;
 $('manageShopSavePlanBtn').addEventListener('click', async ()=>{
   if(!manageShopTargetId) return;
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+    const res = await platformFetch(`shops?id=eq.${manageShopTargetId}`, {
       method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({plan: $('manageShopPlan').value}),
     });
     if(!res.ok){ toast('Could not save the plan'); return; }
@@ -3158,19 +3183,19 @@ $('manageShopRecordPaymentBtn').addEventListener('click', async ()=>{
   if(!amount || amount<=0){ toast('Enter the amount received'); return; }
   manageShopBillingBusy = true;
   try{
-    const cur = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}&select=license_expires_at`, {headers: mpesaFunctionHeaders()});
+    const cur = await platformFetch(`shops?id=eq.${manageShopTargetId}&select=license_expires_at`, {headers: mpesaFunctionHeaders()});
     if(!cur.ok) throw new Error('read');
     const curRow = (await cur.json())[0] || {};
     const now = new Date();
     const base = (curRow.license_expires_at && new Date(curRow.license_expires_at) > now) ? new Date(curRow.license_expires_at) : now;
     const newExpiry = addMonthsIso(base, months);
     if(!confirm(`Record KSh ${amount.toLocaleString()} for ${months} month(s) on ${$('manageShopName').textContent}? Paid until becomes ${newExpiry.toLocaleDateString('en-KE')}.`)) return;
-    const payRes = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_payments`, {
+    const payRes = await platformFetch(`shop_payments`, {
       method:'POST', headers: mpesaFunctionHeaders({'Prefer':'return=minimal'}),
       body: JSON.stringify({shop_id: manageShopTargetId, amount, months, plan, reference: reference||null, recorded_by: superAdminName, extends_to: newExpiry.toISOString()}),
     });
     if(!payRes.ok){ toast('Could not record the payment — nothing was changed'); return; }
-    const upd = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+    const upd = await platformFetch(`shops?id=eq.${manageShopTargetId}`, {
       method:'PATCH', headers: mpesaFunctionHeaders(),
       body: JSON.stringify({plan, license_expires_at: newExpiry.toISOString(), active:true, license_status:'active', license_note:null}),
     });
@@ -3208,7 +3233,7 @@ async function renderManageShopLicense(targetShopId){
   $('manageShopLicenseStatus').value = 'active';
   $('manageShopLicenseNote').value = '';
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${targetShopId}&select=license_status,license_note,active`, {headers: mpesaFunctionHeaders()});
+    const res = await platformFetch(`shops?id=eq.${targetShopId}&select=license_status,license_note,active`, {headers: mpesaFunctionHeaders()});
     if(!res.ok) return; // schema may not have the columns yet on an older backend — falls back to the defaults above
     const rows = await res.json();
     if(!rows.length) return;
@@ -3224,13 +3249,13 @@ $('manageShopSaveLicenseBtn').addEventListener('click', async ()=>{
   const blocking = status==='suspended' || status==='cancelled';
   if(blocking && !confirm(`Set "${$('manageShopName').textContent}" to ${status}? Every device at that shop will be signed out and blocked from signing back in until you change this back to Trial or Active. Their data stays intact.`)) return;
   try{
-    let res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+    let res = await platformFetch(`shops?id=eq.${manageShopTargetId}`, {
       method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({license_status: status, license_note: note || null, active: !blocking}),
     });
     if(!res.ok){
       // Same migration fallback as the quick toggle above — without the license_status/
       // license_note columns yet, at least still apply the active/suspended switch itself.
-      res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shops?id=eq.${manageShopTargetId}`, {
+      res = await platformFetch(`shops?id=eq.${manageShopTargetId}`, {
         method:'PATCH', headers: mpesaFunctionHeaders(), body: JSON.stringify({active: !blocking}),
       });
       if(!res.ok){ toast('Could not save — check the connection'); return; }
@@ -3247,7 +3272,7 @@ $('manageShopSaveLicenseBtn').addEventListener('click', async ()=>{
 
 async function renderManageShopTableView(targetShopId){
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.table_view_enabled&select=value`, {headers: mpesaFunctionHeaders()});
+    const res = await platformFetch(`shop_settings?shop_id=eq.${targetShopId}&key=eq.table_view_enabled&select=value`, {headers: mpesaFunctionHeaders()});
     const rows = res.ok ? await res.json() : [];
     // Defaults to on — matches the local default so a shop that's never had this
     // setting saved yet shows the same behavior it would actually get.
@@ -3258,7 +3283,7 @@ $('manageShopSaveTableViewBtn').addEventListener('click', async ()=>{
   if(!manageShopTargetId) return;
   const enabled = $('manageShopTableViewCheckbox').checked;
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
+    const res = await platformFetch(`shop_settings`, {
       method:'POST', headers: mpesaFunctionHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),
       body: JSON.stringify({shop_id:manageShopTargetId, key:'table_view_enabled', value:enabled, updated_at:new Date().toISOString()}),
     });
@@ -3274,7 +3299,7 @@ async function renderManageShopBizTypes(targetShopId){
   const box = $('manageShopBizTypes');
   box.innerHTML = 'Loading…';
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings?shop_id=eq.${targetShopId}&key=eq.active_business_types&select=value`, {headers: mpesaFunctionHeaders()});
+    const res = await platformFetch(`shop_settings?shop_id=eq.${targetShopId}&key=eq.active_business_types&select=value`, {headers: mpesaFunctionHeaders()});
     const rows = res.ok ? await res.json() : [];
     const current = rows.length ? rows[0].value : ['duka'];
     const types = allBusinessTypes(); // built-in + platform types — a shop's own custom types aren't visible platform-wide, so aren't offered here
@@ -3293,7 +3318,7 @@ $('manageShopSaveBizBtn').addEventListener('click', async ()=>{
   const checked = [...$('manageShopBizTypes').querySelectorAll('input[data-biz-id]:checked')].map(el=>el.dataset.bizId);
   if(checked.length===0){ toast('Select at least one business type'); return; }
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/shop_settings`, {
+    const res = await platformFetch(`shop_settings`, {
       method:'POST', headers: mpesaFunctionHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),
       body: JSON.stringify({shop_id:manageShopTargetId, key:'active_business_types', value:checked, updated_at:new Date().toISOString()}),
     });
@@ -3309,7 +3334,7 @@ async function renderManageShopAdminInfo(targetShopId){
   const box = $('manageShopAdminInfo');
   box.textContent = 'Loading…';
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${targetShopId}&role=eq.admin&active=eq.true&select=id,name,pin`, {headers: mpesaFunctionHeaders()});
+    const res = await platformFetch(`staff?shop_id=eq.${targetShopId}&role=eq.admin&active=eq.true&select=id,name,pin`, {headers: mpesaFunctionHeaders()});
     const rows = res.ok ? await res.json() : [];
     if(rows.length===0){ box.textContent = 'No active admin account found for this shop.'; return; }
     box.innerHTML = rows.map(a=>`${a.name} — current PIN ${a.pin}`).join('<br>');
@@ -3328,10 +3353,10 @@ $('manageShopResetPinBtn').addEventListener('click', async ()=>{
     const uniqueCheck = await isPinGloballyUnique(newPin, null);
     if(!uniqueCheck.unique){ toast('That PIN is already in use by '+uniqueCheck.ownerName+' — pick a different one'); return; }
     if(!uniqueCheck.checkedRemote){ toast('Could not verify this PIN against every shop — check the connection and try again'); return; }
-    const staffRes = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?shop_id=eq.${manageShopTargetId}&role=eq.admin&active=eq.true&select=id`, {headers: mpesaFunctionHeaders()});
+    const staffRes = await platformFetch(`staff?shop_id=eq.${manageShopTargetId}&role=eq.admin&active=eq.true&select=id`, {headers: mpesaFunctionHeaders()});
     const rows = staffRes.ok ? await staffRes.json() : [];
     if(rows.length===0){ toast('No active admin account found for this shop'); return; }
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/staff?id=eq.${rows[0].id}`, {
+    const res = await platformFetch(`staff?id=eq.${rows[0].id}`, {
       method:'PATCH', headers: mpesaFunctionHeaders({'Prefer':'return=minimal'}),
       body: JSON.stringify({pin:newPin, updated_at:new Date().toISOString()}),
     });
@@ -3363,7 +3388,7 @@ $('saAddBizTypeBtn').addEventListener('click', async ()=>{
   cats.forEach((c,i)=> colors[c] = BIZ_COLOR_PALETTE[i % BIZ_COLOR_PALETTE.length]);
   const id = label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') + '-' + Date.now().toString().slice(-4);
   try{
-    const res = await fetchT(`${PLATFORM_SUPABASE_URL}/rest/v1/platform_business_types`, {
+    const res = await platformFetch(`platform_business_types`, {
       method:'POST', headers: mpesaFunctionHeaders(),
       body: JSON.stringify({id, label, emoji, description:label, cats, colors, created_by: superAdminName}),
     });
@@ -6349,10 +6374,12 @@ function genClientShopCode(){
   return c;
 }
 // Gives a shop a fresh code (retries on the rare clash with another shop's code). Returns the new code or null.
-async function changeShopCode(targetShopId, headers, baseUrl){
+async function changeShopCode(targetShopId, headers, baseUrl, viaPlatform){
   for(let i=0;i<6;i++){
     const code = genClientShopCode();
-    const res = await fetchT(`${baseUrl}/rest/v1/shops?id=eq.${targetShopId}`, {method:'PATCH', headers, body: JSON.stringify({shop_code: code})}, 8000);
+    const res = viaPlatform
+      ? await platformFetch(`shops?id=eq.${targetShopId}`, {method:'PATCH', body: JSON.stringify({shop_code: code})})
+      : await fetchT(`${baseUrl}/rest/v1/shops?id=eq.${targetShopId}`, {method:'PATCH', headers, body: JSON.stringify({shop_code: code})}, 8000);
     if(res.ok) return code;
     if(res.status!==409) return null;
   }
@@ -6385,7 +6412,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(m) m.addEventListener('click', async ()=>{
     if(!manageShopTargetId) return;
     if(!confirm('Change the Shop Code for '+$('manageShopName').textContent+'? The old code stops working for new phones straight away.')) return;
-    const code = await changeShopCode(manageShopTargetId, mpesaFunctionHeaders(), PLATFORM_SUPABASE_URL);
+    const code = await changeShopCode(manageShopTargetId, null, PLATFORM_SUPABASE_URL, true);
     if(!code){ toast('Could not change the code — try again'); return; }
     $('manageShopCode').textContent = code;
     logAudit('Shop Code changed (Platform Administrator)', $('manageShopName').textContent); toast('New Shop Code: '+code);
