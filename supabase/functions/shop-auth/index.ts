@@ -6,6 +6,7 @@
 //
 // Actions (POST JSON):
 //   shop_by_code { code }                    -> { ok, shop:{id,name,active} } | { ok:false, code:'not_found' }
+//   pin_unique { pin, excludeStaffId? }      -> { ok, unique }
 //   login { pin, shopCode? , shopId? }       -> { ok, staff, shop, session } | { ok:false, code, ... }
 //        codes: bad_request | not_found | prefix | other_shop | suspended | locked
 //
@@ -64,6 +65,29 @@ Deno.serve(async (req) => {
       const { data } = await admin.from('shops').select('id,name,active,license_status').eq('shop_code', code).maybeSingle();
       if (!data) return json({ ok: false, code: 'not_found' }, 404);
       return json({ ok: true, shop: { id: data.id, name: data.name, active: data.active !== false } });
+    }
+
+    if (action === 'pin_unique') {
+      // Is this PIN free to use? Clashes = same PIN, or one PIN being the start of another, on any shop.
+      // Answers only yes/no (never whose PIN it is), and is rate limited so it cannot be used to map PINs.
+      const pin = String(body.pin || '');
+      if (!/^(\d{4}|\d{6})$/.test(pin)) return json({ ok: false, code: 'bad_request' }, 400);
+      const qk = 'pinq';
+      const qs = await lockState(qk);
+      if (qs?.locked_until && new Date(qs.locked_until).getTime() > Date.now()) return json({ ok: false, code: 'locked' }, 429);
+      const now = Date.now();
+      let n = 1, ws = new Date(now).toISOString(), lu: string | null = null;
+      if (qs && now - new Date(qs.window_start).getTime() < WINDOW_MS) { n = qs.fails + 1; ws = qs.window_start; }
+      if (n >= 120) { lu = new Date(now + LOCK_MS).toISOString(); n = 0; ws = new Date(now).toISOString(); }
+      await admin.from('shop_auth_attempts').upsert({ key: qk, fails: n, window_start: ws, locked_until: lu });
+      let q = admin.from('staff').select('id').eq('active', true);
+      const conds = [`pin.eq.${pin}`];
+      if (pin.length === 4) conds.push(`pin.like.${pin}*`); else conds.push(`pin.eq.${pin.slice(0, 4)}`);
+      q = q.or(conds.join(','));
+      if (body.excludeStaffId) q = q.neq('id', String(body.excludeStaffId));
+      const { data: clash, error } = await q.limit(1);
+      if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      return json({ ok: true, unique: !(clash && clash.length) });
     }
 
     if (action !== 'login') return json({ ok: false, code: 'bad_request' }, 400);

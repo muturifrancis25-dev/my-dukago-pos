@@ -1899,8 +1899,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-pull-resilient-30';
-const BUILD_DATE_LABEL = '07 Oct 2026, 12:50';
+const BUILD_VERSION = '2026-10-07-pin-via-function-31';
+const BUILD_DATE_LABEL = '07 Oct 2026, 13:20';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -6298,8 +6298,17 @@ async function connectWithShopCode(){
   if(!(isOnline && backendLive())){ setLoginHint('Connect to the internet to enter a Shop Code.', true); return; }
   setLoginHint('Checking Shop Code…', false);
   try{
-    const res = await fetchT(`${supaUrl}/rest/v1/shops?shop_code=eq.${code}&select=id,name,active`, {headers: sbHeaders()}, 8000);
-    const rows = res.ok ? await res.json() : null;
+    let rows = null;
+    try{
+      const fr = await fetchT(`${supaUrl}/functions/v1/shop-auth`, {method:'POST', headers:{'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, body: JSON.stringify({action:'shop_by_code', code})}, 8000);
+      const fj = await fr.json().catch(()=>null);
+      if(fj && fj.ok) rows = [fj.shop];
+      else if(fj && fj.code==='not_found') rows = [];
+    }catch(e){}
+    if(rows===null){
+      const res = await fetchT(`${supaUrl}/rest/v1/shops?shop_code=eq.${code}&select=id,name,active`, {headers: sbHeaders()}, 8000);
+      rows = res.ok ? await res.json() : null;
+    }
     if(!rows){ setLoginHint('Could not check the code — try again.', true); return; }
     if(!rows.length){ noteWrongPin(); setLoginHint('No shop has that code. Check it and try again.', true); shakePinDots(); return; }
     if(rows[0].active===false){ setLoginHint('This shop is switched off. Contact My DukaGO support.', true); return; }
@@ -6411,6 +6420,17 @@ async function updateShopNameInBackend(name){
 // its owner's shop with nothing typed but the PIN itself. Once a device already belongs to a
 // shop, this must never be used to decide who can sign in there — see tryPinCheckpoint, which
 // calls this only when !shopId, and lookupPinForThisShop (below) otherwise.
+// Asks the shop-auth function to check a PIN for THIS shop. Returns its JSON verdict, or null when the
+// function can't be reached (callers then fall back to the older direct lookups).
+async function shopAuthLogin(pinValue){
+  if(!backendLive() || !shopId) return null;
+  try{
+    const res = await fetchT(`${supaUrl}/functions/v1/shop-auth`, {method:'POST', headers:{'Content-Type':'application/json','apikey':supaKey,'Authorization':`Bearer ${supaKey}`}, body: JSON.stringify({action:'login', pin:pinValue, shopId})}, 8000);
+    const j = await res.json().catch(()=>null);
+    if(j && (j.ok || ['not_found','prefix','other_shop','suspended','locked'].includes(j.code))) return j;
+    return null;
+  }catch(e){ return null; }
+}
 async function lookupPinGlobally(pinValue){
   if(!backendLive()) return null;
   try{
@@ -6554,6 +6574,18 @@ async function isPinGloballyUnique(pinValue, excludeUserId){
   // specifically to prevent this) was being satisfied by a check that had actually failed.
   // remoteCheckSucceeded only becomes true once real rows have actually come back.
   let remoteCheckSucceeded = false;
+  if(backendLive() && /^(\d{4}|\d{6})$/.test(pinValue)){
+    // The server answers yes/no across every shop (no names, rate limited). Only if it can't be
+    // reached do we fall back to the direct queries below.
+    try{
+      const ur = await fetchT(`${supaUrl}/functions/v1/shop-auth`, {method:'POST', headers: sbHeaders(), body: JSON.stringify({action:'pin_unique', pin:pinValue, excludeStaffId: excludeUserId||null})}, 8000);
+      const uj = await ur.json().catch(()=>null);
+      if(uj && uj.ok===true){
+        if(uj.unique===false) return {unique:false, ownerName:'another person (this PIN or one it overlaps)', checkedRemote:true};
+        return {unique:true, checkedRemote:true};
+      }
+    }catch(e){ /* fall through to the direct check */ }
+  }
   if(backendLive()){
     try{
       // Exact match, plus: if pinValue is 4 digits, any 6-digit PIN starting with it;
@@ -8542,12 +8574,36 @@ async function tryPinCheckpoint(){
       // away (no waiting to see whether more digits follow): the answer for 4 digits is decided by
       // whether any 6-digit PIN anywhere starts with them — see pinPrefixExistsAnywhere.
       const needsGlobalCheck = true;
-      const [sameShopMatch, elsewhereMatch, prefixAnywhere] = await Promise.all([
-        lookupPinForThisShop(pinBuffer),
-        lookupPinGlobally(pinBuffer),
-        pinBuffer.length===4 ? pinPrefixExistsAnywhere(pinBuffer) : Promise.resolve(false),
-      ]);
+      let sameShopMatch, elsewhereMatch, prefixAnywhere;
+      const sa = await shopAuthLogin(pinBuffer); // the server decides; one call replaces three lookups
       if(stale()) return;
+      if(sa && sa.code==='locked'){
+        setLoginHint('Too many wrong PINs for this shop. Try again in a few minutes.', true);
+        shakePinDots(); pinBuffer=''; setTimeout(updatePinDots, 200);
+        return;
+      }
+      if(sa && sa.code==='suspended'){
+        setLoginHint(sa.note || 'This shop has been deactivated — contact your platform administrator.', true);
+        shakePinDots(); pinBuffer=''; setTimeout(updatePinDots, 200);
+        return;
+      }
+      if(sa){
+        if(sa.ok){
+          sameShopMatch = sa.staff;
+          shopSession = {access:sa.session.access_token, refresh:sa.session.refresh_token, expires:sa.session.expires_at, staffId:sa.staff.id};
+          saveShopSession();
+        }
+        elsewhereMatch = sa.code==='other_shop' ? {shop_id:'other'} : null;
+        prefixAnywhere = sa.code==='prefix';
+      } else {
+        // Function unreachable — the older direct lookups still work while the database is open.
+        [sameShopMatch, elsewhereMatch, prefixAnywhere] = await Promise.all([
+          lookupPinForThisShop(pinBuffer),
+          lookupPinGlobally(pinBuffer),
+          pinBuffer.length===4 ? pinPrefixExistsAnywhere(pinBuffer) : Promise.resolve(false),
+        ]);
+        if(stale()) return;
+      }
       if(sameShopMatch){
         try{
           await pullSpecificShop(sameShopMatch.shop_id); // same-shop branch — safe, additive, never wipes
