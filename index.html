@@ -575,6 +575,14 @@
   }
   .biz-card.checked .biz-check{background:var(--sage); border-color:var(--sage);}
 </style>
+<style>
+  /* Added 09 Oct 2026 — Price Changes view and the price-raise tap target. Nothing above is edited. */
+  #view-pricechanges.active{display:block;}
+  #view-pricechanges .stat-card .sval{color:var(--accent-text);} /* readable in dark mode too */
+  .rline .rprice.raisable{cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
+  .rline .rname .raise-tag{display:block; font-size:10px; font-weight:700; color:var(--marigold-dark); margin-top:1px;}
+  html[data-theme="dark"] .rline .rname .raise-tag{color:var(--marigold);}
+</style>
 </head>
 <body>
 
@@ -604,6 +612,7 @@
     <button data-view="payables">Payables</button>
     <button data-view="debts" id="navCustomerCreditBtn">Customer Credit</button>
     <button data-view="removals">Removals</button>
+    <button data-view="pricechanges" id="navPriceChangesBtn" style="display:none;">Price Changes<span id="priceRaiseBadge" style="display:none; background:var(--clay); color:#fff; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:999px; margin-left:5px;">0</span></button>
     <button data-view="staffcash">Staff Cash</button>
     <button data-view="reports">Reports</button>
     <button data-view="staff" class="admin-only-tab">Staff</button>
@@ -981,6 +990,34 @@
       <div class="panel">
         <h3>Reviewed — history</h3>
         <div id="removalsReviewedList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PRICE CHANGES — items sold above their list price, for the admin to review ============ -->
+  <section class="view" id="view-pricechanges">
+    <div class="cat-row" id="priceChangePeriodRow" style="margin-bottom:14px;"></div>
+    <div class="panel">
+      <h3>Sold above list price — <span id="priceChangePeriodLabel">today</span></h3>
+      <p class="hint">At a pub/bar, whoever is serving can raise an item's price at the till — never lower it. The extra is part of the sale itself, so it is already inside Revenue and Profit in Reports. This page shows where it came from: who raised what, by how much, and whether an admin has looked at it yet.</p>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); margin-bottom:14px;">
+        <div class="stat-card"><div class="slabel">Extra collected</div><div class="sval" id="priceChangeExtraTotal">KSh 0</div></div>
+        <div class="stat-card"><div class="slabel">Sales with a raised price</div><div class="sval" id="priceChangeSaleCount">0</div></div>
+        <div class="stat-card"><div class="slabel">Awaiting review (all dates)</div><div class="sval" id="priceChangePendingCount">0</div></div>
+      </div>
+      <div class="table-scroll"><table><thead><tr><th>Staff</th><th>Items raised</th><th>Extra collected</th></tr></thead>
+      <tbody id="priceChangeStaffTable"></tbody></table></div>
+    </div>
+    <div class="panel-pair">
+      <div class="panel">
+        <h3>Awaiting review</h3>
+        <p class="hint">Every sale that included a raised price, newest first, from any device at this shop. An Admin can clear any of them; a Supervisor can clear other people's, not their own.</p>
+        <button class="modal-cancel" id="priceChangeReviewAllBtn" style="display:none; margin-bottom:12px; padding:8px 14px; font-size:12px; border:none; border-radius:8px; font-weight:700; cursor:pointer;">Mark all as reviewed</button>
+        <div id="priceChangePendingList"></div>
+      </div>
+      <div class="panel">
+        <h3>Reviewed — <span id="priceChangeReviewedLabel">today</span></h3>
+        <div id="priceChangeReviewedList"></div>
       </div>
     </div>
   </section>
@@ -1444,6 +1481,27 @@
   </div>
 </div>
 
+<!-- Price raise — pub/bar only. Whoever is serving can charge MORE than the list price for a line,
+     never less. The raise travels on the sale itself (each line keeps its list price next to the
+     price actually charged), which is what Admin → Price Changes reads. -->
+<div class="modal-overlay" id="priceRaiseModal">
+  <div class="modal-box" style="width:min(88vw,320px); text-align:left;">
+    <h3 style="text-align:center;">Change price</h3>
+    <p id="priceRaiseInfo" style="text-align:center; font-size:12.5px; margin-bottom:10px;"></p>
+    <label>New price for one item (KSh)</label>
+    <input id="priceRaiseInput" type="number" inputmode="numeric" min="0" step="1" autocomplete="off" style="text-align:center; letter-spacing:1px; font-size:20px; font-family:var(--mono); margin-bottom:8px;">
+    <div class="quick-cash" id="priceRaiseQuick" style="margin-bottom:4px;"></div>
+    <p id="priceRaiseError" style="color:var(--clay); font-size:11.5px; min-height:15px; margin:0 0 6px;"></p>
+    <label>Why (optional)</label>
+    <input id="priceRaiseNote" type="text" maxlength="80" autocomplete="off" placeholder="e.g. late-night price, served at the table" style="text-align:left; letter-spacing:0; margin-bottom:8px;">
+    <p style="font-size:11px; margin:0 0 12px;">You can only go higher than the list price, never lower. The change is listed for the admin to review.</p>
+    <div class="modal-actions">
+      <button class="modal-cancel" id="priceRaiseCancelBtn">Cancel</button>
+      <button class="modal-confirm" id="priceRaiseConfirmBtn">Apply</button>
+    </div>
+  </div>
+</div>
+
 <!-- Quick-action modals reachable directly from the till by ANY role — no backoffice access
      needed, since logging an invoice or a customer credit is normal operational work, not
      something that should require an admin/supervisor PIN just to open the screen. -->
@@ -1830,6 +1888,10 @@
     </label>
     <button class="primary-btn" id="manageShopSaveTableViewBtn" style="width:100%; margin-bottom:18px;">Save Table View setting</button>
 
+    <h3 style="font-size:13.5px;">Products, prices &amp; purchase orders</h3>
+    <p class="hint">Set this shop's catalogue up for them — rename an item, change its price or cost, add something they sell that isn't on the list, or correct a purchase order that hasn't been delivered yet. Their devices pick the changes up the next time they sync.</p>
+    <button class="primary-btn" id="manageShopOpenCatalogBtn" style="width:100%; margin-bottom:18px;">Edit this shop's products &amp; POs</button>
+
     <h3 style="font-size:13.5px;">Reset admin PIN</h3>
     <p class="hint">For a shop that's locked out — sets a new PIN for their Admin account directly. Tell them the new PIN through a separate channel; this doesn't notify them automatically.</p>
     <div id="manageShopAdminInfo" style="margin-bottom:8px; font-size:12.5px; color:var(--muted);">Loading…</div>
@@ -1838,6 +1900,45 @@
 
     <div class="modal-actions" style="margin-top:18px;">
       <button class="modal-cancel" id="manageShopCloseBtn" style="width:100%;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Manage Shop → products, prices & purchase orders — Platform Administrator only. Reads and
+     writes the chosen shop's own rows through the same platform-rest function every other Manage
+     Shop control uses; that shop's devices pick the change up on their next pull, by updated_at,
+     exactly as they would an edit made on one of their own tills.
+     z-index:280 for the same reason manageShopModal carries 270 — it opens on top of it. -->
+<div class="modal-overlay" id="manageShopCatalogModal" style="z-index:280;">
+  <div class="modal-box" style="width:min(96vw,560px); text-align:left; max-height:88vh; overflow-y:auto;">
+    <h3 style="text-align:center;">Products &amp; purchase orders</h3>
+    <p class="hint" id="mscShopName" style="text-align:center; margin:0 0 6px;">—</p>
+    <p id="mscStatus" style="font-size:12px; min-height:16px; margin:0 0 12px; text-align:center;"></p>
+
+    <h3 style="font-size:13.5px;">Add a product</h3>
+    <p class="hint">For something this shop sells that isn't on its list yet. Leave stock blank for an item that isn't counted (a drink poured by the cup, a service).</p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+      <input id="mscNewName" placeholder="Product name" autocomplete="off" style="text-align:left; letter-spacing:0; margin:0;">
+      <select id="mscNewCat" style="margin:0;"></select>
+      <input id="mscNewPrice" type="number" min="0" placeholder="Sell price (KSh)" style="text-align:left; letter-spacing:0; margin:0;">
+      <input id="mscNewCost" type="number" min="0" placeholder="Cost (KSh, optional)" style="text-align:left; letter-spacing:0; margin:0;">
+      <input id="mscNewStock" type="number" min="0" placeholder="Stock (blank = not counted)" style="text-align:left; letter-spacing:0; margin:0;">
+      <input id="mscNewSku" placeholder="SKU / barcode (optional)" autocomplete="off" style="text-align:left; letter-spacing:0; margin:0;">
+    </div>
+    <button class="primary-btn" id="mscAddBtn" style="width:100%; margin-bottom:18px;">Add product to this shop</button>
+
+    <h3 style="font-size:13.5px;">Products <span id="mscProductCount" style="color:var(--muted); font-weight:600;"></span></h3>
+    <p class="hint">Change a name, category, price or cost and tap Save on that row. Stock counts stay with the shop — they change with every sale, so they aren't edited from here once an item is on record.</p>
+    <input id="mscSearch" placeholder="Search by name or SKU…" autocomplete="off" style="text-align:left; letter-spacing:0; margin:0 0 10px;">
+    <div id="mscProductList" style="margin-bottom:18px;"></div>
+
+    <h3 style="font-size:13.5px;">Purchase orders not yet delivered</h3>
+    <p class="hint">Correct the supplier, a quantity or a unit cost before the shop receives the order. Set a quantity to 0 to drop that line. Orders already received can't be changed — the stock has moved.</p>
+    <div id="mscPoList" style="margin-bottom:18px;"></div>
+
+    <div class="modal-actions">
+      <button class="modal-cancel" id="mscReloadBtn">Reload</button>
+      <button class="modal-confirm" id="mscCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -1899,8 +2000,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-07-platform-login-timeout-37';
-const BUILD_DATE_LABEL = '07 Oct 2026, 17:00';
+const BUILD_VERSION = '2026-10-09-table-merge-39';
+const BUILD_DATE_LABEL = '09 Oct 2026, 18:15';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -2251,6 +2352,37 @@ const BUILTIN_BUSINESS_TYPES = {
       {sku:'PUB-WATER-500', name:'Bottled Water 500ml', price:100, stock:40, cat:'Soft Drinks & Mixers'},
       {sku:'PUB-BARSNACK-NUTS', name:'Bar Snacks (peanuts)', price:150, stock:25, cat:'Other'},
       {sku:'PUB-ICECUBES-BAG', name:'Ice Cubes (bag)', price:100, stock:20, cat:'Other'},
+      // Added 09 Oct 2026 — what pubs/bars in the market actually sell, at the prices they
+      // actually charge. Keg is poured by the cup or jug; spirits go out as a quarter (250ml) or
+      // a mzinga (750ml). All left stock:null on purpose, same as the draught/shots above: a
+      // made-up opening count would be wrong for every shop, and a wrong count blocks a sale at
+      // zero. A shop that wants its bottles counted just receives real stock under Admin → Stock,
+      // which switches that one item to tracked from then on. Existing shops get these the same
+      // way every starter item arrives — applyBusinessTypes() adds any SKU not already on the
+      // device, and never touches one that is (so a price a shop already edited stays as it is).
+      {sku:'PUB-KEG-DARK-BIG', name:'Keg Dark (Big Cup)', price:60, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-KEG-DARK-SMALL', name:'Keg Dark (Small Cup)', price:40, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-KEG-DARK-JUG', name:'Keg Dark (Jug)', price:180, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-KEG-BROWN-BIG', name:'Keg Brown (Big Cup)', price:60, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-KEG-BROWN-SMALL', name:'Keg Brown (Small Cup)', price:40, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-KEG-BROWN-JUG', name:'Keg Brown (Jug)', price:180, stock:null, cat:'Draught (Keg)'},
+      {sku:'PUB-KC-QTR', name:'Kenya Cane Quarter (KC)', price:320, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-KC-MZINGA', name:'Kenya Cane Mzinga (KC)', price:900, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-CHROME-QTR', name:'Chrome Quarter', price:300, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-CHROME-MZINGA', name:'Chrome Mzinga', price:800, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-COUNTY-QTR', name:'County Quarter', price:300, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-COUNTY-MZINGA', name:'County Mzinga', price:800, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-ORIJIN-QTR', name:'Orijin Quarter', price:300, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-ORIJIN-MZINGA', name:'Orijin Mzinga', price:800, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-KIBAO-QTR', name:'Kibao Quarter', price:300, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-KIBAO-MZINGA', name:'Kibao Mzinga', price:800, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-TRIPLEACE-QTR', name:'Triple Ace Quarter', price:280, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-TRIPLEACE-MZINGA', name:'Triple Ace Mzinga', price:800, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-HUNTERS-QTR', name:'Hunters Quarter', price:400, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-HUNTERS-MZINGA', name:'Hunters Mzinga', price:1100, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-CAPTAIN-QTR', name:'Captain Quarter', price:400, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-CAPTAIN-MZINGA', name:'Captain Mzinga', price:1000, stock:null, cat:'Spirits & Shots'},
+      {sku:'PUB-VNA', name:'V&A', price:400, stock:null, cat:'Spirits & Shots'},
     ]
   },
   wholesaler: {
@@ -2699,6 +2831,7 @@ function renderCart(){
   $('subTotal').textContent = fmtKsh(netSubtotal);
   $('taxLabel').textContent = vatEnabled ? `VAT included (${vatRate}%)` : 'VAT';
   $('taxTotal').textContent = fmtKsh(tax);
+  decorateRaisablePrices('cart', cart); // pub/bar only: tap a line's price to raise it (never lower) — see PRICE RAISE AT THE TILL
   $('grandTotal').textContent = fmtKsh(total);
   $('checkoutBtn').disabled = false;
 }
@@ -3602,6 +3735,8 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
     const hasStock = p.stock!==null && p.stock!==undefined;
     if(hasStock) p.stock -= item.qty; // local, optimistic — the till still works instantly, offline included
     lines.push({sku:item.sku,name:item.name,qty:item.qty,price:item.price,cost:(p.cost||0),btype:(p.btype||'duka')});
+    carryPriceRaise(item, lines[lines.length-1]); // a raised price keeps its list price beside it, for Admin → Price Changes
+    carryTableLineRef(item, lines[lines.length-1]); // which table line this was, so no phone can bill it a second time
     await put('products', p);
     // A sale's stock change is a DELTA push (adjust_stock RPC), not an absolute-value upsert —
     // see pushStockAdjust's own comment for why: two tills selling the same SKU at once must
@@ -3626,12 +3761,14 @@ async function finalizeSale(method, subtotal, tax, total, tendered, mpesaCode){
     const tables = await getAll('open_orders');
     const table = tables.find(t=>t.id===settlingTableId);
     if(table){
+      const unbilledLines = splitUnbilledTableLines(table, lines); // anything another phone added while this payment was being taken
       table.status = 'settled';
       table.settledAt = new Date().toISOString();
       table.settledSaleId = sale.id;
       await put('open_orders', table);
       await queuePush('table_order_upsert', table);
       logAudit('Table settled', `${table.label} — ${fmtKsh(total)}`);
+      if(unbilledLines.length) await openLateTableSitting(table, unbilledLines); // …stays on the table as LATE instead of closing with the bill
     }
     settlingTableId = null;
     exitTableMode();
@@ -3691,6 +3828,7 @@ $('csConfirmBtn').addEventListener('click', async ()=>{
     const hasStock = p.stock!==null && p.stock!==undefined;
     if(hasStock) p.stock -= item.qty;
     lineItems.push({sku:item.sku, name:item.name, qty:item.qty, price:item.price, cost:(p.cost||0)});
+    carryPriceRaise(item, lineItems[lineItems.length-1]); // same as finalizeSale — a credit sale's raised price is reviewable too
     await put('products', p);
     // Delta push, same reasoning as finalizeSale — see pushStockAdjust's comment.
     if(hasStock) await pushStockAdjust(item.sku, -item.qty);
@@ -4566,6 +4704,7 @@ async function openFloorTable(defId){
       openedBy: currentUser ? currentUser.name : 'Unknown', openedAt: new Date().toISOString(),
       settledAt: null, settledSaleId: null,
     };
+    await inheritTableMarkers(table); // lines removed at this table recently come along out of sight, so a phone that missed the removal can't bring them back
     await put('open_orders', table);
     await queuePush('table_order_upsert', table);
     logAudit('Table opened', table.label);
@@ -4622,6 +4761,7 @@ async function addItemToTable(sku){
   const tables = await getAll('open_orders');
   const table = tables.find(t=>t.id===activeTableId);
   if(!table){ toast('Table not found'); activeTableId=null; return; }
+  normalizeTableOrder(table); // any line from before the merge build gets its id now, before a new one is added beside it
   // A new tap adds to the newest not-yet-sent line for that item, never merges into a
   // line that's already gone to the kitchen — the kitchen's copy must stay exactly what
   // was actually sent, never silently revised after the fact.
@@ -4629,6 +4769,7 @@ async function addItemToTable(sku){
   if(existing) existing.qty += 1;
   else table.lines.push({sku:p.sku, name:p.name, price:p.price, cost:p.cost||0, qty:1, sentToKitchen:false});
   table.billPrinted = false; // any change to the order makes the last printed bill stale
+  stampTableOrder(table); // records what this phone just added, in a form another phone's changes can be merged with
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   renderTableOrderView();
@@ -4638,12 +4779,14 @@ async function adjustTableLineQty(idx, delta){
   const tables = await getAll('open_orders');
   const table = tables.find(t=>t.id===activeTableId);
   if(!table) return;
+  normalizeTableOrder(table);
   const line = table.lines[idx];
   if(!line) return;
   if(line.sentToKitchen){ toast(`Already sent to the ${stationLabelLower()} — can't be quietly changed here`); return; }
   line.qty += delta;
   if(line.qty<=0) table.lines.splice(idx,1);
   table.billPrinted = false;
+  stampTableOrder(table);
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   renderTableOrderView();
@@ -4652,11 +4795,14 @@ async function removeTableLine(idx){
   const tables = await getAll('open_orders');
   const table = tables.find(t=>t.id===activeTableId);
   if(!table) return;
+  normalizeTableOrder(table);
   const line = table.lines[idx];
   if(!line) return;
+  if(line.late){ removeLateTableLine(table.id, line.lid); return; } // a LATE line leaves through the reason-and-review path, not this block
   if(line.sentToKitchen){ toast(`Already sent to the ${stationLabelLower()} — can't be quietly removed here`); return; }
   table.lines.splice(idx,1);
   table.billPrinted = false;
+  stampTableOrder(table); // leaves a marker so the removed line can't come back from another phone
   await put('open_orders', table);
   await queuePush('table_order_upsert', table);
   renderTableOrderView();
@@ -4688,6 +4834,7 @@ async function renderTableOrderView(){
     list.querySelectorAll('.tbl-qty-inc').forEach(b=>b.addEventListener('click', ()=> adjustTableLineQty(parseInt(b.dataset.idx,10), 1)));
     list.querySelectorAll('.tbl-qty-dec').forEach(b=>b.addEventListener('click', ()=> adjustTableLineQty(parseInt(b.dataset.idx,10), -1)));
     list.querySelectorAll('.tbl-del').forEach(b=>b.addEventListener('click', ()=> removeTableLine(parseInt(b.dataset.idx,10))));
+    decorateRaisablePrices('table', table.lines); // pub/bar only: tap a line's price to raise it (never lower)
   }
   const subtotal = table.lines.reduce((s,l)=>s+l.price*l.qty,0);
   $('tableOrderSubTotal').textContent = fmtKsh(subtotal);
@@ -4797,6 +4944,7 @@ function printKitchenTicket(table, lines, round){
 
 $('settleTableBtn').addEventListener('click', async ()=>{
   if(!activeTableId) return;
+  if(!(await checkTableBeforeSettle(activeTableId))) return; // brings in what other phones added; refuses a bill already paid elsewhere
   const tables = await getAll('open_orders');
   const table = tables.find(t=>t.id===activeTableId);
   if(!table || table.lines.length===0) return;
@@ -4814,6 +4962,8 @@ $('settleTableBtn').addEventListener('click', async ()=>{
   // Hands off to the exact same cash/M-Pesa flow a normal walk-in sale already uses —
   // see the settlingTableId check at the end of finalizeSale() for how this closes out.
   cart = table.lines.map(l=>({sku:l.sku, name:l.name, price:l.price, qty:l.qty}));
+  table.lines.forEach((l,i)=> carryPriceRaise(l, cart[i])); // a price raised at the table stays marked as raised through settlement
+  table.lines.forEach((l,i)=>{ if(l.lid){ cart[i].lid = l.lid; cart[i].tbl = table.id; } }); // so the sale records exactly which table lines it paid for
   settlingTableId = activeTableId;
   renderCart();
   checkout();
@@ -6159,7 +6309,9 @@ async function pushToSupabase(item){
   }
   else if(item.type==='table_order_upsert'){
     table='table_orders'; prefer='resolution=merge-duplicates,return=minimal';
-    const p = item.payload;
+    // Was `const p = item.payload;` — the snapshot from whenever this was queued. Now the table as
+    // it stands at this moment, merged with the server's copy first. See tableOrderForPush().
+    const p = await tableOrderForPush(item.payload);
     body = {
       id:p.id, shop_id:shopId, label:p.label, status:p.status, lines:p.lines, bill_printed:p.billPrinted||false,
       kitchen_round_count:p.kitchenRoundCount||0,
@@ -6892,18 +7044,10 @@ async function pullShopData(fullPull, force){
     const toRes = await fetchT(`${supaUrl}/rest/v1/table_orders?shop_id=eq.${shopId}&select=*`, {headers: sbHeaders()});
     if(toRes.ok){
       const remoteTables = await toRes.json();
-      const localTables = await getAll('open_orders');
-      for(const rt of remoteTables){
-        const lt = localTables.find(t=>t.id===rt.id);
-        if(!lt || !lt.updated_at || new Date(rt.updated_at) > new Date(lt.updated_at)){
-          await put('open_orders', {
-            id:rt.id, label:rt.label, status:rt.status, lines:rt.lines, billPrinted:rt.bill_printed||false,
-            kitchenRoundCount:rt.kitchen_round_count||0,
-            openedBy:rt.opened_by, openedAt:rt.opened_at, settledAt:rt.settled_at, settledSaleId:rt.settled_sale_id,
-            updated_at:rt.updated_at,
-          });
-        }
-      }
+      // Was: whichever copy of a table had the newer updated_at replaced the other one whole. That is
+      // what lost one waiter's items when two phones worked the same table. Now each table is merged
+      // line by line — see TABLE ORDERS: MERGE, DON'T OVERWRITE.
+      await reconcileTableOrders(remoteTables, salesRes.ok);
       if(tableServiceEnabled()){ refreshFloorIfActive(); if(activeTableId) renderTableOrderView(); }
     }
     // Stock takes — previously local-only (see stock_take_upsert): a count done on one device
@@ -8371,6 +8515,7 @@ function switchBackofficeView(viewName){
   if(viewName==='payables'){ prefillPayableDates(); renderPayablesLists(); }
   if(viewName==='debts'){ prefillDebtDate(); renderDebtsLists(); }
   if(viewName==='removals') renderRemovalsList();
+  if(viewName==='pricechanges') renderPriceChanges();
   if(viewName==='staffcash') renderStaffCash();
   if(viewName==='reports') renderReports();
   if(viewName==='staff'){ renderStaffTable(); renderAttendanceTable(); }
@@ -8388,6 +8533,7 @@ function openBackoffice(){
   document.querySelectorAll('.admin-only-tab').forEach(b => b.style.display = isRealAdmin ? '' : 'none');
   switchBackofficeView('business');
   updateStockLowBadge();
+  updatePriceRaiseBadge();
 }
 $('adminGearBtn').addEventListener('click', ()=>{
   if(currentUser && (currentUser.role==='admin' || currentUser.role==='supervisor')){
@@ -9338,6 +9484,1265 @@ $('logoutBtn').addEventListener('click', async ()=>{
   try{ localStorage.removeItem('my_duka_session_uid'); }catch(e){}
   showLoginScreen();
 });
+
+// ======================================================================
+// PRICE RAISE AT THE TILL (pub/bar) — added 09 Oct 2026
+// Whoever is serving can charge MORE than an item's list price for a line — never less — so
+// a waiter can't cut into the shop's margin, but can still charge the going price when it
+// is higher than what's on the tile. Nothing here asks anyone's permission at the moment of
+// sale (the sale keeps moving, same principle as cart removals); instead every raise is kept
+// on the line itself — `listPrice` is the catalogue price it was added at, `price` is what was
+// actually charged — and that travels with the line into the `sales` record's own `lines`
+// JSON. That is the whole audit trail: no new table and no new column on the backend, and it
+// reaches every device the same way sales already do. Admin → Price Changes reads it back.
+// A line with no `listPrice` was simply sold at list price.
+//
+// Only switched on for a shop whose active business types include Pub / Bar. To offer it to
+// every business type, make priceRaiseEnabled() return true.
+// ======================================================================
+const PRICE_RAISE_MAX_MULTIPLE = 10; // a typo guard (3500 typed for 350), not a business rule
+function priceRaiseEnabled(){ return currentBusinessTypes.includes('pub'); }
+function lineListPrice(line){ return (line.listPrice!==undefined && line.listPrice!==null) ? Number(line.listPrice) : Number(line.price); }
+function lineIsRaised(line){ return !!line && line.listPrice!==undefined && line.listPrice!==null && Number(line.price) > Number(line.listPrice); }
+// Copies the "this was raised" marker from a cart/table line onto the matching sale line.
+function carryPriceRaise(from, to){
+  if(!to || !lineIsRaised(from)) return;
+  to.listPrice = from.listPrice;
+  if(from.raisedBy) to.raisedBy = from.raisedBy;
+  if(from.raisedAt) to.raisedAt = from.raisedAt;
+  if(from.raiseNote) to.raiseNote = from.raiseNote;
+}
+// Called at the end of renderCart() / renderTableOrderView(). Rows are rendered in the same
+// order as `lines`, one .rline each, so row N is line N. Purely additive to what those two
+// functions already drew: marks a raised line, and (pub/bar only) makes the price tappable.
+function decorateRaisablePrices(kind, lines){
+  const list = $(kind==='cart' ? 'cartList' : 'tableOrderList');
+  if(!list || !lines) return;
+  const allowed = priceRaiseEnabled();
+  list.querySelectorAll('.rline').forEach((row, idx)=>{
+    const line = lines[idx];
+    if(!line) return;
+    if(line.late){
+      // Served, but missing from a bill that was paid on another phone — see TABLE ORDERS: MERGE, DON'T OVERWRITE.
+      const nameEl = row.querySelector('.rname');
+      if(nameEl){
+        const tag = document.createElement('span');
+        tag.className = 'raise-tag';
+        tag.style.color = 'var(--clay)';
+        tag.textContent = 'LATE — not on the bill that was paid';
+        nameEl.appendChild(tag);
+      }
+    }
+    if(lineIsRaised(line)){
+      const nameEl = row.querySelector('.rname');
+      if(nameEl){
+        const tag = document.createElement('span');
+        tag.className = 'raise-tag';
+        tag.textContent = `▲ ${fmtKsh(Number(line.price) - lineListPrice(line))} above list (${fmtKsh(lineListPrice(line))})`;
+        nameEl.appendChild(tag);
+      }
+    }
+    if(!allowed) return;
+    const priceEl = row.querySelector('.rprice');
+    if(!priceEl) return;
+    priceEl.classList.add('raisable');
+    priceEl.title = 'Tap to change the price — higher only';
+    priceEl.addEventListener('click', e=>{
+      e.stopPropagation(); // keeps the till's "tap anywhere refocuses the scan box" handler from stealing focus
+      openPriceRaiseModal(kind, idx);
+    });
+  });
+}
+let priceRaiseTarget = null; // {kind, idx, tableId, sku, name, qty, listPrice}
+async function openPriceRaiseModal(kind, idx){
+  if(!priceRaiseEnabled() || saleInFlight) return;
+  let line = null;
+  if(kind==='cart'){
+    line = cart[idx];
+  } else {
+    const table = (await getAll('open_orders')).find(t=>t.id===activeTableId && t.status==='open');
+    line = table ? table.lines[idx] : null;
+  }
+  if(!line) return;
+  const list = lineListPrice(line);
+  priceRaiseTarget = {kind, idx, tableId: kind==='table' ? activeTableId : null, sku: line.sku, name: line.name, qty: line.qty, listPrice: list};
+  $('priceRaiseInfo').innerHTML = `<b style="color:var(--ink);">${scEsc(line.name)}</b><br>List price ${fmtKsh(list)} each` + (lineIsRaised(line) ? ` · now ${fmtKsh(Number(line.price))}` : '');
+  $('priceRaiseInput').value = line.price;
+  $('priceRaiseInput').min = list;
+  $('priceRaiseNote').value = line.raiseNote || '';
+  $('priceRaiseError').textContent = '';
+  const quick = $('priceRaiseQuick'); quick.innerHTML = '';
+  [10, 20, 50, 100].forEach(step=>{
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = '+' + step;
+    b.addEventListener('click', ()=>{
+      const cur = parseFloat($('priceRaiseInput').value);
+      $('priceRaiseInput').value = (isFinite(cur) ? cur : list) + step;
+      $('priceRaiseError').textContent = '';
+    });
+    quick.appendChild(b);
+  });
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.textContent = 'List price';
+  reset.addEventListener('click', ()=>{ $('priceRaiseInput').value = list; $('priceRaiseError').textContent = ''; });
+  quick.appendChild(reset);
+  $('priceRaiseModal').classList.add('show');
+  $('priceRaiseInput').focus();
+  try{ $('priceRaiseInput').select(); }catch(e){}
+}
+function closePriceRaiseModal(){
+  $('priceRaiseModal').classList.remove('show');
+  priceRaiseTarget = null;
+}
+// The one place a line's price is ever changed after it was added. newPrice has already been
+// checked against the list price by the caller; landing exactly on the list price removes the
+// marker again, so "raised then put back" leaves no trace on the sale.
+function setLinePrice(line, newPrice, listPrice, note){
+  line.prev = new Date().toISOString(); // when the price last changed — the table merge keeps the later of two changes
+  if(newPrice > listPrice){
+    line.listPrice = listPrice;
+    line.price = newPrice;
+    line.raisedBy = currentUser ? currentUser.name : 'Unknown';
+    line.raisedAt = new Date().toISOString();
+    if(note) line.raiseNote = note; else delete line.raiseNote;
+  } else {
+    line.price = listPrice;
+    delete line.listPrice; delete line.raisedBy; delete line.raisedAt; delete line.raiseNote;
+  }
+}
+let priceRaiseBusy = false;
+async function applyPriceRaise(){
+  const t = priceRaiseTarget;
+  if(!t || priceRaiseBusy) return;
+  const newPrice = parseFloat(String($('priceRaiseInput').value).trim());
+  const note = $('priceRaiseNote').value.trim().slice(0,80);
+  if(!isFinite(newPrice) || newPrice<=0){ $('priceRaiseError').textContent = 'Enter the new price for one item'; return; }
+  if(newPrice < t.listPrice){
+    $('priceRaiseError').textContent = `Can't go below the list price of ${fmtKsh(t.listPrice)} — only a higher price is allowed here.`;
+    return;
+  }
+  if(t.listPrice>0 && newPrice > t.listPrice*PRICE_RAISE_MAX_MULTIPLE){
+    $('priceRaiseError').textContent = `That is more than ${PRICE_RAISE_MAX_MULTIPLE}× the list price of ${fmtKsh(t.listPrice)} — check the amount.`;
+    return;
+  }
+  priceRaiseBusy = true;
+  try{
+    let where = '';
+    if(t.kind==='cart'){
+      const line = cart[t.idx];
+      // The cart can change underneath an open modal (a pull re-renders it, another tap edits it).
+      if(!line || line.sku!==t.sku){ closePriceRaiseModal(); toast('That line changed — tap its price again'); return; }
+      setLinePrice(line, newPrice, t.listPrice, note);
+      closePriceRaiseModal();
+      renderCart();
+    } else {
+      const table = (await getAll('open_orders')).find(x=>x.id===t.tableId && x.status==='open');
+      if(table) normalizeTableOrder(table);
+      const line = table ? table.lines[t.idx] : null;
+      if(!line || line.sku!==t.sku){ closePriceRaiseModal(); toast('That line changed — tap its price again'); renderTableOrderView(); return; }
+      setLinePrice(line, newPrice, t.listPrice, note);
+      table.billPrinted = false; // the customer has to see the new figure before paying, same as any other change to the order
+      stampTableOrder(table);
+      await put('open_orders', table);
+      await queuePush('table_order_upsert', table);
+      where = ` — ${table.label}`;
+      closePriceRaiseModal();
+      renderTableOrderView();
+    }
+    if(newPrice > t.listPrice){
+      logAudit('Price raised at the till', `${t.name}: ${fmtKsh(t.listPrice)} → ${fmtKsh(newPrice)} each (${t.qty}×)${where}${note ? ` — "${note}"` : ''}`);
+      toast(`Price set to ${fmtKsh(newPrice)} — ${fmtKsh(newPrice - t.listPrice)} above list`);
+    } else {
+      logAudit('Price put back to list price', `${t.name}: ${fmtKsh(t.listPrice)}${where}`);
+      toast('Back to the list price');
+    }
+  } finally { priceRaiseBusy = false; }
+}
+$('priceRaiseCancelBtn').addEventListener('click', closePriceRaiseModal);
+$('priceRaiseConfirmBtn').addEventListener('click', applyPriceRaise);
+$('priceRaiseInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); applyPriceRaise(); } });
+$('priceRaiseInput').addEventListener('input', ()=>{ $('priceRaiseError').textContent = ''; });
+
+// ---------- Admin → Price Changes: every sale that included a raised price ----------
+// Built straight from the `sales` store (and credit sales' line items), so it shows what every
+// device at the shop sold, not just this one. "Reviewed" is the only thing stored separately:
+// a small map of sale id → who cleared it and when, kept as an ordinary shop setting so it
+// syncs through the existing shop_settings path like suppliers or custom categories do.
+const PRICE_REVIEWS_KEY = 'price_raise_reviews';
+const PRICE_REVIEW_KEEP_DAYS = 400; // old review marks are trimmed so the setting can't grow forever
+let priceChangePeriod = 'today';
+async function loadPriceReviews(){
+  try{
+    const s = await getSetting(PRICE_REVIEWS_KEY);
+    return (s && s.value && typeof s.value==='object' && !Array.isArray(s.value)) ? s.value : {};
+  }catch(e){ return {}; }
+}
+function priceRaiseExtra(lines){
+  return lines.reduce((t,l)=> t + (Number(l.price) - Number(l.listPrice)) * Number(l.qty||0), 0);
+}
+async function collectPriceRaises(){
+  const out = [];
+  (await getAll('sales')).forEach(s=>{
+    const raised = (Array.isArray(s.lines) ? s.lines : []).filter(lineIsRaised);
+    if(raised.length) out.push({id:s.id, ts:s.ts, staff:s.cashier||'Unknown', method:s.method||'cash', total:Number(s.total)||0, lines:raised});
+  });
+  (await getAll('customer_debts')).forEach(d=>{
+    const raised = (Array.isArray(d.lineItems) ? d.lineItems : []).filter(lineIsRaised);
+    if(!raised.length) return;
+    // A credit sale has no timestamp of its own, only a date — its id carries the moment it was rung up.
+    const fromId = parseInt(String(d.id||'').split('_')[1], 10);
+    const ts = isFinite(fromId) ? new Date(fromId).toISOString() : ((d.dateGiven||todayIso())+'T12:00:00');
+    out.push({id:d.id, ts, staff:d.addedBy||'Unknown', method:'credit', total:Number(d.amount)||0, lines:raised});
+  });
+  out.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+  return out;
+}
+// An Admin can clear anything. A Supervisor can clear other people's raises but not one they rang
+// up or raised themselves — the same "not your own" rule Staff Cash already uses. A cashier who got
+// into the back office on a manager override can look, not clear.
+function canReviewPriceRaise(entry){
+  if(!currentUser) return false;
+  if(currentUser.role==='admin') return true;
+  if(currentUser.role!=='supervisor') return false;
+  if(entry.staff===currentUser.name) return false;
+  return !entry.lines.some(l=>l.raisedBy===currentUser.name);
+}
+// Also decides whether the Price Changes tab is there at all: only for a shop that can raise
+// prices (pub/bar), or one that has raised-price sales on record from when it could. Every other
+// shop's back office looks exactly as it did before.
+async function updatePriceRaiseBadge(){
+  const badge = $('priceRaiseBadge'), tab = $('navPriceChangesBtn');
+  if(!badge || !tab) return;
+  try{
+    const reviews = await loadPriceReviews();
+    const all = await collectPriceRaises();
+    const pending = all.filter(e=>!reviews[e.id]).length;
+    tab.style.display = (priceRaiseEnabled() || all.length>0) ? '' : 'none';
+    badge.textContent = pending;
+    badge.style.display = pending>0 ? 'inline-block' : 'none';
+  }catch(e){ badge.style.display = 'none'; }
+}
+function renderPriceChangePeriodRow(){
+  const row = $('priceChangePeriodRow'); row.innerHTML = '';
+  REPORT_PERIODS.forEach(p=>{
+    const chip = document.createElement('button');
+    chip.className = 'cat-chip' + (p.id===priceChangePeriod ? ' active' : '');
+    chip.textContent = p.label;
+    chip.addEventListener('click', ()=>{ priceChangePeriod = p.id; renderPriceChanges(); });
+    row.appendChild(chip);
+  });
+}
+function describeRaisedLines(entry){
+  return entry.lines.map(l=>{
+    const each = Number(l.price) - Number(l.listPrice);
+    const extras = [];
+    if(l.raisedBy && l.raisedBy!==entry.staff) extras.push('raised by '+scEsc(l.raisedBy));
+    if(l.raiseNote) extras.push('"'+scEsc(l.raiseNote)+'"');
+    return `<div style="font-size:12px; padding:2px 0;">${scEsc(l.qty)}× ${scEsc(l.name)} — list ${fmtKsh(Number(l.listPrice))} → sold ${fmtKsh(Number(l.price))} each <b>(+${fmtKsh(each*Number(l.qty||0))})</b>${extras.length ? ` <span style="color:var(--muted);">· ${extras.join(' · ')}</span>` : ''}</div>`;
+  }).join('');
+}
+async function savePriceReviews(ids, status){
+  if(!ids.length || !currentUser) return;
+  const reviews = await loadPriceReviews();
+  const now = new Date().toISOString();
+  ids.forEach(id=>{ reviews[id] = {status, by: currentUser.name, at: now}; });
+  const cutoff = Date.now() - PRICE_REVIEW_KEEP_DAYS*86400000;
+  Object.keys(reviews).forEach(id=>{ if(new Date(reviews[id].at).getTime() < cutoff) delete reviews[id]; });
+  await put('settings', {key:PRICE_REVIEWS_KEY, value:reviews, updated_at: now});
+  await queuePush('settings_upsert', {key:PRICE_REVIEWS_KEY, value:reviews});
+}
+async function renderPriceChanges(){
+  renderPriceChangePeriodRow();
+  const periodLabel = REPORT_PERIODS.find(p=>p.id===priceChangePeriod).label.toLowerCase();
+  $('priceChangePeriodLabel').textContent = periodLabel;
+  $('priceChangeReviewedLabel').textContent = periodLabel;
+  const all = await collectPriceRaises();
+  const reviews = await loadPriceReviews();
+  const inPeriod = all.filter(e=>withinPeriod(e.ts, priceChangePeriod));
+  const pending = all.filter(e=>!reviews[e.id]);
+
+  $('priceChangeExtraTotal').textContent = fmtKsh(inPeriod.reduce((t,e)=>t+priceRaiseExtra(e.lines),0));
+  $('priceChangeSaleCount').textContent = inPeriod.length;
+  $('priceChangePendingCount').textContent = pending.length;
+
+  // By staff — credited to whoever actually raised the price when that was recorded (a table can
+  // be served by one person and settled by another), otherwise to whoever rang the sale up.
+  const byStaff = {};
+  inPeriod.forEach(e=> e.lines.forEach(l=>{
+    const who = l.raisedBy || e.staff;
+    const row = byStaff[who] || (byStaff[who] = {items:0, extra:0});
+    row.items += Number(l.qty||0);
+    row.extra += (Number(l.price) - Number(l.listPrice)) * Number(l.qty||0);
+  }));
+  const staffBody = $('priceChangeStaffTable'); staffBody.innerHTML = '';
+  const staffRows = Object.entries(byStaff).sort((a,b)=>b[1].extra-a[1].extra);
+  if(staffRows.length===0){
+    staffBody.innerHTML = `<tr><td colspan="3" style="color:var(--muted);">Nothing was sold above list price in this period.</td></tr>`;
+  } else {
+    staffRows.forEach(([name, r])=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td class="name">${scEsc(name)}</td><td>${r.items}</td><td>${fmtKsh(r.extra)}</td>`;
+      staffBody.appendChild(tr);
+    });
+  }
+
+  const pBox = $('priceChangePendingList'); pBox.innerHTML = '';
+  if(pending.length===0) pBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing waiting on review.</p>`;
+  const reviewable = pending.filter(canReviewPriceRaise);
+  $('priceChangeReviewAllBtn').style.display = reviewable.length>1 ? 'inline-block' : 'none';
+  $('priceChangeReviewAllBtn').textContent = `Mark all ${reviewable.length} as reviewed`;
+  pending.slice(0,100).forEach(e=>{
+    const when = new Date(e.ts).toLocaleString('en-KE',{hour12:false});
+    const row = document.createElement('div');
+    row.style.cssText = 'border:1px solid var(--line); border-radius:9px; padding:12px 14px; margin-bottom:8px;';
+    row.innerHTML = `<b>${fmtKsh(priceRaiseExtra(e.lines))} above list</b> <span style="font-size:11.5px; color:var(--muted);">· sale of ${fmtKsh(e.total)} (${scEsc(e.method)})</span>
+      ${describeRaisedLines(e)}
+      <span style="font-size:11.5px; color:var(--muted);">Rung up by ${scEsc(e.staff)} · ${when}</span>
+      ${canReviewPriceRaise(e) ? `
+      <div class="modal-actions" style="margin-top:10px;">
+        <button class="modal-cancel" data-pr-flag="${scEsc(e.id)}" style="font-size:11.5px;">Flag for follow-up</button>
+        <button class="primary-btn" data-pr-clear="${scEsc(e.id)}" style="font-size:11.5px;">Reviewed — fine</button>
+      </div>` : `<p class="hint" style="margin:8px 0 0;">${currentUser && currentUser.role==='supervisor' ? 'This one is yours — the admin or another supervisor must review it.' : 'Only an Admin or Supervisor account can mark this reviewed.'}</p>`}`;
+    pBox.appendChild(row);
+  });
+  if(pending.length>100){
+    const more = document.createElement('p');
+    more.className = 'hint';
+    more.textContent = `Showing the newest 100 of ${pending.length} — clear these to see the rest.`;
+    pBox.appendChild(more);
+  }
+  pBox.querySelectorAll('button[data-pr-clear], button[data-pr-flag]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.prClear || btn.dataset.prFlag;
+      const isClear = !!btn.dataset.prClear;
+      const e = pending.find(x=>x.id===id);
+      if(!e || !canReviewPriceRaise(e)) return;
+      btn.disabled = true;
+      await savePriceReviews([id], isClear ? 'cleared' : 'flagged');
+      logAudit(isClear ? 'Price raise reviewed' : 'Price raise flagged for follow-up', `${fmtKsh(priceRaiseExtra(e.lines))} above list — rung up by ${e.staff}, reviewed by ${currentUser.name}`);
+      toast(isClear ? 'Marked as reviewed' : 'Flagged for follow-up');
+      renderPriceChanges(); updatePriceRaiseBadge();
+    });
+  });
+
+  const rBox = $('priceChangeReviewedList'); rBox.innerHTML = '';
+  const reviewed = inPeriod.filter(e=>reviews[e.id]);
+  if(reviewed.length===0) rBox.innerHTML = `<p style="color:var(--muted); font-size:12.5px;">Nothing reviewed in this period yet.</p>`;
+  reviewed.slice(0,60).forEach(e=>{
+    const rv = reviews[e.id];
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:8px 0; border-bottom:1px solid var(--line); font-size:12px;';
+    const color = rv.status==='cleared' ? 'var(--sage-dark)' : 'var(--clay)';
+    row.innerHTML = `<span><b>${fmtKsh(priceRaiseExtra(e.lines))} above list</b> <span style="color:var(--muted);">— ${scEsc(e.staff)}, ${new Date(e.ts).toLocaleString('en-KE',{hour12:false})}</span></span>
+      ${describeRaisedLines(e)}
+      <span style="color:${color}; font-weight:600; font-size:11px; text-transform:uppercase;">${scEsc(rv.status)} · ${scEsc(rv.by)}</span>`;
+    rBox.appendChild(row);
+  });
+}
+$('priceChangeReviewAllBtn').addEventListener('click', async ()=>{
+  const reviews = await loadPriceReviews();
+  const ids = (await collectPriceRaises()).filter(e=>!reviews[e.id] && canReviewPriceRaise(e)).map(e=>e.id);
+  if(!ids.length) return;
+  if(!confirm(`Mark ${ids.length} sale(s) with a raised price as reviewed?`)) return;
+  await savePriceReviews(ids, 'cleared');
+  logAudit('Price raises reviewed in bulk', `${ids.length} sale(s) — by ${currentUser ? currentUser.name : 'Unknown'}`);
+  toast(`${ids.length} marked as reviewed`);
+  renderPriceChanges(); updatePriceRaiseBadge();
+});
+
+// ======================================================================
+// MANAGE SHOP → PRODUCTS, PRICES & PURCHASE ORDERS (Platform Administrator) — added 09 Oct 2026
+// Lets the platform administrator set a shop's catalogue up on its behalf. Everything goes
+// through platformFetch(), the same platform-rest function the rest of Manage Shop uses, and
+// lands in that shop's own `products` / `purchase_orders` rows with a fresh updated_at — which
+// is exactly what the shop's devices already merge on their next pull. Nothing new on the
+// device side.
+//
+// Two things worth knowing, both existing behaviour rather than anything added here:
+//  · A business type's starter items live only on each device until someone edits them, so
+//    they have no row on the server yet. They are listed here anyway (marked "starter item")
+//    and the first Save creates the row.
+//  · Deleting isn't offered: a device only removes a product on a full re-sync, and a starter
+//    item is added back the next time the app starts.
+// ======================================================================
+let mscTargetShopId = null;
+let mscProducts = [];   // [{sku,name,cat,price,cost,stock,btype,onServer}]
+let mscPos = [];
+let mscCats = [];       // category labels this shop's tills actually show
+let mscCatType = {};    // category label -> business type id, for filing a new product
+let mscShopTypes = [];
+function mscSetStatus(msg, isError){
+  const el = $('mscStatus');
+  el.textContent = msg || '';
+  el.style.color = isError ? 'var(--clay)' : 'var(--muted)';
+}
+async function mscErrorText(res){
+  const body = await res.text().catch(()=> '');
+  return `${res.status}${body ? ' — '+body.slice(0,160) : ''}`;
+}
+// Same merge applyBusinessTypes() does on the shop's own till, so a category picked here is one
+// that till will actually show — including the "(Type name)" suffix two combined types get when
+// they share a category name.
+function mscBuildCats(typeIds, customCats){
+  const types = allBusinessTypes();
+  const cats = [], catType = {}, owner = {};
+  typeIds.filter(id=>types[id]).forEach(id=>{
+    const t = types[id];
+    t.cats.forEach(c=>{
+      let label = c;
+      if(owner[c]!==undefined && owner[c]!==id) label = `${c} (${t.label})`;
+      if(owner[c]===undefined) owner[c] = id;
+      cats.push(label); catType[label] = id;
+    });
+  });
+  (Array.isArray(customCats) ? customCats : []).forEach(c=>{ if(c && c.name && !cats.includes(c.name)) cats.push(c.name); });
+  if(cats.length===0) cats.push('Other');
+  return {cats, catType};
+}
+function mscCatOptions(selected){
+  const opts = mscCats.slice();
+  if(selected && !opts.includes(selected)) opts.push(selected);
+  return opts.map(c=>`<option value="${scEsc(c)}" ${c===selected?'selected':''}>${scEsc(c)}</option>`).join('');
+}
+async function openManageShopCatalog(){
+  if(!manageShopTargetId) return;
+  mscTargetShopId = manageShopTargetId;
+  $('mscShopName').textContent = $('manageShopName').textContent;
+  $('mscSearch').value = '';
+  ['mscNewName','mscNewPrice','mscNewCost','mscNewStock','mscNewSku'].forEach(id=> $(id).value = '');
+  $('mscProductList').innerHTML = ''; $('mscPoList').innerHTML = ''; $('mscProductCount').textContent = '';
+  $('manageShopCatalogModal').classList.add('show');
+  await loadManageShopCatalog();
+}
+async function loadManageShopCatalog(){
+  const shop = mscTargetShopId;
+  if(!shop) return;
+  mscSetStatus('Loading this shop\'s products…');
+  try{
+    // One call first, on its own: if the platform pass has expired this is the one that asks for the PIN, once.
+    const setRes = await platformFetch(`shop_settings?shop_id=eq.${shop}&select=key,value`);
+    const settings = setRes.ok ? await setRes.json() : [];
+    const typeRow = settings.find(r=>r.key==='active_business_types');
+    const catRow = settings.find(r=>r.key==='custom_categories');
+    mscShopTypes = (typeRow && Array.isArray(typeRow.value) && typeRow.value.length) ? typeRow.value : ['duka'];
+    const built = mscBuildCats(mscShopTypes, catRow ? catRow.value : []);
+    mscCats = built.cats; mscCatType = built.catType;
+    $('mscNewCat').innerHTML = mscCatOptions(mscCats[0]);
+
+    const prodRes = await platformFetch(`products?shop_id=eq.${shop}&select=*&order=name.asc`);
+    if(shop!==mscTargetShopId) return; // a different shop was opened while this was loading
+    if(!prodRes.ok){
+      mscSetStatus('Could not load this shop\'s products ('+(await mscErrorText(prodRes))+'). If this says the table isn\'t allowed, the platform-rest function needs "products" and "purchase_orders" added to what it accepts.', true);
+      return;
+    }
+    const rows = await prodRes.json();
+    mscProducts = rows.map(r=>({sku:r.sku, name:r.name, cat:r.cat, price:Number(r.price)||0, cost:Number(r.cost)||0, stock:(r.stock===null||r.stock===undefined)?null:Number(r.stock), btype:r.btype||mscShopTypes[0], onServer:true}));
+    const have = new Set(mscProducts.map(p=>p.sku));
+    const types = allBusinessTypes();
+    mscShopTypes.forEach(id=>{
+      const t = types[id]; if(!t) return;
+      (t.starter||[]).forEach(p=>{
+        if(have.has(p.sku)) return;
+        have.add(p.sku);
+        mscProducts.push({sku:p.sku, name:p.name, cat:p.cat, price:p.price, cost:p.cost||0, stock:(p.stock===null||p.stock===undefined)?null:p.stock, btype:id, onServer:false});
+      });
+    });
+    mscProducts.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    mscRenderProducts();
+
+    const poRes = await platformFetch(`purchase_orders?shop_id=eq.${shop}&status=neq.received&select=*&order=created_at.desc`);
+    if(shop!==mscTargetShopId) return;
+    if(poRes.ok){
+      mscPos = (await poRes.json()).map(r=>({id:r.id, poNumber:r.po_number, supplierName:r.supplier_name||'', items:Array.isArray(r.items)?r.items:[], createdAt:r.created_at, createdBy:r.created_by}));
+      mscRenderPos();
+    } else {
+      $('mscPoList').innerHTML = `<p class="hint" style="color:var(--clay);">Could not load purchase orders (${scEsc(await mscErrorText(poRes))}).</p>`;
+    }
+    mscSetStatus('');
+  }catch(e){
+    mscSetStatus('Could not load — '+((e && e.message) || 'check the connection'), true);
+  }
+}
+function mscRenderProducts(){
+  const box = $('mscProductList');
+  const q = $('mscSearch').value.trim().toLowerCase();
+  const matches = q ? mscProducts.filter(p=>String(p.name).toLowerCase().includes(q) || String(p.sku).toLowerCase().includes(q)) : mscProducts;
+  $('mscProductCount').textContent = `(${mscProducts.length})`;
+  if(matches.length===0){
+    box.innerHTML = `<p class="hint">${mscProducts.length ? 'Nothing matches that search.' : 'This shop has no products yet.'}</p>`;
+    return;
+  }
+  const shown = matches.slice(0,60);
+  const field = 'text-align:left; letter-spacing:0; margin:0;';
+  box.innerHTML = shown.map(p=>`
+    <div data-msc-sku="${scEsc(p.sku)}" style="border:1px solid var(--line); border-radius:9px; padding:10px 12px; margin-bottom:8px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+        <input data-f="name" value="${scEsc(p.name)}" autocomplete="off" style="${field}">
+        <select data-f="cat" style="margin:0;">${mscCatOptions(p.cat)}</select>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr${p.onServer?'':' 1fr'} auto; gap:6px; margin-top:6px; align-items:end;">
+        <div><div style="font-size:10.5px; color:var(--muted); margin-bottom:2px;">Sell price (KSh)</div><input data-f="price" type="number" min="0" value="${scEsc(p.price)}" style="${field}"></div>
+        <div><div style="font-size:10.5px; color:var(--muted); margin-bottom:2px;">Cost (KSh)</div><input data-f="cost" type="number" min="0" value="${p.cost ? scEsc(p.cost) : ''}" placeholder="—" style="${field}"></div>
+        ${p.onServer ? '' : `<div><div style="font-size:10.5px; color:var(--muted); margin-bottom:2px;">Stock</div><input data-f="stock" type="number" min="0" value="${p.stock===null ? '' : scEsc(p.stock)}" placeholder="not counted" style="${field}"></div>`}
+        <button class="primary-btn" data-msc-save style="padding:10px 14px;">Save</button>
+      </div>
+      <div data-msc-note style="font-size:10.5px; color:var(--muted); margin-top:6px; font-family:var(--mono); overflow-wrap:anywhere;">${scEsc(p.sku)} · ${p.onServer ? (p.stock===null ? 'not counted' : 'stock '+scEsc(p.stock)) : 'starter item — not saved for this shop yet; the first Save also sets the stock figure on their devices'}</div>
+    </div>`).join('') + (matches.length>shown.length ? `<p class="hint">Showing ${shown.length} of ${matches.length} — search to narrow it down.</p>` : '');
+  box.querySelectorAll('button[data-msc-save]').forEach(btn=>{
+    btn.addEventListener('click', ()=> mscSaveProduct(btn.closest('[data-msc-sku]'), btn));
+  });
+}
+async function mscSaveProduct(rowEl, btn){
+  const shop = mscTargetShopId;
+  const p = mscProducts.find(x=>x.sku===rowEl.dataset.mscSku);
+  if(!shop || !p || btn.disabled) return;
+  const val = f => { const el = rowEl.querySelector(`[data-f="${f}"]`); return el ? String(el.value).trim() : ''; };
+  const name = val('name'), cat = val('cat'), price = parseFloat(val('price'));
+  const cost = val('cost')==='' ? 0 : parseFloat(val('cost'));
+  if(!name){ toast('Enter a product name'); return; }
+  if(!isFinite(price) || price<0){ toast('Enter a valid sell price'); return; }
+  if(!isFinite(cost) || cost<0){ toast('Enter a valid cost, or leave it blank'); return; }
+  let stock = p.stock;
+  if(!p.onServer){
+    const stockRaw = val('stock');
+    stock = stockRaw==='' ? null : parseInt(stockRaw, 10);
+    if(stock!==null && (!isFinite(stock) || stock<0)){ toast('Stock must be a number, or blank for an item that isn\'t counted'); return; }
+  }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const now = new Date().toISOString();
+  try{
+    let res;
+    if(p.onServer){
+      // A patch of only what was typed here — never the stock column, which the shop's own sales keep moving.
+      res = await platformFetch(`products?shop_id=eq.${shop}&sku=eq.${encodeURIComponent(p.sku)}`, {
+        method:'PATCH', headers:{'Prefer':'return=minimal'},
+        body: JSON.stringify({name, cat, price, cost, updated_at: now}),
+      });
+    } else {
+      res = await platformFetch(`products`, {
+        method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+        body: JSON.stringify({shop_id:shop, sku:p.sku, name, cat, price, cost, stock, btype:p.btype, supplier_name:null, reorder_threshold:10, expiry_date:null, is_rx:false, updated_at: now}),
+      });
+    }
+    if(!res.ok){ toast('Could not save — '+(await mscErrorText(res))); return; }
+    const before = `${p.name} @ ${fmtKsh(p.price)}`;
+    Object.assign(p, {name, cat, price, cost, stock, onServer:true});
+    logAudit('Edited a shop\'s product (Platform Administrator)', `${$('mscShopName').textContent}: ${before} → ${name} @ ${fmtKsh(price)} (${p.sku})`);
+    toast(`${name} saved — their devices pick it up at the next sync`);
+    const note = rowEl.querySelector('[data-msc-note]');
+    if(note){ note.textContent = `${p.sku} · saved ✓ ${new Date().toLocaleTimeString('en-KE',{hour12:false})}`; note.style.color = 'var(--sage-dark)'; }
+  }catch(e){
+    toast('Could not save — '+((e && e.message) || 'check the connection'));
+  } finally { btn.disabled = false; btn.textContent = 'Save'; }
+}
+let mscAddBusy = false;
+async function mscAddProduct(){
+  const shop = mscTargetShopId;
+  if(!shop || mscAddBusy) return;
+  const name = $('mscNewName').value.trim();
+  const cat = $('mscNewCat').value;
+  const price = parseFloat($('mscNewPrice').value);
+  const costRaw = $('mscNewCost').value.trim(), stockRaw = $('mscNewStock').value.trim();
+  const cost = costRaw==='' ? 0 : parseFloat(costRaw);
+  const stock = stockRaw==='' ? null : parseInt(stockRaw, 10);
+  let sku = $('mscNewSku').value.trim();
+  if(!name){ toast('Enter a product name'); return; }
+  if(!isFinite(price) || price<0){ toast('Enter a valid sell price'); return; }
+  if(!isFinite(cost) || cost<0){ toast('Enter a valid cost, or leave it blank'); return; }
+  if(stock!==null && (!isFinite(stock) || stock<0)){ toast('Stock must be a number, or blank for an item that isn\'t counted'); return; }
+  if(!sku) sku = 'PA-' + Date.now().toString(36).toUpperCase();
+  if(mscProducts.some(p=>String(p.sku).toLowerCase()===sku.toLowerCase())){ toast('That SKU is already used by another product at this shop'); return; }
+  const btype = mscCatType[cat] || mscShopTypes[0] || 'duka';
+  mscAddBusy = true; $('mscAddBtn').disabled = true;
+  try{
+    const res = await platformFetch(`products`, {
+      method:'POST', headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+      body: JSON.stringify({shop_id:shop, sku, name, cat, price, cost, stock, btype, supplier_name:null, reorder_threshold:10, expiry_date:null, is_rx:false, updated_at:new Date().toISOString()}),
+    });
+    if(!res.ok){ toast('Could not add — '+(await mscErrorText(res))); return; }
+    mscProducts.push({sku, name, cat, price, cost, stock, btype, onServer:true});
+    mscProducts.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    logAudit('Added a product to a shop (Platform Administrator)', `${$('mscShopName').textContent}: ${name} @ ${fmtKsh(price)} (${sku})`);
+    toast(`${name} added — their devices pick it up at the next sync`);
+    ['mscNewName','mscNewPrice','mscNewCost','mscNewStock','mscNewSku'].forEach(id=> $(id).value = '');
+    mscRenderProducts();
+  }catch(e){
+    toast('Could not add — '+((e && e.message) || 'check the connection'));
+  } finally { mscAddBusy = false; $('mscAddBtn').disabled = false; }
+}
+function mscRenderPos(){
+  const box = $('mscPoList');
+  if(mscPos.length===0){ box.innerHTML = `<p class="hint">No purchase orders are waiting on delivery at this shop.</p>`; return; }
+  const field = 'text-align:left; letter-spacing:0; margin:0;';
+  box.innerHTML = mscPos.map(po=>`
+    <div data-msc-po="${scEsc(po.id)}" style="border:1px solid var(--line); border-radius:9px; padding:10px 12px; margin-bottom:8px;">
+      <b>${scEsc(po.poNumber||po.id)}</b> <span style="font-size:11px; color:var(--muted);">· ${po.createdAt ? new Date(po.createdAt).toLocaleDateString('en-KE') : ''}${po.createdBy ? ' · by '+scEsc(po.createdBy) : ''}</span>
+      <div style="font-size:10.5px; color:var(--muted); margin:6px 0 2px;">Supplier</div>
+      <input data-f="supplier" value="${scEsc(po.supplierName)}" autocomplete="off" style="${field}">
+      <div style="display:grid; grid-template-columns:1fr 70px 90px; gap:6px; margin-top:8px; font-size:10.5px; color:var(--muted);"><span>Item</span><span>Qty</span><span>Unit cost</span></div>
+      ${po.items.map((i,idx)=>`<div style="display:grid; grid-template-columns:1fr 70px 90px; gap:6px; margin-top:4px; align-items:center;">
+        <span style="font-size:12px; overflow-wrap:anywhere;">${scEsc(i.name)}</span>
+        <input data-po-qty="${idx}" type="number" min="0" value="${scEsc(i.qty)}" style="${field}">
+        <input data-po-cost="${idx}" type="number" min="0" value="${scEsc(i.cost||0)}" style="${field}">
+      </div>`).join('')}
+      <button class="primary-btn" data-msc-save-po style="width:100%; margin-top:10px;">Save this purchase order</button>
+    </div>`).join('');
+  box.querySelectorAll('button[data-msc-save-po]').forEach(btn=>{
+    btn.addEventListener('click', ()=> mscSavePo(btn.closest('[data-msc-po]'), btn));
+  });
+}
+async function mscSavePo(rowEl, btn){
+  const shop = mscTargetShopId;
+  const po = mscPos.find(x=>x.id===rowEl.dataset.mscPo);
+  if(!shop || !po || btn.disabled) return;
+  const supplierName = rowEl.querySelector('[data-f="supplier"]').value.trim();
+  if(!supplierName){ toast('Enter the supplier\'s name'); return; }
+  const items = [];
+  for(let idx=0; idx<po.items.length; idx++){
+    const qty = parseInt(rowEl.querySelector(`[data-po-qty="${idx}"]`).value, 10);
+    const cost = parseFloat(rowEl.querySelector(`[data-po-cost="${idx}"]`).value);
+    if(!isFinite(qty) || qty<0){ toast('Each quantity must be 0 or more'); return; }
+    if(!isFinite(cost) || cost<0){ toast('Each unit cost must be 0 or more'); return; }
+    if(qty>0) items.push(Object.assign({}, po.items[idx], {qty, cost}));
+  }
+  if(items.length===0){ toast('A purchase order needs at least one line with a quantity'); return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    // status=neq.received in the filter as well: if the shop received this order a moment ago, this changes nothing.
+    const res = await platformFetch(`purchase_orders?id=eq.${encodeURIComponent(po.id)}&shop_id=eq.${shop}&status=neq.received`, {
+      method:'PATCH', headers:{'Prefer':'return=minimal'},
+      body: JSON.stringify({supplier_name:supplierName, items, updated_at:new Date().toISOString()}),
+    });
+    if(!res.ok){ toast('Could not save — '+(await mscErrorText(res))); return; }
+    po.supplierName = supplierName; po.items = items;
+    logAudit('Edited a shop\'s purchase order (Platform Administrator)', `${$('mscShopName').textContent}: ${po.poNumber||po.id} — ${supplierName}, ${items.length} line(s)`);
+    toast(`${po.poNumber||'Purchase order'} saved — their devices pick it up at the next sync`);
+    mscRenderPos();
+  }catch(e){
+    toast('Could not save — '+((e && e.message) || 'check the connection'));
+  } finally {
+    // After a successful save the list is redrawn and this button is gone; otherwise put it back.
+    if(btn.isConnected){ btn.disabled = false; btn.textContent = 'Save this purchase order'; }
+  }
+}
+$('manageShopOpenCatalogBtn').addEventListener('click', openManageShopCatalog);
+$('mscCloseBtn').addEventListener('click', ()=>{ $('manageShopCatalogModal').classList.remove('show'); mscTargetShopId = null; });
+$('mscReloadBtn').addEventListener('click', loadManageShopCatalog);
+$('mscSearch').addEventListener('input', mscRenderProducts);
+$('mscAddBtn').addEventListener('click', mscAddProduct);
+
+// ======================================================================
+// TABLE ORDERS: MERGE, DON'T OVERWRITE — added 09 Oct 2026
+//
+// What this replaces. A table used to sync as one lump: every change pushed the whole table,
+// and whichever copy carried the newest timestamp replaced the other outright. Two phones adding
+// to the same table — one of them offline for a while — each ended up with a different bill, and
+// whatever the settling phone couldn't see was never charged.
+//
+// What happens now. A table is merged item by item, on every pull and again just before every
+// push, so two phones' additions are combined instead of one replacing the other:
+//  · every line gets its own id (`lid`) the moment it is added, so "the same line" is recognised
+//    on another phone whatever order things arrive in;
+//  · every single unit on a line is its own little tick (`u`), made by the phone that tapped it.
+//    The quantity shown is simply how many ticks are still standing. Two waiters tapping + on the
+//    same line each add their own tick, so both count; taking a unit off knocks one tick down,
+//    and a tick that is down stays down on every phone;
+//  · a line with no ticks left is kept out of sight (`zero`) rather than deleted, so a phone that
+//    hadn't heard about the removal can't bring it back — while a drink someone else added to
+//    that same line at the same moment still shows up;
+//  · a line that has already been paid for (its `lid` is on a sale) is never billed again, and
+//    anything on the table that was NOT on that sale stays on the table, tagged LATE, instead
+//    of vanishing when the table closes.
+//
+// No backend change: `lid`, `u` and the rest live inside the table's existing `lines` JSON, and
+// the out-of-sight lines travel in that same array as zero-quantity entries flagged `removed`. A
+// phone still on the previous build ignores what it doesn't understand, but it still overwrites
+// — the protection is only complete once every phone at a shop is on this build.
+//
+// The table screens themselves are untouched: `table.lines` is still just the live lines, in
+// the order they were added. Everything below sits around that, not inside it.
+// ======================================================================
+function tableDeviceId(){
+  if(tableDeviceId._v) return tableDeviceId._v;
+  let v = null;
+  try{ v = localStorage.getItem('my_duka_device_id'); }catch(e){}
+  if(!v){
+    v = 'd' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-3);
+    try{ localStorage.setItem('my_duka_device_id', v); }catch(e){}
+  }
+  return (tableDeviceId._v = v);
+}
+function newTableLineId(){ return tableDeviceId() + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6); }
+let tableTokenSeq = Date.now(); // time-seeded, so a tick made after a reload can never repeat one made before it
+function newTableToken(){ return tableDeviceId() + '.' + (tableTokenSeq++).toString(36); }
+function legacyTableToken(l){ let k = 0; while(('~'+k) in l.u) k++; return '~'+k; }
+function tableLineAlive(l){ let n = 0; const u = l.u || {}; for(const k in u){ if(u[k]) n++; } return n; }
+// Makes a line's ticks agree with its quantity: adds ticks (made by `mint`) when the quantity is
+// higher, knocks the most recent ones down when it is lower.
+function fitTableLineTokens(l, mint){
+  if(!l.u || typeof l.u!=='object' || Array.isArray(l.u)) l.u = {};
+  const want = Math.max(0, Math.round(Number(l.qty)||0));
+  const alive = tableLineAlive(l);
+  if(alive < want){ for(let i=alive; i<want; i++) l.u[mint(l)] = 1; }
+  else if(alive > want){ Object.keys(l.u).filter(k=>l.u[k]).sort().reverse().slice(0, alive-want).forEach(k=>{ l.u[k] = 0; }); }
+}
+// Lines written before this build (or by a phone still on it) carry no id. They get one that
+// depends only on the sitting and the line itself, so two phones looking at the same old table
+// arrive at the SAME ids independently — random ids here would make every old line look like
+// two different lines after a merge, i.e. a doubled bill. Their units get fixed tick names
+// (~0, ~1, …) for exactly the same reason.
+function assignLegacyTableLineIds(t){
+  const base = t.openedAt || '';
+  const nth = {};
+  t.lines.forEach(l=>{
+    if(l.lid) return;
+    const n = nth[l.sku] || 0; nth[l.sku] = n + 1;
+    l.lid = `x:${base}:${l.sku}:${n}`;
+  });
+}
+function cloneTableLine(l){ return JSON.parse(JSON.stringify(l)); }
+function mergeTableLine(a, b){
+  const out = Object.assign({}, a);
+  const u = {}, ua = a.u || {}, ub = b.u || {};
+  new Set(Object.keys(ua).concat(Object.keys(ub))).forEach(k=>{ u[k] = (ua[k]===0 || ub[k]===0) ? 0 : 1; });
+  out.u = u;
+  out.qty = tableLineAlive(out);
+  // Price is one value, so the later change wins; a tie goes to the higher price.
+  const pa = String(a.prev||''), pb = String(b.prev||'');
+  const src = pb > pa ? b : (pb < pa ? a : (Number(b.price) > Number(a.price) ? b : a));
+  ['price','listPrice','raisedBy','raisedAt','raiseNote','prev'].forEach(f=>{
+    if(src[f]===undefined || src[f]===null) delete out[f]; else out[f] = src[f];
+  });
+  out.sentToKitchen = !!(a.sentToKitchen || b.sentToKitchen); // once it has gone to the bar on any phone, it has gone
+  if(a.late || b.late) out.late = true;
+  const dead = [a.deadAt, b.deadAt].filter(Boolean).sort().pop();
+  if(dead) out.deadAt = dead;
+  return out;
+}
+// Brings any copy of a table — local, or just arrived from the server — into the shape the
+// merge works on: live lines in `lines`, lines with nothing left on them in `zero`. Safe to run
+// any number of times.
+function normalizeTableOrder(t){
+  if(!t) return t;
+  if(!Array.isArray(t.lines)) t.lines = [];
+  if(!Array.isArray(t.zero)) t.zero = [];
+  const base = t.openedAt || '';
+  const live = [];
+  let dead = t.zero.filter(z=>z && z.lid);
+  t.lines.forEach(l=>{
+    if(!l) return;
+    if(!l.removed){ live.push(l); return; }
+    // An out-of-sight line coming back in off the wire.
+    const c = Object.assign({}, l);
+    delete c.removed;
+    c.sentToKitchen = !!c.wasSent; delete c.wasSent;
+    if(!c.lid) return;
+    if((Number(c.qty)||0) > 0) live.push(c); // a phone on the previous build pressed + on it — it is a real line again
+    else { c.qty = 0; dead.push(c); }
+  });
+  t.lines = live;
+  assignLegacyTableLineIds(t);
+  t.lines.forEach(l=>{
+    fitTableLineTokens(l, legacyTableToken);
+    l.qty = tableLineAlive(l);
+    if(!l.prev) l.prev = base;
+  });
+  // One entry per line id, and each line in exactly one of the two lists.
+  const byLid = new Map(), order = [];
+  t.lines.concat(dead).forEach(l=>{
+    if(byLid.has(l.lid)) byLid.set(l.lid, mergeTableLine(byLid.get(l.lid), l));
+    else { byLid.set(l.lid, l); order.push(l.lid); }
+  });
+  t.lines = []; t.zero = [];
+  order.forEach(lid=>{
+    const l = byLid.get(lid);
+    if(!l.u || typeof l.u!=='object') l.u = {};
+    if(tableLineAlive(l) > 0){ l.qty = tableLineAlive(l); t.lines.push(l); }
+    else { l.qty = 0; t.zero.push(l); }
+  });
+  return t;
+}
+// Called right before a table is saved after something was changed ON THIS PHONE. Works out what
+// changed by looking — a new line, a different quantity, a line that is no longer there — and
+// records it in merge-safe form. Every caller runs normalizeTableOrder() on the table before
+// making its change, so by this point the only line without an id is one just added here.
+function stampTableOrder(table){
+  if(!table) return;
+  const now = new Date().toISOString();
+  if(!Array.isArray(table.lines)) table.lines = [];
+  if(!Array.isArray(table.zero)) table.zero = [];
+  table.lines.forEach(l=>{
+    if(!l.lid){ l.lid = newTableLineId(); l.u = {}; l.prev = now; l.addedAt = now; }
+    fitTableLineTokens(l, newTableToken);
+    if(!l.prev) l.prev = now;
+  });
+  if(Array.isArray(table.seen)){
+    table.seen.forEach(s=>{
+      if(!s || !s.lid) return;
+      if(table.lines.some(l=>l.lid===s.lid) || table.zero.some(z=>z.lid===s.lid)) return;
+      // A line that was here a moment ago and isn't now: removed on this phone. Knock down the
+      // ticks this phone could see — and only those.
+      const gone = cloneTableLine(s);
+      Object.keys(gone.u||{}).forEach(k=>{ gone.u[k] = 0; });
+      gone.qty = 0; gone.deadAt = now;
+      table.zero.push(gone);
+    });
+  }
+  table.seen = table.lines.map(cloneTableLine);
+}
+function tableBillSig(lines){ return (lines||[]).map(l=>`${l.lid}:${Number(l.qty)||0}:${Number(l.price)||0}`).sort().join('|'); }
+// Two open copies of the same table → one, with everything from both.
+function mergeOpenTables(L, R){
+  const map = new Map(), order = [];
+  [L.lines, R.lines, L.zero, R.zero].forEach(list=> (list||[]).forEach(l=>{
+    if(map.has(l.lid)) map.set(l.lid, mergeTableLine(map.get(l.lid), l));
+    else { map.set(l.lid, cloneTableLine(l)); order.push(l.lid); }
+  }));
+  const lines = [], zero = [];
+  order.forEach(lid=>{
+    const l = map.get(lid);
+    if(tableLineAlive(l) > 0){ l.qty = tableLineAlive(l); lines.push(l); }
+    else { l.qty = 0; zero.push(l); }
+  });
+  const first = String(R.openedAt||'') < String(L.openedAt||'') ? R : L;
+  const T = Object.assign({}, L, {
+    lines, zero, status:'open', label: L.label || R.label,
+    openedAt: first.openedAt, openedBy: first.openedBy,
+    kitchenRoundCount: Math.max(L.kitchenRoundCount||0, R.kitchenRoundCount||0),
+    settledAt:null, settledSaleId:null,
+  });
+  const lastSent = [L.lastSentAt, R.lastSentAt].filter(Boolean).sort().pop();
+  if(lastSent) T.lastSentAt = lastSent;
+  // A printed bill only still counts if it showed exactly what the merged table now holds.
+  const sig = tableBillSig(lines);
+  T.billPrinted = (L.billPrinted===true && tableBillSig(L.lines)===sig) || (R.billPrinted===true && tableBillSig(R.lines)===sig);
+  return T;
+}
+function tableLineAddedAt(l){ return String(l.addedAt || l.prev || ''); }
+// The table was paid on one phone while another still had items for it. `paidCopy` is the paid
+// copy, `other` the copy that still had it open. Whatever was served but is not on the paid bill
+// stays on the table as a fresh open order — the money is still owed — rather than disappearing
+// with the bill. Returns null when there is nothing left over.
+function lateTableSitting(id, paidCopy, other, billed){
+  const merged = mergeOpenTables(Object.assign({}, other, {status:'open'}), Object.assign({}, paidCopy, {status:'open'}));
+  const paid = new Set((paidCopy.lines||[]).map(l=>l.lid));
+  const orphans = merged.lines.filter(l=> !paid.has(l.lid) && !billed.has(id+'|'+l.lid));
+  if(!orphans.length) return null;
+  const cut = String(paidCopy.settledAt||'');
+  return {
+    id, label: paidCopy.label || other.label, status:'open',
+    lines: orphans.map(l=> Object.assign({}, l, (cut && tableLineAddedAt(l) <= cut) ? {late:true} : {})),
+    zero: merged.zero.filter(z=>!paid.has(z.lid)),
+    billPrinted:false, kitchenRoundCount: paidCopy.kitchenRoundCount || 0,
+    openedBy: other.openedBy || paidCopy.openedBy,
+    openedAt: cut || other.openedAt || new Date().toISOString(),
+    settledAt:null, settledSaleId:null,
+  };
+}
+// Everything already charged on a recent sale, keyed by table + line. Built from the local
+// sales store, which every pull keeps complete across devices.
+let billedTableLinesMemo = null;
+let tableSalesFreshAt = 0; // when a pull last brought the sales list in successfully
+async function buildBilledTableLines(){
+  if(billedTableLinesMemo && Date.now() - billedTableLinesMemo.at < 2500) return billedTableLinesMemo.map;
+  const map = new Map();
+  const cutoff = Date.now() - 4*86400000;
+  (await getAll('sales')).forEach(s=>{
+    if(!Array.isArray(s.lines)) return;
+    const when = new Date(s.ts).getTime();
+    if(isFinite(when) && when < cutoff) return;
+    s.lines.forEach(l=>{
+      if(!l || !l.lid || !l.tbl) return;
+      const k = l.tbl + '|' + l.lid, cur = map.get(k);
+      map.set(k, {saleId:s.id, ts:s.ts, qty:(cur ? cur.qty : 0) + (Number(l.qty)||0)});
+    });
+  });
+  billedTableLinesMemo = {at:Date.now(), map};
+  return map;
+}
+// Takes anything already paid for off an open table. Returns the corrected table, or null when
+// nothing on it was paid.
+function sweepBilledTableLines(T, billed){
+  if(!billed || !billed.size) return null;
+  const keep = [], paid = [];
+  let sale = null;
+  T.lines.forEach(l=>{
+    const b = billed.get(T.id + '|' + l.lid);
+    if(!b){ keep.push(l); return; }
+    paid.push(l);
+    if(!sale || String(b.ts) > String(sale.ts)) sale = b;
+    const extra = (Number(l.qty)||0) - b.qty;
+    if(extra > 0){
+      // More of this line on the table than was on the bill — the difference is still owed.
+      const rl = l.lid + '+r';
+      if(!billed.has(T.id + '|' + rl) && !T.lines.some(x=>x.lid===rl) && !(T.zero||[]).some(x=>x.lid===rl)){
+        const rest = Object.assign({}, l, {lid:rl, qty:extra, u:{}, late:true});
+        fitTableLineTokens(rest, legacyTableToken);
+        keep.push(rest);
+      }
+    }
+  });
+  if(!paid.length) return null;
+  if(!keep.length){
+    return Object.assign({}, T, {status:'settled', settledAt:sale.ts, settledSaleId:sale.saleId, lines:paid, billPrinted:true});
+  }
+  return Object.assign({}, T, {
+    lines: keep.map(l=> (l.late || tableLineAddedAt(l) > String(sale.ts)) ? l : Object.assign({}, l, {late:true})),
+    billPrinted:false,
+  });
+}
+// The comparison that decides whether anything needs writing or sending. Order of lines and of
+// keys is deliberately ignored — two phones can hold the same table in a different order.
+function tableCanon(t){
+  if(!t) return '';
+  const ticks = l => Object.keys(l.u||{}).sort().map(k=> k+(l.u[k] ? '+' : '-')).join(',');
+  const lines = (t.lines||[]).map(l=>[
+    l.lid, l.sku, Number(l.qty)||0, Number(l.price)||0,
+    (l.listPrice===undefined || l.listPrice===null) ? '' : Number(l.listPrice),
+    l.sentToKitchen ? 1 : 0, l.late ? 1 : 0, ticks(l),
+  ].join('~')).sort();
+  const zero = (t.zero||[]).map(l=> l.lid+'~'+ticks(l)).sort();
+  return JSON.stringify([t.status||'', t.openedAt||'', t.billPrinted ? 1 : 0, t.kitchenRoundCount||0, t.settledSaleId||'', lines, zero]);
+}
+// The one decision: given this phone's copy (L) and the server's (R), what should the table be?
+function decideTableOrder(id, L, R, billed){
+  let T = null;
+  const notes = [];
+  const lidsOf = t => new Set((t.lines||[]).map(l=>l.lid));
+  if(!L && !R) return {T:null, notes};
+  if(!L) T = R;
+  else if(!R) T = L;
+  else if(L.status!=='open' && R.status!=='open'){
+    T = (String(R.updated_at||'') > String(L.updated_at||'')) ? R : L;
+  }
+  else if(L.status!=='open' && R.status==='open'){
+    // This phone has the table as paid; the server shows it open.
+    const mine = lidsOf(L);
+    const sameSitting = (R.lines||[]).some(l=>mine.has(l.lid)) || R.openedAt===L.openedAt;
+    if(!sameSitting && String(R.openedAt||'') > String(L.settledAt||'')) T = R; // a new party has since sat down
+    else {
+      const late = lateTableSitting(id, L, R, billed);
+      if(late){ T = late; notes.push('late'); }
+      else T = L; // a stale open copy landed on the server after the bill was paid — put the paid state back
+    }
+  }
+  else if(L.status==='open' && R.status!=='open'){
+    // The server shows the table paid; this phone still has it open.
+    const theirs = lidsOf(R);
+    const sameSitting = (L.lines||[]).some(l=>theirs.has(l.lid)) || L.openedAt===R.openedAt || String(L.openedAt||'') <= String(R.settledAt||'');
+    if(!sameSitting) T = L; // this is a newer sitting, opened here after that bill was paid
+    else {
+      const late = lateTableSitting(id, R, L, billed);
+      if(late){ T = late; notes.push('late'); }
+      else T = R;
+    }
+  }
+  else T = mergeOpenTables(L, R);
+  if(T && T.status==='open'){
+    const swept = sweepBilledTableLines(T, billed);
+    if(swept){ T = swept; notes.push(swept.status==='open' ? 'late' : 'paid'); }
+  }
+  return {T, notes};
+}
+function tableNeedsUpgrade(stored){
+  return !stored || !Array.isArray(stored.seen) || !Array.isArray(stored.zero) || (stored.lines||[]).some(l=>!l || !l.lid || !l.u || l.removed);
+}
+// One read-decide-write on a single record, inside ONE database transaction. Without that, a tap
+// that lands between "read the table" and "write the merged table" would be silently undone.
+function idbUpdate(store, key, fn){
+  return withDbTimeout(new Promise((res, rej)=>{
+    let result = {};
+    const os = tx(store, 'readwrite');
+    const t = os.transaction;
+    const g = os.get(key);
+    g.onsuccess = ()=>{
+      try{
+        result = fn(g.result) || {};
+        if(result.write) os.put(result.write);
+      }catch(e){ try{ t.abort(); }catch(_){} rej(e); }
+    };
+    g.onerror = ()=> rej(g.error);
+    t.oncomplete = ()=> res(result);
+    t.onerror = ()=> rej(t.error);
+    t.onabort = ()=> rej(t.error || new Error('The table update was cancelled'));
+  }), 'Updating '+store);
+}
+// R: the server's copy, already through tableFromWire(); null = the server has no such table;
+// undefined = couldn't ask (offline). `fallback` stands in for a local copy that is missing.
+async function reconcileOneTable(id, R, billed, fallback){
+  return idbUpdate('open_orders', id, stored=>{
+    const base = stored || fallback || null;
+    const L = base ? normalizeTableOrder(JSON.parse(JSON.stringify(base))) : null;
+    const d = decideTableOrder(id, L, R || null, billed || new Map());
+    if(!d.T) return {id, table:null, notes:[], changed:false, push:false};
+    const T = Object.assign({}, d.T);
+    const changed = !L || tableCanon(T)!==tableCanon(L);
+    T.seen = (T.lines||[]).map(cloneTableLine);
+    if(changed) T.updated_at = (R && d.T===R ? R.updated_at : null) || new Date().toISOString();
+    else if(stored && stored.updated_at) T.updated_at = stored.updated_at;
+    const out = {id, table:T, notes:d.notes, changed, push: R ? tableCanon(T)!==tableCanon(R) : d.notes.length>0};
+    // Never bring back a record this phone no longer has (a queued change left over from before a
+    // shop switch); otherwise write whenever the content moved or the record is in the old shape.
+    if((stored || R) && (changed || tableNeedsUpgrade(stored))) out.write = T;
+    return out;
+  });
+}
+function tableFromWire(rt){
+  return normalizeTableOrder({
+    id:rt.id, label:rt.label, status:rt.status,
+    lines: Array.isArray(rt.lines) ? rt.lines.map(l=>Object.assign({}, l)) : [],
+    billPrinted: rt.bill_printed || false, kitchenRoundCount: rt.kitchen_round_count || 0,
+    openedBy: rt.opened_by, openedAt: rt.opened_at, settledAt: rt.settled_at, settledSaleId: rt.settled_sale_id,
+    updated_at: rt.updated_at,
+  });
+}
+// What actually goes to the server: the live lines, then the out-of-sight ones as zero-quantity
+// entries flagged `removed`. They keep their real sku and name so a phone on the previous build,
+// which will show them as "0×" lines, still finds the product if it settles the table; and they
+// are flagged as already sent so that phone never counts them as something new for the bar.
+function tableToWire(t){
+  const live = (t.lines||[]).map(l=>Object.assign({}, l));
+  const hidden = (t.zero||[]).map(l=>Object.assign({}, l, {removed:true, qty:0, wasSent:!!l.sentToKitchen, sentToKitchen:true}));
+  return {
+    id:t.id, label:t.label, status:t.status, lines: live.concat(hidden), billPrinted: t.billPrinted || false,
+    kitchenRoundCount: t.kitchenRoundCount || 0, openedBy:t.openedBy, openedAt:t.openedAt,
+    settledAt:t.settledAt, settledSaleId:t.settledSaleId, updated_at:new Date().toISOString(),
+  };
+}
+async function fetchRemoteTableOrder(id, timeoutMs){
+  try{
+    const res = await fetchT(`${supaUrl}/rest/v1/table_orders?shop_id=eq.${shopId}&id=eq.${encodeURIComponent(id)}&select=*`, {headers: sbHeaders()}, timeoutMs || 5000);
+    if(!res.ok) return {ok:false};
+    const rows = await res.json();
+    return {ok:true, row: (rows && rows.length) ? tableFromWire(rows[0]) : null};
+  }catch(e){ return {ok:false}; }
+}
+// Whether any other phone has ever touched a table at this shop. A shop that runs on one device
+// can never have a clash, so it is never made to wait, or asked the "another phone may have
+// added…" question.
+let otherTableDevicesSeen = null;
+async function otherDevicesSeen(){
+  if(otherTableDevicesSeen===null){
+    try{ const s = await getSetting('other_table_devices_seen'); otherTableDevicesSeen = !!(s && s.value); }catch(e){ otherTableDevicesSeen = false; }
+  }
+  return otherTableDevicesSeen;
+}
+async function noteOtherTableDevices(table){
+  if(await otherDevicesSeen()) return;
+  const mine = tableDeviceId() + '.';
+  const foreign = (table.lines||[]).concat(table.zero||[]).some(l=> Object.keys(l.u||{}).some(k=> k.charAt(0)!=='~' && k.indexOf(mine)!==0));
+  if(foreign){ otherTableDevicesSeen = true; put('settings', {key:'other_table_devices_seen', value:true}).catch(()=>{}); }
+}
+async function queueTableOrderPush(table){
+  // A push always sends the table as it stands at that moment (see tableOrderForPush), so one
+  // queued entry per table is enough — a second would just send the same thing twice.
+  const queued = (await getAll('sync_queue')).some(q=> q.type==='table_order_upsert' && q.payload && q.payload.id===table.id);
+  if(!queued) await queuePush('table_order_upsert', table);
+}
+// Everything that follows a reconcile and isn't the data itself: queue the merged copy for
+// sending, tell whoever is at this phone, and get them off a table that is no longer theirs.
+async function afterTableReconcile(res, opts){
+  if(!res || !res.table) return;
+  const queue = !(opts && opts.queue===false);
+  if(res.push && queue) await queueTableOrderPush(res.table);
+  await noteOtherTableDevices(res.table);
+  if(!res.changed) return;
+  const t = res.table;
+  if(res.notes.includes('late') && t.status==='open'){
+    const late = t.lines.filter(l=>l.late);
+    if(late.length){
+      toast(`${t.label}: ${late.length} item(s) were not on the bill that was paid — still on the table, marked LATE`);
+      logAudit('Table items missed by a paid bill', `${t.label} — ${late.map(l=>`${l.qty}× ${l.name}`).join(', ')} — kept on the table as LATE`);
+    }
+  }
+  if(t.status!=='open'){
+    if(settlingTableId===res.id && !saleInFlight){
+      // This phone was part-way through taking payment for a bill another phone has just closed.
+      settlingTableId = null;
+      cart = []; renderCart();
+      $('tenderModal').classList.remove('show');
+      if($('mpesaModal').classList.contains('show')) closeMpesaModal();
+      toast(`${t.label} was already paid on another phone — this payment was not recorded`);
+      logAudit('Settlement stopped — table already paid elsewhere', t.label);
+    }
+    if(activeTableId===res.id){
+      toast(`${t.label} was settled on another phone`);
+      exitTableMode();
+    }
+  }
+}
+// Replaces the old "newest timestamp replaces the whole table" loop in pullShopData().
+// `salesOk` is whether this same pull managed to fetch the sales list: deciding what has and
+// hasn't been paid for from a stale list is exactly how something gets billed twice, so on a
+// cycle where sales didn't come through, tables are simply left as they are until the next one.
+async function reconcileTableOrders(remoteRows, salesOk){
+  if(salesOk===false) return;
+  tableSalesFreshAt = Date.now();
+  billedTableLinesMemo = null;
+  const remotes = new Map();
+  (remoteRows||[]).forEach(rt=>{ if(rt && rt.id) remotes.set(rt.id, tableFromWire(rt)); });
+  const locals = await getAll('open_orders');
+  const anyOpen = locals.some(t=>t.status==='open') || [...remotes.values()].some(t=>t.status==='open');
+  const billed = anyOpen ? await buildBilledTableLines() : new Map();
+  const ids = new Set([...remotes.keys(), ...locals.map(t=>t.id)]);
+  for(const id of ids){
+    const R = remotes.has(id) ? remotes.get(id) : null;
+    const stored = locals.find(t=>t.id===id) || null;
+    try{
+      // A dry run on the copy already in hand: most tables, on most pulls, need nothing at all.
+      const Lq = stored ? normalizeTableOrder(JSON.parse(JSON.stringify(stored))) : null;
+      const dq = decideTableOrder(id, Lq, R, billed);
+      if(!dq.T) continue;
+      const settled = stored && tableCanon(dq.T)===tableCanon(Lq) && !tableNeedsUpgrade(stored);
+      const inStep = R ? tableCanon(dq.T)===tableCanon(R) : dq.notes.length===0;
+      if(settled && inStep) continue;
+      await afterTableReconcile(await reconcileOneTable(id, R, billed));
+    }catch(e){
+      log(`Table ${id} not merged this cycle: ${e && e.message ? e.message : e}`, 'warn'); // one bad record must not stop the rest
+    }
+  }
+}
+// What a queued table change actually sends. Not the snapshot taken when it was queued — that
+// may be minutes old by the time a phone is back online — but this phone's table as it stands
+// now, merged with whatever the server holds at this moment. Reading the server's copy first is
+// what stops a phone that has been offline from flattening what everyone else did meanwhile.
+async function tableOrderForPush(payload){
+  let cur = payload;
+  try{
+    const remote = await fetchRemoteTableOrder(payload.id);
+    const res = await reconcileOneTable(payload.id, remote.ok ? remote.row : undefined, await buildBilledTableLines(), payload);
+    if(res && res.table){ cur = res.table; await afterTableReconcile(res, {queue:false}); }
+  }catch(e){
+    try{ const l = await getOne('open_orders', payload.id); if(l) cur = l; }catch(_){}
+  }
+  if(tableServiceEnabled()){ refreshFloorIfActive(); if(activeTableId===payload.id) renderTableOrderView(); }
+  return tableToWire(normalizeTableOrder(JSON.parse(JSON.stringify(cur))));
+}
+// Runs when Settle is tapped, before the bill is turned into a sale: pulls in anything another
+// phone added to this table, and refuses a bill that has already been paid. The existing "print
+// the bill first" rule then does the rest — a merge that changed the table un-prints the bill.
+let settleCheckBusy = false;
+async function checkTableBeforeSettle(id){
+  if(settleCheckBusy) return false;
+  settleCheckBusy = true;
+  try{
+    const online = isOnline && backendLive() && !!shopId;
+    const shared = await otherDevicesSeen();
+    if(online && shared){
+      // A phone that has only just come back online may not have heard yet what was paid while it
+      // was away. Let one full sync finish first (a few seconds at most) rather than bill on old news.
+      const queued = (await getAll('sync_queue')).length;
+      if(queued > 0 || Date.now() - tableSalesFreshAt > 20000){
+        toast('Checking this table with the other phones…');
+        await Promise.race([runSyncLoop(), new Promise(r=>setTimeout(r, 7000))]);
+      }
+    }
+    const fresh = Date.now() - tableSalesFreshAt <= 30000;
+    const remote = online ? await fetchRemoteTableOrder(id, 3500) : {ok:false}; // short on purpose — a customer is waiting to pay
+    billedTableLinesMemo = null; // this one decision is worth a fresh read
+    const res = await reconcileOneTable(id, remote.ok ? remote.row : undefined, await buildBilledTableLines());
+    await afterTableReconcile(res);
+    const t = await getOne('open_orders', id);
+    if(!t || t.status!=='open'){
+      toast('This table has already been settled on another phone');
+      if(activeTableId===id) exitTableMode();
+      return false;
+    }
+    if(activeTableId===id) await renderTableOrderView();
+    if(res && res.changed && !t.billPrinted){
+      toast('Another phone changed this table — check the items and print the bill again');
+      return false;
+    }
+    if(shared && !(remote.ok && fresh)){
+      if(!confirm(`This phone can't reach the server right now, so it can't see what other phones may have added to ${t.label}.\n\nSettle with only what is on this screen?`)) return false;
+    }
+    return true;
+  }catch(e){
+    log('Pre-settle table check failed: '+(e && e.message ? e.message : e), 'warn');
+    return true; // the check must never be the reason a customer can't pay
+  } finally { settleCheckBusy = false; }
+}
+function carryTableLineRef(from, to){
+  if(to && from && from.lid && from.tbl){ to.lid = from.lid; to.tbl = from.tbl; }
+}
+// At the moment of payment: anything on the table that is NOT on the sale just recorded — a line
+// another phone added while the payment screen was open, or extra units of a line that was —
+// comes off the paid table and is handed back to be kept as a LATE order.
+function splitUnbilledTableLines(table, saleLines){
+  normalizeTableOrder(table);
+  const billedQty = {};
+  (saleLines||[]).forEach(l=>{ if(l && l.lid && l.tbl===table.id) billedQty[l.lid] = (billedQty[l.lid]||0) + (Number(l.qty)||0); });
+  if(!Object.keys(billedQty).length) return []; // a sale with no line ids came from the old flow — leave the table exactly as it was
+  const rest = [], paid = [];
+  table.lines.forEach(l=>{
+    if(billedQty[l.lid]===undefined){ rest.push(l); return; }
+    const extra = (Number(l.qty)||0) - billedQty[l.lid];
+    if(extra > 0){
+      const more = Object.assign(cloneTableLine(l), {lid:l.lid+'+r', qty:extra, u:{}});
+      fitTableLineTokens(more, legacyTableToken);
+      rest.push(more);
+    }
+    paid.push(l);
+  });
+  table.lines = paid;
+  table.seen = paid.map(cloneTableLine);
+  return rest;
+}
+async function openLateTableSitting(settledTable, rest){
+  const late = {
+    id: settledTable.id, label: settledTable.label, status:'open',
+    lines: rest.map(l=>Object.assign(cloneTableLine(l), {late:true})),
+    zero: (settledTable.zero||[]).map(cloneTableLine),
+    billPrinted:false, kitchenRoundCount: settledTable.kitchenRoundCount || 0,
+    openedBy: settledTable.openedBy, openedAt: settledTable.settledAt || new Date().toISOString(),
+    settledAt:null, settledSaleId:null, updated_at: new Date().toISOString(),
+  };
+  late.seen = late.lines.map(cloneTableLine);
+  await put('open_orders', late);
+  await queueTableOrderPush(late);
+  logAudit('Table items missed by a paid bill', `${late.label} — ${late.lines.map(l=>`${l.qty}× ${l.name}`).join(', ')} — kept on the table as LATE`);
+  setTimeout(()=> toast(`${late.label}: ${late.lines.length} item(s) were added during payment — still on the table, marked LATE`), 2200);
+  refreshFloorIfActive();
+}
+// A table that is being opened again: lines removed during its recent sittings come along, out
+// of sight, so a phone that was offline when they were removed can't put them onto this one.
+// Only the last day's worth — beyond that a phone has long since caught up.
+async function inheritTableMarkers(table){
+  try{
+    const prev = await getOne('open_orders', table.id);
+    if(!prev) return;
+    const p = normalizeTableOrder(JSON.parse(JSON.stringify(prev)));
+    const cutoff = new Date(Date.now() - 86400000).toISOString();
+    table.zero = (p.zero||[]).filter(z=> String(z.deadAt||'') > cutoff);
+    table.seen = [];
+  }catch(e){ /* a table simply opens without them */ }
+}
+// A LATE line can't be quietly dropped (it was served) and can't be un-sent either, so the normal
+// "already sent to the bar" block would leave it stuck on the table for good if the customer has
+// left. It goes through the same reason-and-review path as any other removal instead.
+function removeLateTableLine(tableId, lid){
+  getAll('open_orders').then(tables=>{
+    const table = tables.find(t=>t.id===tableId);
+    const line = table ? table.lines.find(l=>l.lid===lid) : null;
+    if(!line) return;
+    requestCartRemoval('void_line', {name: line.name+' (late item, '+table.label+')', qty: line.qty, price: line.price}, async ()=>{
+      const fresh = (await getAll('open_orders')).find(t=>t.id===tableId);
+      if(!fresh) return;
+      normalizeTableOrder(fresh);
+      const idx = fresh.lines.findIndex(l=>l.lid===lid);
+      if(idx<0) return;
+      fresh.lines.splice(idx,1);
+      fresh.billPrinted = false;
+      stampTableOrder(fresh);
+      await put('open_orders', fresh);
+      await queuePush('table_order_upsert', fresh);
+      refreshFloorIfActive();
+      if(activeTableId===tableId) renderTableOrderView();
+    });
+  });
+}
 
 // ---------- Theme (light / dark) ----------
 const ICON_MOON = '<svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1Z"/></svg>';
