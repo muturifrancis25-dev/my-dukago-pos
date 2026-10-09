@@ -1830,6 +1830,24 @@
   </div>
 </div>
 
+<!-- First-time business type choice — shown once, to the Admin of a shop that has just been set
+     up, so a new shop no longer starts life as "Duka / General Retail" by default with no way to
+     say otherwise. Deliberately has no Cancel: the till isn't usable as the right kind of shop
+     until this is answered, and it is the only time a shop's own admin gets to answer it —
+     afterwards the type is changed by the Platform Administrator, exactly as before. -->
+<div class="modal-overlay" id="firstBizTypeModal">
+  <div class="modal-box" style="width:min(94vw,460px); text-align:left; max-height:88vh; overflow-y:auto;">
+    <h3 style="text-align:center;">What kind of business is this?</h3>
+    <p style="text-align:center;">Pick the one that fits this shop. It sets the products and screens you start with. You choose this once — after that it can only be changed by your platform administrator.</p>
+    <div id="firstBizTypeList" style="margin-bottom:12px;"></div>
+    <!-- Stays in view at the bottom while the list scrolls — on a phone the list is longer than the screen. -->
+    <div style="position:sticky; bottom:-22px; background:var(--panel); padding:8px 0 22px; margin:0 0 -22px;">
+      <p id="firstBizTypeError" style="color:var(--clay); font-size:11.5px; min-height:15px; margin:0 0 8px; text-align:center;"></p>
+      <button class="btn-pay" id="firstBizTypeConfirmBtn" style="width:100%; padding:13px 0; font-size:14px;" disabled>Choose a business type</button>
+    </div>
+  </div>
+</div>
+
 <!-- Manage Shop — Super Admin only. Lets the platform administrator set a shop's active
      business types remotely (self-service combining is locked to Super Admin now — see
      the combine-mode gate), and reset a locked-out admin's PIN when a shop is stuck. -->
@@ -2000,8 +2018,8 @@ const OUTLET_ID = 'outlet_001';
 // BUILD_VERSION keeps the descriptive slug for diagnostics/support; BUILD_DATE_LABEL is the
 // plain "last updated" date+time shown right on the login screen — easier for a shop owner to
 // read off at a glance and compare than a slug, which is all that screen really needs to say.
-const BUILD_VERSION = '2026-10-09-table-merge-39';
-const BUILD_DATE_LABEL = '09 Oct 2026, 18:15';
+const BUILD_VERSION = '2026-10-09-first-biz-type-choice-40';
+const BUILD_DATE_LABEL = '09 Oct 2026, 19:00';
 const CATS_BY_TYPE = {}; // filled below, keyed by business type id
 let CATS = ['All'];
 let CAT_COLORS = {};
@@ -9011,6 +9029,7 @@ async function handleSetPinDigit(k){
   await put('users', adminUser);
   await queuePush('staff_upsert', adminUser);
   await refreshUserCache();
+  await markBusinessTypeChoicePending(); // a new shop gets to say what kind of business it is — once. See FIRST-TIME BUSINESS TYPE CHOICE
   setPinBuffer=''; setPinFirstEntry='';
   await completeSignIn(adminUser, {isNewSetup:true, skipCartResume:true});
 }
@@ -9173,6 +9192,7 @@ async function completeSignIn(u, opts={}){
   try{ await updateStockLowBadge(); }catch(e){ log('Low-stock badge failed: '+e.message, 'warn'); }
   try{ updateTableServiceVisibility(); }catch(e){ log('Table service visibility failed: '+e.message, 'warn'); }
   try{ scanInput.focus(); }catch(e){}
+  maybeAskBusinessTypeOnce(u); // only ever does anything for the Admin of a shop whose type hasn't been chosen yet
   // Deactivation check, now deliberately AFTER the sign-in has already completed on screen —
   // see the comment at the top of this function. Only acts if it genuinely comes back
   // confirmed-deactivated; any offline/unreachable/ambiguous result (null) changes nothing,
@@ -10743,6 +10763,86 @@ function removeLateTableLine(tableId, lid){
     });
   });
 }
+
+// ======================================================================
+// FIRST-TIME BUSINESS TYPE CHOICE — added 09 Oct 2026
+// A brand-new shop used to come up as Duka / General Retail and stay that way until the
+// Platform Administrator changed it from Manage Shop. Now the Admin who has just set the shop
+// up is asked once what kind of business it is. One choice, then the existing lock applies
+// unchanged: renderBizGrid() still refuses a shop admin's later attempts, and Manage Shop →
+// Business types is still where it is changed from then on.
+//
+// "Still to choose" is a shop setting (biz_type_choice_pending), written the moment a new shop's
+// Admin PIN is confirmed and synced like any other setting — so if the app is closed before the
+// question is answered, it is asked again at the next Admin sign-in, on whichever phone that is.
+// Shops that already existed before this build have no such setting and are never asked.
+// ======================================================================
+const BIZ_CHOICE_KEY = 'biz_type_choice_pending';
+let firstBizTypePick = null;
+async function markBusinessTypeChoicePending(){
+  const now = new Date().toISOString();
+  await put('settings', {key:BIZ_CHOICE_KEY, value:true, updated_at:now});
+  await queuePush('settings_upsert', {key:BIZ_CHOICE_KEY, value:true});
+}
+async function maybeAskBusinessTypeOnce(u){
+  try{
+    if(!u || u.role!=='admin' || !shopId) return;
+    const s = await getSetting(BIZ_CHOICE_KEY);
+    if(!s || s.value!==true) return;
+    if(!currentUser || currentUser.id!==u.id) return; // signed out again while this was being looked up
+    openFirstBizTypeModal();
+  }catch(e){ /* asking is a courtesy at sign-in — never a reason for sign-in to fail */ }
+}
+function openFirstBizTypeModal(){
+  const types = allBusinessTypes();
+  firstBizTypePick = null;
+  const box = $('firstBizTypeList'); box.innerHTML = '';
+  Object.keys(types).forEach(id=>{
+    const t = types[id];
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.dataset.bizPick = id;
+    row.style.cssText = 'display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:var(--bg); color:var(--ink); border:2px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:6px; cursor:pointer; font-family:var(--sans);';
+    row.innerHTML = `<span style="font-size:22px; flex:none;">${scEsc(t.emoji||'🏪')}</span><span style="min-width:0;"><b style="font-size:13px; display:block;">${scEsc(t.label)}</b><span style="font-size:11px; color:var(--muted);">${scEsc(t.desc||'')}</span></span>`;
+    row.addEventListener('click', ()=>{
+      firstBizTypePick = id;
+      box.querySelectorAll('button[data-biz-pick]').forEach(b=>{ b.style.borderColor = b.dataset.bizPick===id ? 'var(--marigold)' : 'var(--line)'; });
+      $('firstBizTypeError').textContent = '';
+      $('firstBizTypeConfirmBtn').disabled = false;
+      $('firstBizTypeConfirmBtn').textContent = `Set this shop up as ${t.label}`;
+    });
+    box.appendChild(row);
+  });
+  $('firstBizTypeConfirmBtn').disabled = true;
+  $('firstBizTypeConfirmBtn').textContent = 'Choose a business type';
+  $('firstBizTypeError').textContent = '';
+  $('firstBizTypeModal').classList.add('show');
+}
+let firstBizTypeBusy = false;
+$('firstBizTypeConfirmBtn').addEventListener('click', async ()=>{
+  const id = firstBizTypePick;
+  if(!id || firstBizTypeBusy) return;
+  if(!(currentUser && currentUser.role==='admin')){ $('firstBizTypeModal').classList.remove('show'); return; }
+  const types = allBusinessTypes();
+  if(!types[id]){ $('firstBizTypeError').textContent = 'That type is no longer available — pick another.'; return; }
+  firstBizTypeBusy = true;
+  $('firstBizTypeConfirmBtn').disabled = true;
+  try{
+    // The setting may have been answered on another phone since this screen opened.
+    const s = await getSetting(BIZ_CHOICE_KEY);
+    if(!s || s.value!==true){ $('firstBizTypeModal').classList.remove('show'); toast('This shop\'s business type has already been set'); return; }
+    await applyBusinessTypes([id]); // the same call a Platform Administrator's change makes — categories, starter items, sync
+    const now = new Date().toISOString();
+    await put('settings', {key:BIZ_CHOICE_KEY, value:false, updated_at:now});
+    await queuePush('settings_upsert', {key:BIZ_CHOICE_KEY, value:false});
+    logAudit('Business type chosen at first setup', types[id].label);
+    $('firstBizTypeModal').classList.remove('show');
+    if($('view-business').classList.contains('active')) renderBizGrid();
+  }catch(e){
+    $('firstBizTypeError').textContent = 'Could not save that — '+((e && e.message) || 'try again');
+    $('firstBizTypeConfirmBtn').disabled = false;
+  } finally { firstBizTypeBusy = false; }
+});
 
 // ---------- Theme (light / dark) ----------
 const ICON_MOON = '<svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1Z"/></svg>';
