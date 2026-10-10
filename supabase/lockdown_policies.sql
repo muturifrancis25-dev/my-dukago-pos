@@ -37,7 +37,7 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'cart_removal_requests','customer_debts','payables','po_number_counters','products',
+    'audit_log','cart_removal_requests','customer_debts','payables','po_number_counters','products',
     'purchase_orders','refunds','sales','shop_settings','staff_cash','stock_movements','stock_takes','table_orders'
   ] loop
     execute format('alter table public.%I enable row level security', t);
