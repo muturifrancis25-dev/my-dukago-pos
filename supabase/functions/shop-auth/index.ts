@@ -35,8 +35,13 @@ async function hmacHex(key: string, msg: string) {
 const emailFor = async (staffId: string) => `s_${(await sha256Hex(staffId)).slice(0, 32)}@staff.invalid`;
 const passwordFor = (staffId: string) => hmacHex(SERVICE_KEY, 'staff-pw:' + staffId);
 
+// Only the official app address may call this function from a browser. Browsers always send an Origin header
+// on these requests, so a copy of the app hosted anywhere else is refused here even if someone gets past the
+// client-side host lock. (Override with the ALLOWED_ORIGINS secret, comma separated, if the address ever changes.)
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
 const CORS = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': ALLOWED_ORIGINS[0],
+  'Vary': 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -81,6 +86,8 @@ async function issueSession(staff: StaffRow) {
 }
 
 Deno.serve(async (req) => {
+  const origin = req.headers.get('origin');
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ ok: false, code: 'forbidden_origin' }, 403);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
     const body = await req.json().catch(() => ({}));
