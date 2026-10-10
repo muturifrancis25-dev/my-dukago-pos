@@ -9,6 +9,7 @@
 //   pin_unique { pin, excludeStaffId? }      -> { ok, unique }
 //   business_types {}                        -> { ok, rows }
 //   c2b_list {} / c2b_match { trans_id }      -> (needs staff token) unmatched M-Pesa payments / mark one used
+//   rpc { fn, args }                          -> { ok, data }  (licence/device functions that take an Admin PIN, rate limited)
 //   login { pin, shopCode? , shopId? }       -> { ok, staff, shop, session } | { ok:false, code, ... }
 //        codes: bad_request | not_found | prefix | other_shop | suspended | locked
 //
@@ -117,6 +118,28 @@ Deno.serve(async (req) => {
       const { error } = await admin.from('mpesa_c2b_payments').update({ matched: true }).eq('trans_id', transId).eq('matched', false);
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
       return json({ ok: true });
+    }
+
+    if (action === 'rpc') {
+      // Licence / device functions that take an Admin PIN. They are no longer callable straight from the
+      // browser (that was a way to guess Admin PINs with no limit); they go through here instead, where
+      // wrong PINs count against the same per-shop lock as the sign-in.
+      const ALLOWED = ['register_device', 'remove_device', 'shop_devices_list', 'submit_license_payment'];
+      const fn = String(body.fn || '');
+      const args = (body.args && typeof body.args === 'object') ? body.args : {};
+      if (!ALLOWED.includes(fn)) return json({ ok: false, code: 'bad_request' }, 400);
+      const sid = String(args.p_shop_id || '');
+      if (!/^[0-9a-f-]{36}$/i.test(sid)) return json({ ok: false, code: 'bad_request' }, 400);
+      const key = 'shop:' + sid;
+      const usesPin = args.p_pin != null || args.p_admin_pin != null;
+      if (usesPin) {
+        const ls = await lockState(key);
+        if (ls?.locked_until && new Date(ls.locked_until).getTime() > Date.now()) return json({ ok: true, data: { ok: false, code: 'too_many' } });
+      }
+      const { data, error } = await admin.rpc(fn, args);
+      if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      if (usesPin && data && (data as { code?: string }).code === 'bad_pin') await noteFail(key);
+      return json({ ok: true, data });
     }
 
     if (action !== 'login') return json({ ok: false, code: 'bad_request' }, 400);
