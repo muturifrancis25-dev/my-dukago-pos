@@ -10,6 +10,8 @@
 //   business_types {}                        -> { ok, rows }
 //   c2b_list {} / c2b_match { trans_id }      -> (needs staff token) unmatched M-Pesa payments / mark one used
 //   rpc { fn, args }                          -> { ok, data }  (licence/device functions that take an Admin PIN, rate limited)
+//   register_shop { shopId, adminId, pin, email? } -> { ok, staff, shop, session }  (first-time setup of a new shop)
+//   shop_name { name }                       -> (Admin token) rename own shop
 //   login { pin, shopCode? , shopId? }       -> { ok, staff, shop, session } | { ok:false, code, ... }
 //        codes: bad_request | not_found | prefix | other_shop | suspended | locked
 //
@@ -54,6 +56,27 @@ async function noteFail(key: string) {
 }
 async function clearFails(key: string) {
   await admin.from('shop_auth_attempts').upsert({ key, fails: 0, window_start: new Date().toISOString(), locked_until: null });
+}
+
+type StaffRow = { id: string; shop_id: string; role: string; [k: string]: unknown };
+// Makes sure this staff member has an Auth user whose claims are current, signs in as them, returns the session.
+async function issueSession(staff: StaffRow) {
+  const meta = { shop_id: staff.shop_id, staff_id: staff.id, role: staff.role };
+  const email = await emailFor(staff.id);
+  const password = await passwordFor(staff.id);
+  const { data: map } = await admin.from('staff_auth').select('auth_user_id').eq('staff_id', staff.id).maybeSingle();
+  if (map) {
+    const { error } = await admin.auth.admin.updateUserById(map.auth_user_id, { password, app_metadata: meta, ban_duration: 'none' });
+    if (error) return { error: error.message };
+  } else {
+    const { data: created, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, app_metadata: meta });
+    if (error || !created?.user) return { error: error?.message || 'create failed' };
+    await admin.from('staff_auth').insert({ staff_id: staff.id, auth_user_id: created.user.id });
+  }
+  const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: sess, error: sErr } = await anon.auth.signInWithPassword({ email, password });
+  if (sErr || !sess?.session) return { error: sErr?.message || 'sign-in failed' };
+  return { session: { access_token: sess.session.access_token, refresh_token: sess.session.refresh_token, expires_at: sess.session.expires_at } };
 }
 
 Deno.serve(async (req) => {
@@ -142,6 +165,54 @@ Deno.serve(async (req) => {
       return json({ ok: true, data });
     }
 
+    if (action === 'register_shop') {
+      // First-time setup of a brand-new shop: creates the shop and its first Admin, then signs the Admin in.
+      // (The browser can no longer write to the shops/staff tables directly once the database is locked.)
+      const shopId = String(body.shopId || ''), adminId = String(body.adminId || ''), apin = String(body.pin || '');
+      if (!/^[0-9a-f-]{36}$/i.test(shopId) || adminId !== 'u_admin_' + shopId || !/^\d{6}$/.test(apin)) return json({ ok: false, code: 'bad_request' }, 400);
+      const rk = 'register';
+      const rs = await lockState(rk);
+      if (rs?.locked_until && new Date(rs.locked_until).getTime() > Date.now()) return json({ ok: false, code: 'locked' }, 429);
+      const nowMs = Date.now();
+      let rn = 1, rws = new Date(nowMs).toISOString(), rlu: string | null = null;
+      if (rs && nowMs - new Date(rs.window_start).getTime() < WINDOW_MS) { rn = rs.fails + 1; rws = rs.window_start; }
+      if (rn >= 30) { rlu = new Date(nowMs + LOCK_MS).toISOString(); rn = 0; rws = new Date(nowMs).toISOString(); }
+      await admin.from('shop_auth_attempts').upsert({ key: rk, fails: rn, window_start: rws, locked_until: rlu });
+
+      const { data: ex } = await admin.from('shops').select('id').eq('id', shopId).maybeSingle();
+      if (ex) {
+        const { data: st } = await admin.from('staff').select('id').eq('shop_id', shopId).limit(1);
+        if (st && st.length) return json({ ok: false, code: 'exists' }, 409);
+      }
+      const conds = [`pin.eq.${apin}`, `pin.eq.${apin.slice(0, 4)}`];
+      const { data: clash } = await admin.from('staff').select('id').eq('active', true).or(conds.join(',')).neq('id', adminId).limit(1);
+      if (clash && clash.length) return json({ ok: false, code: 'pin_taken' }, 409);
+      if (!ex) {
+        const { error } = await admin.from('shops').insert({ id: shopId, name: String(body.name || 'New shop').slice(0, 120) });
+        if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      }
+      const staffRow = { id: adminId, shop_id: shopId, name: 'Admin', role: 'admin', pin: apin, active: true, email: body.email ? String(body.email).slice(0, 200) : null };
+      const { error: se } = await admin.from('staff').upsert(staffRow);
+      if (se) return json({ ok: false, code: 'server_error', detail: se.message }, 500);
+      const { data: shop } = await admin.from('shops').select('id,name,shop_code').eq('id', shopId).maybeSingle();
+      const issued = await issueSession(staffRow);
+      if (!issued.session) return json({ ok: false, code: 'server_error', detail: issued.error }, 500);
+      return json({ ok: true, staff: staffRow, shop, session: issued.session });
+    }
+
+    if (action === 'shop_name') {
+      // An Admin renames their own shop.
+      const tok = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+      const { data: u } = await admin.auth.getUser(tok);
+      const md = (u?.user?.app_metadata || {}) as { shop_id?: string; role?: string };
+      if (!u?.user || !md.shop_id || md.role !== 'admin') return json({ ok: false, code: 'unauthorized' }, 401);
+      const nm = String(body.name || '').trim().slice(0, 120);
+      if (!nm) return json({ ok: false, code: 'bad_request' }, 400);
+      const { error } = await admin.from('shops').update({ name: nm }).eq('id', md.shop_id);
+      if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      return json({ ok: true });
+    }
+
     if (action !== 'login') return json({ ok: false, code: 'bad_request' }, 400);
 
     const pin = String(body.pin || '');
@@ -184,32 +255,15 @@ Deno.serve(async (req) => {
     }
 
     // Make sure this staff member has an Auth user whose claims are current, then sign in as them.
-    const meta = { shop_id: staff.shop_id, staff_id: staff.id, role: staff.role };
-    const email = await emailFor(staff.id);
-    const password = await passwordFor(staff.id);
-    const { data: map } = await admin.from('staff_auth').select('auth_user_id').eq('staff_id', staff.id).maybeSingle();
-    if (map) {
-      const { error } = await admin.auth.admin.updateUserById(map.auth_user_id, { password, app_metadata: meta, ban_duration: 'none' });
-      if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
-    } else {
-      const { data: created, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, app_metadata: meta });
-      if (error || !created?.user) return json({ ok: false, code: 'server_error', detail: error?.message || 'create failed' }, 500);
-      await admin.from('staff_auth').insert({ staff_id: staff.id, auth_user_id: created.user.id });
-    }
-    const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data: sess, error: sErr } = await anon.auth.signInWithPassword({ email, password });
-    if (sErr || !sess?.session) return json({ ok: false, code: 'server_error', detail: sErr?.message || 'sign-in failed' }, 500);
+    const issued = await issueSession(staff as StaffRow);
+    if (!issued.session) return json({ ok: false, code: 'server_error', detail: issued.error }, 500);
 
     await clearFails(key);
     return json({
       ok: true,
       staff,
       shop: { id: shop.id, name: shop.name },
-      session: {
-        access_token: sess.session.access_token,
-        refresh_token: sess.session.refresh_token,
-        expires_at: sess.session.expires_at,
-      },
+      session: issued.session,
     });
   } catch (e) {
     return json({ ok: false, code: 'server_error', detail: String(e) }, 500);
