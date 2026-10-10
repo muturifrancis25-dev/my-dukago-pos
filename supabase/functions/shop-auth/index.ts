@@ -12,8 +12,8 @@
 //   rpc { fn, args }                          -> { ok, data }  (licence/device functions that take an Admin PIN, rate limited)
 //   register_shop { shopId, adminId, pin, email? } -> { ok, staff, shop, session }  (first-time setup of a new shop)
 //   shop_name { name }                       -> (Admin token) rename own shop
-//   login { pin, shopCode? , shopId? }       -> { ok, staff, shop, session } | { ok:false, code, ... }
-//        codes: bad_request | not_found | prefix | other_shop | suspended | locked
+//   login { pin, shopCode? , shopId?, deviceId?, deviceLabel? } -> { ok, staff, shop, session } | { ok:false, code, ... }
+//        codes: bad_request | not_found | prefix | other_shop | suspended | locked | device_blocked (plan's device limit reached)
 //
 // Brute-force guard: 10 failed PINs for one shop within 10 minutes locks that shop's logins for 5 minutes.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -261,6 +261,20 @@ Deno.serve(async (req) => {
       const { data: elsewhere } = await admin.from('staff').select('id').eq('pin', pin).eq('active', true).neq('shop_id', shopId).limit(1);
       if (elsewhere && elsewhere.length) return json({ ok: false, code: 'other_shop' }, 401);
       return json({ ok: false, code: 'not_found' }, 401);
+    }
+
+    // Device limit: the PIN is right, but is this phone allowed on the shop's plan? A phone that is already
+    // linked passes; a new one takes a free place; if the plan is full it gets no session at all.
+    const devId = String(body.deviceId || '').slice(0, 80);
+    if (devId) {
+      const { data: dv, error: de } = await admin.rpc('register_device', {
+        p_shop_id: shopId, p_device_id: devId, p_label: body.deviceLabel ? String(body.deviceLabel).slice(0, 80) : null,
+        p_existing: false, p_admin_pin: null, p_accept_upgrade: false,
+      });
+      const d = dv as { ok?: boolean; code?: string; count?: number; limit?: number; plan?: string; price?: number } | null;
+      if (!de && d && d.ok === false && ['limit', 'needs_upgrade', 'needs_admin', 'removed'].includes(String(d.code))) {
+        return json({ ok: false, code: 'device_blocked', reason: d.code, count: d.count, limit: d.limit, plan: d.plan, price: d.price }, 403);
+      }
     }
 
     // Make sure this staff member has an Auth user whose claims are current, then sign in as them.
