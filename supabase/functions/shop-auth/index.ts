@@ -23,6 +23,7 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 
+const TRIAL_DAYS = 14;
 const MAX_FAILS = 10, WINDOW_MS = 10 * 60 * 1000, LOCK_MS = 5 * 60 * 1000;
 const enc = new TextEncoder();
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
@@ -187,9 +188,17 @@ Deno.serve(async (req) => {
       const conds = [`pin.eq.${apin}`, `pin.eq.${apin.slice(0, 4)}`];
       const { data: clash } = await admin.from('staff').select('id').eq('active', true).or(conds.join(',')).neq('id', adminId).limit(1);
       if (clash && clash.length) return json({ ok: false, code: 'pin_taken' }, 409);
+      // The shop picks a plan at setup and gets a free trial that starts now. After the trial the usual
+      // 7-day grace applies, then the shop is suspended until a payment is confirmed (which sets it 'active').
+      const PLANS = ['small', 'medium', 'large', 'xl'];
+      const plan = PLANS.includes(String(body.plan || '')) ? String(body.plan) : 'small';
+      const trialEnds = new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString();
       if (!ex) {
-        const { error } = await admin.from('shops').insert({ id: shopId, name: String(body.name || 'New shop').slice(0, 120) });
+        const { error } = await admin.from('shops').insert({ id: shopId, name: String(body.name || 'New shop').slice(0, 120), plan, license_status: 'trial', license_expires_at: trialEnds });
         if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      } else {
+        // A shop row left behind by an earlier unfinished setup, with no licence dates yet: start its trial now.
+        await admin.from('shops').update({ plan, license_status: 'trial', license_expires_at: trialEnds }).eq('id', shopId).is('license_expires_at', null);
       }
       const staffRow = { id: adminId, shop_id: shopId, name: 'Admin', role: 'admin', pin: apin, active: true, email: body.email ? String(body.email).slice(0, 200) : null };
       const { error: se } = await admin.from('staff').upsert(staffRow);
