@@ -1,5 +1,5 @@
 -- ============================================================================================
--- Security lockdown: per-shop row-level security.   STATUS: written + tested locally, NOT applied.
+-- Security lockdown: per-shop row-level security.   STATUS: ready to apply (trial). Undo with supabase/lockdown_rollback.sql.
 -- Apply only together with the app release that signs in through the `shop-login` function
 -- (otherwise every device loses sync). See LOCKDOWN_PLAN.md.
 --
@@ -65,6 +65,10 @@ create policy mpesa_req_read on public.mpesa_requests for select to authenticate
 -- 7. platform_business_types: every signed-in shop may read the platform's type list; writes are service-role only.
 alter table public.platform_business_types enable row level security;
 create policy pbt_read on public.platform_business_types for select to authenticated using (true);
+
+-- 7b. shop_payments: a shop may read its own payment history; writes are service-role only.
+alter table public.shop_payments enable row level security;
+create policy shop_pay_read on public.shop_payments for select to authenticated using (shop_id = public.jwt_shop_id());
 
 -- 8. Platform-only tables stay locked (RLS on, no policy): platform_admins, platform_audit_log,
 --    mpesa_c2b_payments (written by the Daraja callback functions; reading it from the app moves to an
