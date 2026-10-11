@@ -39,7 +39,7 @@ async function verify(token: string) {
   } catch { return null; }
 }
 
-const TABLES = new Set(['shops', 'shop_payments', 'shop_settings', 'staff', 'platform_business_types', 'license_payment_requests', 'shop_devices']);
+const TABLES = new Set(['shops', 'shop_payments', 'shop_settings', 'staff', 'platform_business_types', 'license_payment_requests', 'shop_devices', 'products', 'purchase_orders']);
 const METHODS = new Set(['GET', 'POST', 'PATCH']);
 // Which columns a platform write may touch, per table (reads are unrestricted within the allowed tables).
 const WRITE_COLS: Record<string, Set<string>> = {
@@ -50,6 +50,8 @@ const WRITE_COLS: Record<string, Set<string>> = {
   platform_business_types: new Set(['id', 'label', 'emoji', 'description', 'cats', 'colors', 'created_by']),
   license_payment_requests: new Set(['status', 'decided_by', 'decision_note']),
   shop_devices: new Set(['status', 'over_plan', 'removed_by', 'removed_at', 'last_seen']),
+  products: new Set(['shop_id', 'sku', 'name', 'cat', 'price', 'cost', 'stock', 'btype', 'supplier_name', 'reorder_threshold', 'reorder_qty', 'expiry_date', 'is_rx', 'make', 'model', 'brand', 'part_no', 'grade', 'position', 'shelf', 'updated_at']),
+  purchase_orders: new Set(['supplier_name', 'items', 'updated_at']),
 };
 
 Deno.serve(async (req) => {
