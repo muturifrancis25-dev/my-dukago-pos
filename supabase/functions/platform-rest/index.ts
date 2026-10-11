@@ -39,7 +39,7 @@ async function verify(token: string) {
   } catch { return null; }
 }
 
-const TABLES = new Set(['shops', 'shop_payments', 'shop_settings', 'staff', 'platform_business_types']);
+const TABLES = new Set(['shops', 'shop_payments', 'shop_settings', 'staff', 'platform_business_types', 'license_payment_requests', 'shop_devices']);
 const METHODS = new Set(['GET', 'POST', 'PATCH']);
 // Which columns a platform write may touch, per table (reads are unrestricted within the allowed tables).
 const WRITE_COLS: Record<string, Set<string>> = {
@@ -48,6 +48,8 @@ const WRITE_COLS: Record<string, Set<string>> = {
   shop_settings: new Set(['shop_id', 'key', 'value', 'updated_at']),
   staff: new Set(['pin', 'updated_at']),
   platform_business_types: new Set(['id', 'label', 'emoji', 'description', 'cats', 'colors', 'created_by']),
+  license_payment_requests: new Set(['status', 'decided_by', 'decision_note']),
+  shop_devices: new Set(['status', 'over_plan', 'removed_by', 'removed_at', 'last_seen']),
 };
 
 Deno.serve(async (req) => {
@@ -71,7 +73,7 @@ Deno.serve(async (req) => {
         for (const k of Object.keys(r)) if (!WRITE_COLS[table].has(k)) return json({ message: `Column not allowed: ${k}` }, 403);
       }
       // A PATCH must target specific rows, never the whole table.
-      if (method === 'PATCH' && !/[?&](id|shop_id)=eq\./.test(path)) return json({ message: 'PATCH needs an id filter' }, 400);
+      if (method === 'PATCH' && !/[?&](id|shop_id)=(eq|in)\./.test(path)) return json({ message: 'PATCH needs an id filter' }, 400);
       bodyText = JSON.stringify(b.body);
     }
     const headers: Record<string, string> = {
