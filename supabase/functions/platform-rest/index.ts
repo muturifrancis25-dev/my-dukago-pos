@@ -83,7 +83,9 @@ Deno.serve(async (req) => {
 
     const up = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { method, headers, body: bodyText });
     const text = await up.text();
-    return new Response(text, { status: up.status, headers: { ...CORS, 'Content-Type': up.headers.get('content-type') || 'application/json' } });
+    // 204/205/304 must have a null body or the Response constructor throws (PATCH/DELETE with return=minimal).
+    const nullBody = up.status === 204 || up.status === 205 || up.status === 304;
+    return new Response(nullBody ? null : text, { status: up.status, headers: { ...CORS, 'Content-Type': up.headers.get('content-type') || 'application/json' } });
   } catch (e) {
     return json({ message: String(e) }, 500);
   }
