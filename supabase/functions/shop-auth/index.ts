@@ -15,6 +15,7 @@
 //   login { pin, shopCode? , shopId?, deviceId?, deviceLabel? } -> { ok, staff, shop, session } | { ok:false, code, ... }
 //        codes: bad_request | not_found | prefix | other_shop | suspended | locked | device_blocked (plan's device limit reached)
 //
+// PINs are stored scrambled (keyed HMAC, key held in Supabase Vault) - see supabase/pin_hashing_a.sql / _b.sql.
 // Brute-force guard: 10 failed PINs for one shop within 10 minutes locks that shop's logins for 5 minutes.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -114,14 +115,10 @@ Deno.serve(async (req) => {
       if (qs && now - new Date(qs.window_start).getTime() < WINDOW_MS) { n = qs.fails + 1; ws = qs.window_start; }
       if (n >= 120) { lu = new Date(now + LOCK_MS).toISOString(); n = 0; ws = new Date(now).toISOString(); }
       await admin.from('shop_auth_attempts').upsert({ key: qk, fails: n, window_start: ws, locked_until: lu });
-      let q = admin.from('staff').select('id').eq('active', true);
-      const conds = [`pin.eq.${pin}`];
-      if (pin.length === 4) conds.push(`pin.like.${pin}*`); else conds.push(`pin.eq.${pin.slice(0, 4)}`);
-      q = q.or(conds.join(','));
-      if (body.excludeStaffId) q = q.neq('id', String(body.excludeStaffId));
-      const { data: clash, error } = await q.limit(1);
+      // PINs are stored scrambled (see supabase/pin_hashing_*.sql); the database does the comparison.
+      const { data: inUse, error } = await admin.rpc('pin_in_use', { p_pin: pin, p_exclude: body.excludeStaffId ? String(body.excludeStaffId) : null });
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
-      return json({ ok: true, unique: !(clash && clash.length) });
+      return json({ ok: true, unique: !inUse });
     }
 
 
@@ -192,9 +189,9 @@ Deno.serve(async (req) => {
         const { data: st } = await admin.from('staff').select('id').eq('shop_id', shopId).limit(1);
         if (st && st.length) return json({ ok: false, code: 'exists' }, 409);
       }
-      const conds = [`pin.eq.${apin}`, `pin.eq.${apin.slice(0, 4)}`];
-      const { data: clash } = await admin.from('staff').select('id').eq('active', true).or(conds.join(',')).neq('id', adminId).limit(1);
-      if (clash && clash.length) return json({ ok: false, code: 'pin_taken' }, 409);
+      const { data: taken, error: te } = await admin.rpc('pin_in_use', { p_pin: apin, p_exclude: adminId });
+      if (te) return json({ ok: false, code: 'server_error', detail: te.message }, 500);
+      if (taken) return json({ ok: false, code: 'pin_taken' }, 409);
       // The shop picks a plan at setup and gets a free trial that starts now. After the trial the usual
       // 7-day grace applies, then the shop is suspended until a payment is confirmed (which sets it 'active').
       const PLANS = ['small', 'medium', 'large', 'xl'];
@@ -257,18 +254,21 @@ Deno.serve(async (req) => {
       return json({ ok: false, code: 'suspended', note: shop.license_note || null }, 403);
     }
 
-    const { data: staff } = await admin.from('staff').select('*').eq('shop_id', shopId).eq('pin', pin).eq('active', true).maybeSingle();
-    if (!staff) {
+    // PINs are stored scrambled. Match on the scrambled form (the plain form is also accepted only while old rows are
+    // still being converted; once converted no plain PIN can exist, the database scrambles every write).
+    const { data: ph, error: phe } = await admin.rpc('pin_hash', { p_pin: pin });
+    if (phe || !ph) return json({ ok: false, code: 'server_error', detail: phe?.message || 'hash failed' }, 500);
+    const { data: staffRow } = await admin.from('staff').select('*').eq('shop_id', shopId).eq('active', true).or(`pin.eq.${ph},pin.eq.${pin}`).limit(1).maybeSingle();
+    if (!staffRow) {
       await noteFail(key);
       // Helpful, narrow hints only: is this the start of a longer PIN in THIS shop, or a PIN that exists elsewhere?
-      if (pin.length === 4) {
-        const { data: longer } = await admin.from('staff').select('id').eq('shop_id', shopId).eq('active', true).like('pin', pin + '%').limit(1);
-        if (longer && longer.length) return json({ ok: false, code: 'prefix' }, 401);
-      }
-      const { data: elsewhere } = await admin.from('staff').select('id').eq('pin', pin).eq('active', true).neq('shop_id', shopId).limit(1);
-      if (elsewhere && elsewhere.length) return json({ ok: false, code: 'other_shop' }, 401);
+      const { data: hint } = await admin.rpc('pin_login_hint', { p_shop: shopId, p_pin: pin });
+      if (hint === 'prefix') return json({ ok: false, code: 'prefix' }, 401);
+      if (hint === 'other_shop') return json({ ok: false, code: 'other_shop' }, 401);
       return json({ ok: false, code: 'not_found' }, 401);
     }
+    // The device gets back the PIN it just typed (never the stored scrambled value) so it can sign this person in offline later.
+    const staff = { ...staffRow, pin, pin_h: staffRow.pin };
 
     // Device limit: the PIN is right, but is this phone allowed on the shop's plan? A phone that is already
     // linked passes; a new one takes a free place; if the plan is full it gets no session at all.
