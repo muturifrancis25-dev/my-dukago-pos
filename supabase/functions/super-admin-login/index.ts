@@ -15,15 +15,18 @@ const TOKEN_TTL_S = 2 * 60 * 60;
 const MAX_FAILS = 10, WINDOW_MS = 10 * 60 * 1000, LOCK_MS = 5 * 60 * 1000;
 const enc = new TextEncoder();
 
-function corsHeaders() {
+// Only the official app address may call this from a browser (same rule as shop-auth), so a copy of the
+// app hosted anywhere else cannot even try Platform Administrator PINs. Override with the ALLOWED_ORIGINS
+// secret, comma separated, if the address ever changes.
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
+function corsHeaders(origin: string | null) {
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    'Vary': 'Origin',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
 }
-const json = (b: unknown, status = 200) =>
-  new Response(JSON.stringify(b), { status, headers: { ...corsHeaders(), 'Content-Type': 'application/json' } });
 const b64url = (buf: ArrayBuffer | Uint8Array) => {
   const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let s = ''; u.forEach(c => s += String.fromCharCode(c));
@@ -35,7 +38,12 @@ async function sign(payloadB64: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders() });
+  const origin = req.headers.get('origin');
+  const cors = corsHeaders(origin);
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ ok: false, error: 'This copy of the app is not allowed' }, 403);
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   try {
     const { pin } = await req.json();
     if (!pin || typeof pin !== 'string') return json({ ok: false, error: 'A PIN is required' }, 400);
