@@ -8,13 +8,15 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const enc = new TextEncoder();
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
+// Only the official app address may call this from a browser (same rule as shop-auth and super-admin-login).
+// Override with the ALLOWED_ORIGINS secret, comma separated, if the address ever changes.
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
+const corsFor = (origin: string | null) => ({
+  'Access-Control-Allow-Origin': origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+  'Vary': 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-const json = (b: unknown, status = 200) =>
-  new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+});
 const b64url = (buf: ArrayBuffer) => {
   const u = new Uint8Array(buf); let s = ''; u.forEach(c => s += String.fromCharCode(c));
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -55,6 +57,11 @@ const WRITE_COLS: Record<string, Set<string>> = {
 };
 
 Deno.serve(async (req) => {
+  const origin = req.headers.get('origin');
+  const CORS = corsFor(origin);
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ message: 'This copy of the app is not allowed' }, 403);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
     const b = await req.json().catch(() => ({}));
