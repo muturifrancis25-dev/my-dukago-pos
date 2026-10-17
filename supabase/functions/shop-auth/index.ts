@@ -8,7 +8,8 @@
 //   shop_by_code { code }                    -> { ok, shop:{id,name,active} } | { ok:false, code:'not_found' }
 //   pin_unique { pin, excludeStaffId? }      -> { ok, unique }
 //   business_types {}                        -> { ok, rows }
-//   c2b_list {} / c2b_match { trans_id }      -> (needs staff token) unmatched M-Pesa payments / mark one used
+//   c2b_list {} / c2b_match { trans_id }      -> (needs staff token) this shop's unmatched M-Pesa payments (account number =
+//                                               Shop Code) / mark one used (code already_matched if another till got it first)
 //   rpc { fn, args }                          -> { ok, data }  (licence/device functions that take an Admin PIN, rate limited)
 //   register_shop { shopId, adminId, pin, email? } -> { ok, staff, shop, session }  (first-time setup of a new shop)
 //   shop_name { name }                       -> (Admin token) rename own shop
@@ -135,16 +136,25 @@ Deno.serve(async (req) => {
       const { data: u } = await admin.auth.getUser(tok);
       const md = (u?.user?.app_metadata || {}) as { shop_id?: string; role?: string };
       if (!u?.user || !md.shop_id) return json({ ok: false, code: 'unauthorized' }, 401);
+      // Every shop receives on the same platform paybill, so a payment belongs to a shop only when the customer
+      // typed that shop's Shop Code as the account number. A shop never sees or claims another shop's payments.
+      const { data: own } = await admin.from('shops').select('shop_code').eq('id', md.shop_id).maybeSingle();
+      const shopCode = String(own?.shop_code || '').toUpperCase();
+      if (!shopCode) return json({ ok: false, code: 'unauthorized' }, 401);
       if (action === 'c2b_list') {
         const since = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-        const { data, error } = await admin.from('mpesa_c2b_payments').select('*').eq('matched', false).gt('created_at', since).order('created_at', { ascending: false }).limit(15);
+        const { data, error } = await admin.from('mpesa_c2b_payments').select('trans_id,trans_time,trans_amount,msisdn,first_name,created_at')
+          .eq('matched', false).ilike('bill_ref_number', shopCode).gt('created_at', since).order('created_at', { ascending: false }).limit(15);
         if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
-        return json({ ok: true, rows: data || [] });
+        return json({ ok: true, rows: data || [], account: shopCode });
       }
       const transId = String(body.trans_id || '');
       if (!transId) return json({ ok: false, code: 'bad_request' }, 400);
-      const { error } = await admin.from('mpesa_c2b_payments').update({ matched: true }).eq('trans_id', transId).eq('matched', false);
+      // Only flips a row that is still unmatched, so if two tills pick the same payment only the first one wins.
+      const { data: hit, error } = await admin.from('mpesa_c2b_payments').update({ matched: true })
+        .eq('trans_id', transId).eq('matched', false).ilike('bill_ref_number', shopCode).select('trans_id');
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
+      if (!hit || !hit.length) return json({ ok: false, code: 'already_matched' }, 409);
       return json({ ok: true });
     }
 
