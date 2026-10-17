@@ -2780,7 +2780,7 @@ async function fpStaffNudge(){const n=$('staffEmailNudge');if(!n)return;try{cons
   const sv=$('manageShopSaveEmailBtn');sv&&sv.addEventListener('click',async()=>{const m=$('manageShopAdminEmail'),em=m.value.trim().toLowerCase(),id=m.dataset.staffId;
     if(!id)return toast('No active admin account found for this shop');if(em&&!FP_EMAIL_RE.test(em))return toast('That doesn\'t look like an email address');
     try{const r=await platformFetch(`staff?id=eq.${encodeURIComponent(id)}`,{method:'PATCH',headers:mpesaFunctionHeaders({Prefer:'return=minimal'}),body:JSON.stringify({email:em||null,updated_at:(new Date).toISOString()})});
-      if(!r.ok)return toast('Could not save - check the connection');toast(em?'Admin email saved - they can now use "Forgot PIN?"':'Admin email removed');logAudit('Set a shop admin email (Platform Administrator)',$('manageShopName').textContent)}catch(e){toast('Could not save - check the connection')}});
+      if(!r.ok)return toast(r.status>=400&&r.status<500?'The server refused this change ('+r.status+') - nothing was saved':'Could not save - check the connection');toast(em?'Admin email saved - they can now use "Forgot PIN?"':'Admin email removed');logAudit('Set a shop admin email (Platform Administrator)',$('manageShopName').textContent)}catch(e){toast('Could not save - check the connection')}});
   // Refresh the Staff-page reminder whenever the staff list is drawn.
   if(typeof renderStaffTable==='function'){const orig=renderStaffTable;renderStaffTable=async function(){const r=await orig.apply(this,arguments);fpStaffNudge();return r}}
 })();
