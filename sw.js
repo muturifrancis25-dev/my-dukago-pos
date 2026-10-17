@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v25-2026-10-17';
+const CACHE_NAME = 'my-duka-pos-shell-v26-2026-10-17';
 const SHELL_FILES = [
   './index.html',
   './manifest.json',
@@ -16,7 +16,8 @@ const SHELL_FILES = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
+    // cache:'reload' so the offline copy is fetched fresh, never from the browser's HTTP cache.
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES.map((u) => new Request(u, { cache: 'reload' }))))
   );
   self.skipWaiting();
 });
@@ -25,9 +26,36 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((names) =>
       Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
-    )
+    ).then(() => self.clients.claim()).then(() => sweepOldWindows(true))
   );
-  self.clients.claim();
+});
+
+// Added 17 Oct 2026 (build 92) - reload app windows left open on an old build.
+// Android keeps a home-screen app's window alive for days; switching back to it shows the old
+// page as it was, and builds before 89 never reload themselves. Pages from build 92 on answer a
+// BUILD_PING; any window that doesn't answer is an older build and is reloaded - but only while
+// it is in the background, so nobody's screen changes under them mid-sale.
+const MIN_REPLYING_BUILD = 92;
+let lastSweep = 0;
+function askBuild(client) {
+  return new Promise((resolve) => {
+    const ch = new MessageChannel();
+    const t = setTimeout(() => resolve(0), 3000);
+    ch.port1.onmessage = (e) => { clearTimeout(t); const m = /-(\d+)$/.exec((e.data && e.data.build) || ''); resolve(m ? +m[1] : 0); };
+    try { client.postMessage({ type: 'BUILD_PING' }, [ch.port2]); } catch (e) { clearTimeout(t); resolve(0); }
+  });
+}
+async function sweepOldWindows(force) {
+  if (!force && Date.now() - lastSweep < 60000) return;
+  lastSweep = Date.now();
+  const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  await Promise.all(wins.map(async (c) => {
+    if (await askBuild(c) >= MIN_REPLYING_BUILD) return;
+    if (c.visibilityState === 'hidden' && c.navigate) { try { await c.navigate(c.url); } catch (e) {} }
+  }));
+}
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SWEEP_OLD_WINDOWS') event.waitUntil(sweepOldWindows(true));
 });
 
 // Network-first for the shell so an online cashier always gets the latest
@@ -38,6 +66,9 @@ self.addEventListener('activate', (event) => {
 // though this network-first logic looks correct.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // Any open, up-to-date page syncs every few seconds, so this keeps checking (at most once a
+  // minute) for old windows sitting in the background.
+  if (Date.now() - lastSweep > 60000) event.waitUntil(sweepOldWindows(false).catch(() => {}));
 
   const isNavigation = event.request.mode === 'navigate';
 
