@@ -4,6 +4,9 @@ alter table public.shops add column if not exists plan text not null default 'sm
 alter table public.shops add column if not exists license_expires_at timestamptz;
 alter table public.shops drop constraint if exists shops_plan_check;
 alter table public.shops add constraint shops_plan_check check (plan in ('small','medium','large'));
+-- Later widened live for the unlimited-devices plan (KSh 2,500):
+alter table public.shops drop constraint if exists shops_plan_check;
+alter table public.shops add constraint shops_plan_check check (plan in ('small','medium','large','xl'));
 
 create table if not exists public.shop_payments (
   id uuid primary key default gen_random_uuid(),

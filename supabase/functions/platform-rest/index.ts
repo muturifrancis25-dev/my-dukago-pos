@@ -48,7 +48,7 @@ const WRITE_COLS: Record<string, Set<string>> = {
   shops: new Set(['active', 'license_status', 'license_note', 'plan', 'license_expires_at', 'shop_code', 'name']),
   shop_payments: new Set(['shop_id', 'amount', 'months', 'plan', 'reference', 'recorded_by', 'extends_to']),
   shop_settings: new Set(['shop_id', 'key', 'value', 'updated_at']),
-  staff: new Set(['pin', 'updated_at']),
+  staff: new Set(['pin', 'email', 'updated_at']),   // email: Platform Admin sets a shop Admin's address for "Forgot PIN?"
   platform_business_types: new Set(['id', 'label', 'emoji', 'description', 'cats', 'colors', 'created_by']),
   license_payment_requests: new Set(['status', 'decided_by', 'decision_note']),
   shop_devices: new Set(['status', 'over_plan', 'removed_by', 'removed_at', 'last_seen']),

@@ -6,6 +6,8 @@
 // v5: on success it ALSO returns a short-lived signed platform token ({sub,name,exp} + HMAC), which
 // the `platform-rest` function requires for every platform-level read/write. Wrong PINs are now
 // rate limited (10 failures in 10 minutes locks the login for 5 minutes).
+// v6 (build 94): attempts are counted inside the database (race-proof, see supabase/rate_limits.sql), per caller
+// address as well as overall, and the PIN is stored scrambled (keyed hash), compared via pin_hash().
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -48,22 +50,28 @@ Deno.serve(async (req) => {
     const { pin } = await req.json();
     if (!pin || typeof pin !== 'string') return json({ ok: false, error: 'A PIN is required' }, 400);
 
-    const key = 'platform-login';
-    const { data: ls } = await admin.from('shop_auth_attempts').select('*').eq('key', key).maybeSingle();
+    if (pin.length > 64) return json({ ok: false, error: 'Incorrect PIN' }, 401);
     const now = Date.now();
-    if (ls?.locked_until && new Date(ls.locked_until).getTime() > now) {
+    const ip = (req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || (req.headers.get('x-forwarded-for') || '').split(',')[0] || 'unknown').trim().slice(0, 64);
+    // Counted before the PIN is checked, per address and overall; a good sign-in clears this address's counter.
+    // The overall cap is higher, so one person on their own cannot lock the real administrator out.
+    const hit = async (key: string, limit: number) => {
+      const { data, error } = await admin.rpc('auth_attempt_hit', { p_key: key, p_window_s: WINDOW_MS / 1000, p_limit: limit, p_lock_s: LOCK_MS / 1000 });
+      if (error) throw new Error('rate limit: ' + error.message);
+      return !!(data as { allowed?: boolean })?.allowed;
+    };
+    const ipKey = 'platform-login:' + ip;
+    if (!(await hit(ipKey, MAX_FAILS)) || !(await hit('platform-login', 60))) {
       return json({ ok: false, error: 'Too many wrong attempts — try again in a few minutes' }, 429);
     }
 
-    const { data, error } = await admin.from('platform_admins').select('id, name, email, phone, active').eq('pin', pin).maybeSingle();
-    if (error || !data || data.active === false) {
-      let fails = 1, window_start = new Date(now).toISOString(), locked_until: string | null = null;
-      if (ls && now - new Date(ls.window_start).getTime() < WINDOW_MS) { fails = ls.fails + 1; window_start = ls.window_start; }
-      if (fails >= MAX_FAILS) { locked_until = new Date(now + LOCK_MS).toISOString(); fails = 0; window_start = new Date(now).toISOString(); }
-      await admin.from('shop_auth_attempts').upsert({ key, fails, window_start, locked_until });
-      return json({ ok: false, error: 'Incorrect PIN' }, 401);
-    }
-    await admin.from('shop_auth_attempts').upsert({ key, fails: 0, window_start: new Date(now).toISOString(), locked_until: null });
+    const { data: ph, error: he } = await admin.rpc('pin_hash', { p_pin: pin });
+    if (he || !ph) return json({ ok: false, error: 'Could not check the PIN' }, 500);
+    // The plain form is still accepted only until supabase/rate_limits.sql has scrambled the stored PIN.
+    let { data, error } = await admin.from('platform_admins').select('id, name, email, phone, active').eq('pin', ph).maybeSingle();
+    if (!error && !data) ({ data, error } = await admin.from('platform_admins').select('id, name, email, phone, active').eq('pin', pin).maybeSingle());
+    if (error || !data || data.active === false) return json({ ok: false, error: 'Incorrect PIN' }, 401);
+    await admin.rpc('auth_attempt_clear', { p_key: ipKey });
 
     const exp = Math.floor(now / 1000) + TOKEN_TTL_S;
     const payloadB64 = b64url(enc.encode(JSON.stringify({ sub: data.id, name: data.name, exp })));

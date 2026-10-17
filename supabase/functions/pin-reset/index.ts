@@ -55,20 +55,12 @@ const normEmail = (e: unknown) => String(e || '').trim().toLowerCase().slice(0, 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
-// Counter helper on the existing shop_auth_attempts table (fails = count inside the window).
+// Counter on the shop_auth_attempts table, counted inside the database so requests sent at the same moment are all
+// counted (see supabase/rate_limits.sql). Returns false once the limit is passed.
 async function bump(key: string, windowMs: number, limit: number, lockMs: number): Promise<boolean> {
-  const { data: row } = await admin.from('shop_auth_attempts').select('*').eq('key', key).maybeSingle();
-  const now = Date.now();
-  if (row?.locked_until && new Date(row.locked_until).getTime() > now) return false;
-  let n = 1, ws = new Date(now).toISOString(), lu: string | null = null;
-  if (row && now - new Date(row.window_start).getTime() < windowMs) { n = row.fails + 1; ws = row.window_start; }
-  if (n > limit) { lu = new Date(now + lockMs).toISOString(); n = 0; ws = new Date(now).toISOString(); }
-  await admin.from('shop_auth_attempts').upsert({ key, fails: n, window_start: ws, locked_until: lu });
-  return lu === null;
-}
-async function isLocked(key: string) {
-  const { data } = await admin.from('shop_auth_attempts').select('locked_until').eq('key', key).maybeSingle();
-  return !!(data?.locked_until && new Date(data.locked_until).getTime() > Date.now());
+  const { data, error } = await admin.rpc('auth_attempt_hit', { p_key: key, p_window_s: Math.round(windowMs / 1000), p_limit: limit, p_lock_s: Math.round(lockMs / 1000) });
+  if (error) throw new Error('rate limit: ' + error.message);
+  return !!(data as { allowed?: boolean })?.allowed;
 }
 
 async function findShop(body: Record<string, unknown>) {
@@ -144,23 +136,25 @@ Deno.serve(async (req) => {
 
     // confirm
     const shopFailKey = `reset_bad:${shop.id}`;
-    if (await isLocked(shopFailKey)) return json({ ok: false, code: 'too_many' }, 429);
+    if (!(await bump(shopFailKey, 10 * 60 * 1000, SHOP_CONFIRM_FAILS, 10 * 60 * 1000))) return json({ ok: false, code: 'too_many' }, 429);
     const code = String(body.code || '').replace(/\D/g, '');
     const newPin = String(body.newPin || '');
     if (code.length !== 6) return json({ ok: false, code: 'bad_code', attempts_left: null }, 400);
     const { data: rows } = await admin.from('pin_resets').select('*').eq('shop_id', shop.id).eq('email', email).is('used_at', null).order('created_at', { ascending: false }).limit(1);
     const rr = rows && rows[0];
     if (!rr) return json({ ok: false, code: 'expired' }, 400);
-    if (new Date(rr.expires_at).getTime() < Date.now() || rr.attempts >= MAX_CODE_TRIES) {
-      await admin.from('pin_resets').update({ used_at: new Date().toISOString() }).eq('id', rr.id);
-      return json({ ok: false, code: 'expired' }, 400);
-    }
+    // One try of this code is used up BEFORE comparing (in the database, so parallel guesses can't share a try);
+    // a right code gives the try back. A spent or expired code is marked used.
+    const { data: tries, error: te } = await admin.rpc('pin_reset_try', { p_id: rr.id, p_max: MAX_CODE_TRIES });
+    if (te) return json({ ok: false, code: 'server_error', detail: te.message }, 500);
+    if (tries == null) return json({ ok: false, code: 'expired' }, 400);
     if (rr.code_hash !== await codeHash(shop.id, email, code)) {
-      const attempts = rr.attempts + 1;
-      await admin.from('pin_resets').update({ attempts, ...(attempts >= MAX_CODE_TRIES ? { used_at: new Date().toISOString() } : {}) }).eq('id', rr.id);
-      await bump(shopFailKey, 10 * 60 * 1000, SHOP_CONFIRM_FAILS, 10 * 60 * 1000);
+      const attempts = Number(tries);
+      if (attempts >= MAX_CODE_TRIES) await admin.from('pin_resets').update({ used_at: new Date().toISOString() }).eq('id', rr.id);
       return json({ ok: false, code: attempts >= MAX_CODE_TRIES ? 'expired' : 'bad_code', attempts_left: Math.max(0, MAX_CODE_TRIES - attempts) }, 400);
     }
+    await admin.rpc('pin_reset_try', { p_id: rr.id, p_max: MAX_CODE_TRIES, p_refund: true });
+    await admin.rpc('auth_attempt_clear', { p_key: shopFailKey });
     // Code is right. Which person?
     const people = await staffWithEmail(shop.id, email);
     if (!people.length) return json({ ok: false, code: 'expired' }, 400);
@@ -180,7 +174,7 @@ Deno.serve(async (req) => {
     await admin.from('pin_resets').update({ used_at: new Date().toISOString() }).eq('shop_id', shop.id).eq('email', email).is('used_at', null);
     // A fresh start for this shop's sign-in lock, so the person isn't still locked out from the guessing that
     // probably led them here.
-    await admin.from('shop_auth_attempts').upsert({ key: 'shop:' + shop.id, fails: 0, window_start: new Date().toISOString(), locked_until: null });
+    await admin.rpc('auth_attempt_clear', { p_key: 'shop:' + shop.id });
     if (!testMode && BREVO_KEY && MAIL_FROM) {
       await sendMail(email, 'Your My DukaGO POS PIN was changed',
         `Hi ${person.name},\n\nThe PIN for your ${person.role} account at ${shop.name} was just changed using a code sent to this email. If this wasn't you, tell your shop Admin straight away.`,
