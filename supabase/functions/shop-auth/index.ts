@@ -50,20 +50,54 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
-async function lockState(key: string) {
-  const { data } = await admin.from('shop_auth_attempts').select('*').eq('key', key).maybeSingle();
-  return data as { fails: number; window_start: string; locked_until: string | null } | null;
-}
-async function noteFail(key: string) {
-  const row = await lockState(key);
-  const now = Date.now();
-  let fails = 1, window_start = new Date(now).toISOString(), locked_until: string | null = null;
-  if (row && now - new Date(row.window_start).getTime() < WINDOW_MS) { fails = row.fails + 1; window_start = row.window_start; }
-  if (fails >= MAX_FAILS) { locked_until = new Date(now + LOCK_MS).toISOString(); fails = 0; window_start = new Date(now).toISOString(); }
-  await admin.from('shop_auth_attempts').upsert({ key, fails, window_start, locked_until });
+// Counts one attempt against a key inside the database (row locked, so requests sent at the same moment are all
+// counted - see supabase/rate_limits.sql). Counted BEFORE the PIN is checked; a good sign-in clears it again.
+async function hit(key: string, limit = MAX_FAILS, windowMs = WINDOW_MS, lockMs = LOCK_MS) {
+  const { data, error } = await admin.rpc('auth_attempt_hit', { p_key: key, p_window_s: Math.round(windowMs / 1000), p_limit: limit, p_lock_s: Math.round(lockMs / 1000) });
+  if (error) throw new Error('rate limit: ' + error.message);
+  const d = data as { allowed: boolean; retry_seconds: number };
+  return { allowed: !!d?.allowed, retry: Number(d?.retry_seconds || 0) };
 }
 async function clearFails(key: string) {
-  await admin.from('shop_auth_attempts').upsert({ key, fails: 0, window_start: new Date().toISOString(), locked_until: null });
+  await admin.rpc('auth_attempt_clear', { p_key: key });
+}
+async function lockedFor(key: string) {
+  const { data } = await admin.from('shop_auth_attempts').select('locked_until').eq('key', key).maybeSingle();
+  const t = data?.locked_until ? new Date(data.locked_until).getTime() - Date.now() : 0;
+  return t > 0 ? Math.ceil(t / 1000) : 0;
+}
+// Per-address limits are kept generous: many phones on one mobile network can share an address.
+const IP_FAILS = 40;
+// The caller's address, for per-address limits (one person cannot spread guesses over many shops).
+function clientIp(req: Request) {
+  return (req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || (req.headers.get('x-forwarded-for') || '').split(',')[0] || 'unknown').trim().slice(0, 64);
+}
+async function staffClaims(req: Request) {
+  const tok = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!tok || tok === ANON_KEY) return null;
+  const { data: u } = await admin.auth.getUser(tok);
+  const md = (u?.user?.app_metadata || {}) as { shop_id?: string; role?: string };
+  return u?.user && md.shop_id ? md : null;
+}
+
+// What register_device would answer for a phone, without saving anything (used before anyone has signed in).
+async function devicePreview(shopId: string, deviceId: string) {
+  const { data: shop } = await admin.from('shops').select('plan').eq('id', shopId).maybeSingle();
+  if (!shop) return { ok: false, code: 'no_shop' };
+  const plan = shop.plan || 'small';
+  const { data: limit } = await admin.rpc('plan_device_limit', { p_plan: plan });
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { data: rows } = await admin.from('shop_devices').select('device_id,status,last_seen').eq('shop_id', shopId);
+  const mine = (rows || []).find(r => r.device_id === deviceId.slice(0, 80));
+  const count = (rows || []).filter(r => r.status === 'active' && r.last_seen > since && r.device_id !== deviceId).length;
+  if (mine && mine.status === 'active' && mine.last_seen > since) return { ok: true, count, limit, plan, preview: true };
+  if (mine && mine.status === 'removed') return { ok: false, code: 'needs_admin', count, limit, plan };
+  if (count < Number(limit)) return { ok: true, count: count + 1, limit, plan, preview: true };
+  if (plan === 'large') {
+    const { data: price } = await admin.rpc('plan_monthly_price', { p_plan: 'xl' });
+    return { ok: false, code: 'needs_upgrade', count, limit, plan, price };
+  }
+  return { ok: false, code: 'limit', count, limit, plan };
 }
 
 type StaffRow = { id: string; shop_id: string; role: string; [k: string]: unknown };
@@ -98,6 +132,8 @@ Deno.serve(async (req) => {
     if (action === 'shop_by_code') {
       const code = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (code.length !== 5) return json({ ok: false, code: 'bad_request' }, 400);
+      // Rate limited per address so Shop Codes cannot be found by trying them one after another.
+      if (!(await hit('code:' + clientIp(req), 60)).allowed) return json({ ok: false, code: 'locked' }, 429);
       const { data } = await admin.from('shops').select('id,name,active,license_status').eq('shop_code', code).maybeSingle();
       if (!data) return json({ ok: false, code: 'not_found' }, 404);
       return json({ ok: true, shop: { id: data.id, name: data.name, active: data.active !== false } });
@@ -108,14 +144,11 @@ Deno.serve(async (req) => {
       // Answers only yes/no (never whose PIN it is), and is rate limited so it cannot be used to map PINs.
       const pin = String(body.pin || '');
       if (!/^(\d{4}|\d{6})$/.test(pin)) return json({ ok: false, code: 'bad_request' }, 400);
-      const qk = 'pinq';
-      const qs = await lockState(qk);
-      if (qs?.locked_until && new Date(qs.locked_until).getTime() > Date.now()) return json({ ok: false, code: 'locked' }, 429);
-      const now = Date.now();
-      let n = 1, ws = new Date(now).toISOString(), lu: string | null = null;
-      if (qs && now - new Date(qs.window_start).getTime() < WINDOW_MS) { n = qs.fails + 1; ws = qs.window_start; }
-      if (n >= 120) { lu = new Date(now + LOCK_MS).toISOString(); n = 0; ws = new Date(now).toISOString(); }
-      await admin.from('shop_auth_attempts').upsert({ key: qk, fails: n, window_start: ws, locked_until: lu });
+      // Signed-in staff are limited per shop; before sign-in (new shop setup) it is a tighter limit per address. It used to be
+      // one counter for the whole platform, so one person could block it for everyone or use it to map which PINs exist.
+      const who = await staffClaims(req);
+      const qk = who ? 'pinq:shop:' + who.shop_id : 'pinq:ip:' + clientIp(req);
+      if (!(await hit(qk, who ? 120 : 30)).allowed) return json({ ok: false, code: 'locked' }, 429);
       // PINs are stored scrambled (see supabase/pin_hashing_*.sql); the database does the comparison.
       const { data: inUse, error } = await admin.rpc('pin_in_use', { p_pin: pin, p_exclude: body.excludeStaffId ? String(body.excludeStaffId) : null });
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
@@ -132,10 +165,8 @@ Deno.serve(async (req) => {
 
     if (action === 'c2b_list' || action === 'c2b_match') {
       // Unmatched direct M-Pesa payments. Needs a signed-in staff token (the one shop-auth issued).
-      const tok = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-      const { data: u } = await admin.auth.getUser(tok);
-      const md = (u?.user?.app_metadata || {}) as { shop_id?: string; role?: string };
-      if (!u?.user || !md.shop_id) return json({ ok: false, code: 'unauthorized' }, 401);
+      const md = await staffClaims(req);
+      if (!md) return json({ ok: false, code: 'unauthorized' }, 401);
       // Every shop receives on the same platform paybill, so a payment belongs to a shop only when the customer
       // typed that shop's Shop Code as the account number. A shop never sees or claims another shop's payments.
       const { data: own } = await admin.from('shops').select('shop_code').eq('id', md.shop_id).maybeSingle();
@@ -151,10 +182,10 @@ Deno.serve(async (req) => {
       const transId = String(body.trans_id || '');
       if (!transId) return json({ ok: false, code: 'bad_request' }, 400);
       // Only flips a row that is still unmatched, so if two tills pick the same payment only the first one wins.
-      const { data: hit, error } = await admin.from('mpesa_c2b_payments').update({ matched: true })
+      const { data: claimed, error } = await admin.from('mpesa_c2b_payments').update({ matched: true })
         .eq('trans_id', transId).eq('matched', false).ilike('bill_ref_number', shopCode).select('trans_id');
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
-      if (!hit || !hit.length) return json({ ok: false, code: 'already_matched' }, 409);
+      if (!claimed || !claimed.length) return json({ ok: false, code: 'already_matched' }, 409);
       return json({ ok: true });
     }
 
@@ -170,13 +201,16 @@ Deno.serve(async (req) => {
       if (!/^[0-9a-f-]{36}$/i.test(sid)) return json({ ok: false, code: 'bad_request' }, 400);
       const key = 'shop:' + sid;
       const usesPin = args.p_pin != null || args.p_admin_pin != null;
-      if (usesPin) {
-        const ls = await lockState(key);
-        if (ls?.locked_until && new Date(ls.locked_until).getTime() > Date.now()) return json({ ok: true, data: { ok: false, code: 'too_many' } });
+      if (fn === 'register_device' && !usesPin) {
+        // Linking a phone without the Admin PIN needs that shop's signed-in staff token. Before anyone has signed in
+        // the phone only gets a look (is there a free place?) and nothing is saved: the PIN sign-in itself links the
+        // phone and enforces the plan limit. Without this, anyone with a shop's id could fill all its device places.
+        const md = await staffClaims(req);
+        if (!md || md.shop_id !== sid) return json({ ok: true, data: await devicePreview(sid, String(args.p_device_id || '')) });
       }
+      if (usesPin && !(await hit(key)).allowed) return json({ ok: true, data: { ok: false, code: 'too_many' } });
       const { data, error } = await admin.rpc(fn, args);
       if (error) return json({ ok: false, code: 'server_error', detail: error.message }, 500);
-      if (usesPin && data && (data as { code?: string }).code === 'bad_pin') await noteFail(key);
       return json({ ok: true, data });
     }
 
@@ -185,14 +219,7 @@ Deno.serve(async (req) => {
       // (The browser can no longer write to the shops/staff tables directly once the database is locked.)
       const shopId = String(body.shopId || ''), adminId = String(body.adminId || ''), apin = String(body.pin || '');
       if (!/^[0-9a-f-]{36}$/i.test(shopId) || adminId !== 'u_admin_' + shopId || !/^\d{6}$/.test(apin)) return json({ ok: false, code: 'bad_request' }, 400);
-      const rk = 'register';
-      const rs = await lockState(rk);
-      if (rs?.locked_until && new Date(rs.locked_until).getTime() > Date.now()) return json({ ok: false, code: 'locked' }, 429);
-      const nowMs = Date.now();
-      let rn = 1, rws = new Date(nowMs).toISOString(), rlu: string | null = null;
-      if (rs && nowMs - new Date(rs.window_start).getTime() < WINDOW_MS) { rn = rs.fails + 1; rws = rs.window_start; }
-      if (rn >= 30) { rlu = new Date(nowMs + LOCK_MS).toISOString(); rn = 0; rws = new Date(nowMs).toISOString(); }
-      await admin.from('shop_auth_attempts').upsert({ key: rk, fails: rn, window_start: rws, locked_until: rlu });
+      if (!(await hit('register:' + clientIp(req), 20)).allowed || !(await hit('register', 300)).allowed) return json({ ok: false, code: 'locked' }, 429);
 
       const { data: ex } = await admin.from('shops').select('id').eq('id', shopId).maybeSingle();
       if (ex) {
@@ -252,11 +279,13 @@ Deno.serve(async (req) => {
     }
     if (!shopId || !/^[0-9a-f-]{36}$/i.test(shopId)) return json({ ok: false, code: 'not_found' }, 404);
 
-    const key = 'shop:' + shopId;
-    const ls = await lockState(key);
-    if (ls?.locked_until && new Date(ls.locked_until).getTime() > Date.now()) {
-      return json({ ok: false, code: 'locked', retry_seconds: Math.ceil((new Date(ls.locked_until).getTime() - Date.now()) / 1000) }, 429);
-    }
+    // Every attempt is counted for the shop before the PIN is checked (cleared by a good sign-in); wrong PINs are also
+    // counted for the caller's address, so one person cannot spread guesses over many shops.
+    const key = 'shop:' + shopId, ipKey = 'ipfail:' + clientIp(req);
+    const ipWait = await lockedFor(ipKey);
+    if (ipWait) return json({ ok: false, code: 'locked', retry_seconds: ipWait }, 429);
+    const att = await hit(key);
+    if (!att.allowed) return json({ ok: false, code: 'locked', retry_seconds: att.retry }, 429);
 
     const { data: shop } = await admin.from('shops').select('id,name,active,license_status,license_note').eq('id', shopId).maybeSingle();
     if (!shop) return json({ ok: false, code: 'not_found' }, 404);
@@ -270,13 +299,14 @@ Deno.serve(async (req) => {
     if (phe || !ph) return json({ ok: false, code: 'server_error', detail: phe?.message || 'hash failed' }, 500);
     const { data: staffRow } = await admin.from('staff').select('*').eq('shop_id', shopId).eq('active', true).or(`pin.eq.${ph},pin.eq.${pin}`).limit(1).maybeSingle();
     if (!staffRow) {
-      await noteFail(key);
+      await hit(ipKey, IP_FAILS);
       // Helpful, narrow hints only: is this the start of a longer PIN in THIS shop, or a PIN that exists elsewhere?
       const { data: hint } = await admin.rpc('pin_login_hint', { p_shop: shopId, p_pin: pin });
       if (hint === 'prefix') return json({ ok: false, code: 'prefix' }, 401);
       if (hint === 'other_shop') return json({ ok: false, code: 'other_shop' }, 401);
       return json({ ok: false, code: 'not_found' }, 401);
     }
+    await clearFails(key); // the PIN was right - a blocked device or a later hiccup must not count as a wrong guess
     // The device gets back the PIN it just typed (never the stored scrambled value) so it can sign this person in offline later.
     const staff = { ...staffRow, pin, pin_h: staffRow.pin };
 
@@ -298,7 +328,6 @@ Deno.serve(async (req) => {
     const issued = await issueSession(staff as StaffRow);
     if (!issued.session) return json({ ok: false, code: 'server_error', detail: issued.error }, 500);
 
-    await clearFails(key);
     return json({
       ok: true,
       staff,
