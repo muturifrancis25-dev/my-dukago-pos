@@ -1,7 +1,8 @@
 # Security lockdown plan (Supabase)
 
-Status (2026-10-07): policies written and passing 33 local isolation tests (supabase/tests/rls_isolation_test.mjs).
-NOT applied to the live database. Still to build: `shop-login` / `shop-register` edge functions and the app release that uses them.
+Status (2026-10-17): APPLIED to the live database (per-shop policies on every shop table, anon has no table access),
+signed-in sessions come from the `shop-auth` edge function. Kept below as the design record.
+Earlier status (2026-10-07): policies written and passing 33 local isolation tests (supabase/tests/rls_isolation_test.mjs).
 
 ## Problem
 Every shop table has an `allow all for anon` policy (`USING (true)`), and the anon key ships in

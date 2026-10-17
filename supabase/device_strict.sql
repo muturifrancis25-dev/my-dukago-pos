@@ -52,7 +52,7 @@ begin
 
   if p_admin_pin is not null then
     select t.name into v_admin from public.staff t
-     where t.shop_id::text = p_shop_id and t.pin = p_admin_pin and t.role = 'admin' and t.active is not false
+     where t.shop_id::text = p_shop_id and public.pin_matches(t.pin, p_admin_pin) and t.role = 'admin' and t.active is not false
      limit 1;
     if v_admin is null then
       return jsonb_build_object('ok', false, 'code', 'bad_pin', 'count', v_count, 'limit', v_limit, 'plan', v_plan);

@@ -17,7 +17,9 @@
 //        codes: bad_request | not_found | prefix | other_shop | suspended | locked | device_blocked (plan's device limit reached)
 //
 // PINs are stored scrambled (keyed HMAC, key held in Supabase Vault) - see supabase/pin_hashing_a.sql / _b.sql.
-// Brute-force guard: 10 failed PINs for one shop within 10 minutes locks that shop's logins for 5 minutes.
+// Brute-force guard: more than 10 sign-in attempts for one shop within 10 minutes (a right PIN resets the count) locks
+// that shop's online sign-in for 5 minutes; 40 wrong PINs from one address lock that address. Counted in the database
+// (supabase/rate_limits.sql), so requests sent at the same moment cannot slip past.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
