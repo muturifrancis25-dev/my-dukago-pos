@@ -30,7 +30,7 @@ async function mkDevice(name){
   const ctx=await b.newContext({viewport:{width:420,height:820}}); const page=await ctx.newPage();
   const errs=[]; page.on('pageerror',e=>{errs.push(e.message);console.log(name,'PAGEERR',e.message)});
   page.on('console',m=>{ if(m.type()==='error'&&!/Failed to load resource|net::/.test(m.text())) console.log(name,'CONSOLE',m.text().slice(0,160)); });
-  await ctx.route(/muturifrancis25-dev\.github\.io/, r=>{ const p=new URL(r.request().url()).pathname.replace('/my-dukago-pos/','')||'index.html'; try{ r.fulfill({status:200,contentType:p.endsWith('.js')?'application/javascript':p.endsWith('.json')?'application/json':'text/html',body:fs.readFileSync('/home/claude/my-dukago-pos/'+p)}); }catch(e){ r.fulfill({status:404,body:''}); } });
+  await ctx.route(/my-duka-go\.github\.io/, r=>{ const p=new URL(r.request().url()).pathname.replace('/my-dukago-pos/','')||'index.html'; try{ r.fulfill({status:200,contentType:p.endsWith('.js')?'application/javascript':p.endsWith('.json')?'application/json':'text/html',body:fs.readFileSync('/home/claude/my-dukago-pos/'+p)}); }catch(e){ r.fulfill({status:404,body:''}); } });
   await ctx.route(/supabase\.co/, r=>{ const rq=r.request(), u=rq.url(), body=rq.postData()||'';
     const ok=(o,st=200)=>r.fulfill({status:st,contentType:'application/json',body:JSON.stringify(o)});
     if(u.includes('/functions/v1/shop-auth')){ const j=JSON.parse(body||'{}');
@@ -39,7 +39,7 @@ async function mkDevice(name){
       return ok({ok:true,rows:[]}); }
     if(u.includes('/rest/v1/')){ const [st,d]=rest(u,rq.method(),body,rq.headers()['prefer']); return r.fulfill({status:st,contentType:'application/json',body:JSON.stringify(d)}); }
     ok([]); });
-  await page.goto('https://muturifrancis25-dev.github.io/my-dukago-pos/index.html'); await page.waitForTimeout(2000);
+  await page.goto('https://my-duka-go.github.io/my-dukago-pos/index.html'); await page.waitForTimeout(2000);
   await page.evaluate(async(S)=>{ await put('settings',{key:'shop_id',value:S}); },SHOP);
   await page.reload(); await page.waitForTimeout(2500);
   return {ctx,page,errs};
