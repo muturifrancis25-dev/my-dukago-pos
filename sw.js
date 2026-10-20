@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v35-2026-10-20-101';
+const CACHE_NAME = 'my-duka-pos-shell-v36-2026-10-20-102';
 const SHELL_FILES = [
   './index.html',
   './manifest.json',
@@ -25,7 +25,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((names) =>
-      Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
+      // Only the POS's own old caches: other DukaGO apps (Clinic on the go) live on the same web address.
+      Promise.all(names.filter((n) => n.startsWith('my-duka-pos-shell-') && n !== CACHE_NAME).map((n) => caches.delete(n)))
     ).then(() => self.clients.claim()).then(() => sweepOldWindows(true))
   );
 });
