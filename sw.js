@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v37-2026-10-20-104';
+const CACHE_NAME = 'my-duka-pos-shell-v38-2026-10-20-105';
 const SHELL_FILES = [
   './index.html',
   './manifest.json',
