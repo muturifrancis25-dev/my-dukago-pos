@@ -20,7 +20,7 @@ const enc = new TextEncoder();
 // Only the official app address may call this from a browser (same rule as shop-auth), so a copy of the
 // app hosted anywhere else cannot even try Platform Administrator PINs. Override with the ALLOWED_ORIGINS
 // secret, comma separated, if the address ever changes.
-const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://my-duka-go.github.io,https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
 function corsHeaders(origin: string | null) {
   return {
     'Access-Control-Allow-Origin': origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],

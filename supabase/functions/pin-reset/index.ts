@@ -38,7 +38,7 @@ const REQ_PER_EMAIL = 3, REQ_WINDOW_MS = 30 * 60 * 1000;   // 3 codes per email 
 const REQ_GLOBAL = 200, GLOBAL_WINDOW_MS = 10 * 60 * 1000; // whole-platform cap against abuse
 const SHOP_CONFIRM_FAILS = 15;                               // wrong codes per shop per 10 min before a pause
 
-const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://my-duka-go.github.io,https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
 const corsFor = (origin: string | null) => ({
   'Access-Control-Allow-Origin': origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
   'Vary': 'Origin',

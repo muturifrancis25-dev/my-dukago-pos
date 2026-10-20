@@ -42,7 +42,7 @@ const passwordFor = (staffId: string) => hmacHex(SERVICE_KEY, 'staff-pw:' + staf
 // Only the official app address may call this function from a browser. Browsers always send an Origin header
 // on these requests, so a copy of the app hosted anywhere else is refused here even if someone gets past the
 // client-side host lock. (Override with the ALLOWED_ORIGINS secret, comma separated, if the address ever changes.)
-const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || 'https://my-duka-go.github.io,https://muturifrancis25-dev.github.io').split(',').map(x => x.trim()).filter(Boolean);
 const CORS = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGINS[0],
   'Vary': 'Origin',
@@ -123,7 +123,7 @@ async function issueSession(staff: StaffRow) {
   return { session: { access_token: sess.session.access_token, refresh_token: sess.session.refresh_token, expires_at: sess.session.expires_at } };
 }
 
-Deno.serve(async (req) => {
+const handle = async (req: Request) => {
   const origin = req.headers.get('origin');
   if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ ok: false, code: 'forbidden_origin' }, 403);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -339,4 +339,12 @@ Deno.serve(async (req) => {
   } catch (e) {
     return json({ ok: false, code: 'server_error', detail: String(e) }, 500);
   }
+};
+
+// each allowed address gets its own address back in the CORS header (the browser checks it matches)
+Deno.serve(async (req) => {
+  const res = await handle(req);
+  const origin = req.headers.get('origin');
+  if (origin && ALLOWED_ORIGINS.includes(origin)) res.headers.set('Access-Control-Allow-Origin', origin);
+  return res;
 });
