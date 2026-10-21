@@ -4,7 +4,7 @@
 // app's own files — sales/stock data lives in IndexedDB (see index.html)
 // and is untouched by this file.
 
-const CACHE_NAME = 'my-duka-pos-shell-v48-2026-10-21-122';
+const CACHE_NAME = 'my-duka-pos-shell-v48-2026-10-21-123';
 const SHELL_FILES = [
   './index.html',
   './manifest.json',
@@ -72,30 +72,44 @@ self.addEventListener('fetch', (event) => {
   if (Date.now() - lastSweep > 60000) event.waitUntil(sweepOldWindows(false).catch(() => {}));
 
   const isNavigation = event.request.mode === 'navigate';
+  const url = new URL(event.request.url);
 
-  event.respondWith(
-    fetch(event.request, { cache: 'no-store' })
-      .then((response) => {
-        // Only a genuine success is ever saved or served as "the app". A 404/5xx from the host
-        // (e.g. GitHub Pages being unpublished) is a successful *fetch* but not a usable page —
-        // caching it would overwrite the good offline copy and leave offline phones showing
-        // "File not found". Throwing sends it down the .catch below to the last good cached copy.
-        if(!response.ok && !response.redirected && response.type !== 'opaque') throw new Error('bad response '+response.status);
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      })
-      .catch(() =>
-        // ignoreSearch matters here — a home-screen icon can launch with an
-        // extra query string (e.g. some Android PWA wrappers append one),
-        // which would otherwise miss an exact cache match even though the
-        // shell is cached. For a page-load itself, always fall back to the
-        // cached index.html specifically (this is a single-page app — there
-        // is nothing else to navigate to), not just a same-URL cache match.
-        caches.match(event.request, { ignoreSearch: true })
-          .then((cached) => cached || (isNavigation ? caches.match('./index.html') : undefined))
-      )
-  );
+  // Fonts: the saved copy straight away (refreshed in the background), so a slow or missing
+  // connection never leaves the screen white while it waits for Google.
+  if (/fonts\.(googleapis|gstatic)\.com$/.test(url.hostname)) {
+    event.respondWith(caches.open(CACHE_NAME).then(async (cache) => {
+      const hit = await cache.match(event.request);
+      const net = fetch(event.request).then((r) => { if (r && (r.ok || r.type === 'opaque')) cache.put(event.request, r.clone()); return r; }).catch(() => hit);
+      if (hit) { event.waitUntil(net.catch(() => {})); return hit; }
+      return net;
+    }));
+    return;
+  }
+
+  // Shop data (the server, other sites) is never answered from a saved copy - the page keeps its own
+  // records and must always see the server's real, current answer (or a clear failure when offline).
+  if (url.origin !== self.location.origin) return;
+
+  // The app itself: the network first so an online cashier gets the latest build, but on a weak
+  // signal it waits at most 3 seconds - then the saved copy opens at once and the new copy is saved
+  // in the background for next time. Only a genuine success is ever saved (a 404/5xx from the host
+  // would otherwise overwrite the good offline copy).
+  const fromNet = fetch(event.request, { cache: 'no-store' }).then((response) => {
+    if (!response.ok && !response.redirected && response.type !== 'opaque') throw new Error('bad response ' + response.status);
+    const copy = response.clone();
+    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+    return response;
+  });
+  const saved = () => caches.match(event.request, { ignoreSearch: true })
+    .then((cached) => cached || (isNavigation ? caches.match('./index.html') : undefined));
+  event.respondWith(new Promise((resolve) => {
+    let done = false;
+    const give = (r) => { if (!done && r) { done = true; resolve(r); } };
+    const timer = setTimeout(() => saved().then((c) => { if (c) give(c); }), isNavigation ? 3000 : 4000);
+    fromNet.then((r) => { clearTimeout(timer); give(r); })
+      .catch(() => { clearTimeout(timer); saved().then((c) => { if (c) give(c); else if (!done) { done = true; resolve(Response.error()); } }); });
+  }));
+  event.waitUntil(fromNet.catch(() => {}));
 });
 
 // ===== Background sync (build 93) =====================================================================
