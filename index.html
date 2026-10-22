@@ -1036,6 +1036,7 @@
     </div>
     <div class="panel">
       <h3>Inventory</h3>
+      <div class="rpt-actions"><button class="modal-cancel" id="invXlsxBtn" type="button">⬇ Download Excel</button><span class="hint">Every product with its stock on hand, buying and selling price and stock value.</span></div>
       <div class="table-scroll inv-wrap"><table class="rpt-tbl inv-tbl"><thead><tr><th>Code</th><th>Product</th><th>Category</th><th class="n">Stock on hand</th><th class="n">Cost</th><th class="n">Price</th><th class="n">Margin</th><th></th></tr></thead>
       <tbody id="stockTable"></tbody></table></div>
     </div>
@@ -4365,6 +4366,39 @@ async function pinLocalSignIn(u,pin,t){
   .inv-tbl td.name { font-weight:600; }
   .inv-tbl .low-badge { margin-left:6px; }
 </style>
+<script id="inventoryExcelJs">
+/* Inventory to Excel (POS build 132): every product - code, name, category, stock on hand, buying and selling price,
+   margin and the stock's value at cost and at selling price, with totals. Keg cups/jugs and half bottles are listed
+   as sold from their barrel or bottle (no stock of their own). */
+(function () {
+  async function download() {
+    if (!currentUser || !['admin', 'supervisor'].includes(currentUser.role)) return toast('Only the owner or a supervisor can download the inventory');
+    try { await loadSheetJS(); } catch (e) { return toast(e.message || 'Could not load the Excel library - check the internet connection'); }
+    const prods = (await getAll('products')).slice().sort(listCmp), n = v => v === null || v === undefined || v === '' ? '' : Math.round(Number(v) * 100) / 100;
+    const shop = (() => { try { return businessProfile.storeName || 'My shop'; } catch (e) { return 'My shop'; } })();
+    const head = ['Code', 'Product', 'Category', 'Stock on hand', 'Buying price (KSh)', 'Selling price (KSh)', 'Margin %', 'Stock value at cost (KSh)', 'Stock value at selling price (KSh)', 'Supplier', 'Reorder at', 'Notes'];
+    let units = 0, vc = 0, vp = 0, noCost = 0;
+    const rows = prods.map(p => {
+      const po = window.portionOf && window.portionOf(p), tracked = !po && p.stock !== null && p.stock !== undefined;
+      const st = tracked ? Number(p.stock) || 0 : '', cost = Number(p.cost) || 0, price = Number(p.price) || 0;
+      const valC = tracked && cost ? st * cost : '', valP = tracked && price ? st * price : '';
+      if (tracked) { units += st; if (cost) vc += valC; else if (st > 0) noCost++; vp += valP || 0; }
+      const note = po ? `Sold from ${po.from} - takes ${po.per} of it each` : !tracked ? 'Not stock-counted' : st > 0 && !cost ? 'No buying price yet' : st < 0 ? 'Below zero - check at the stock take' : '';
+      return [p.sku, p.name, p.cat || '', tracked ? n(st) : '', cost ? n(cost) : '', n(price), cost && price ? n((price - cost) / price * 100) : '', valC === '' ? '' : n(valC), valP === '' ? '' : n(valP), p.supplier_name || '', tracked ? (p.reorderThreshold ?? p.reorder_threshold ?? '') : '', note];
+    });
+    const aoa = [[`${shop} - Inventory`], [`Downloaded ${new Date().toLocaleString('en-KE')} by ${currentUser.name}`], [], head, ...rows,
+      [`Total - ${prods.length} products`, '', '', n(units), '', '', '', n(vc), n(vp), '', '', noCost ? `${noCost} product(s) in stock without a buying price are not in the cost value` : '']];
+    const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = head.map((h, i) => ({ wch: i === 1 ? 32 : i === 11 ? 40 : Math.max(10, h.length + 2) }));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+    XLSX.writeFile(wb, `${safeFilenamePart(shop)}-Inventory-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    logAudit('Exported inventory to Excel', `${prods.length} products, stock value KSh ${Math.round(vc).toLocaleString('en-KE')} at cost`); toast('Excel file downloaded');
+  }
+  window.downloadInventoryExcel = download;
+  document.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('#invXlsxBtn')) download(); });
+  const rst = renderStockTable;
+  renderStockTable = async function () { const r = await rst.apply(this, arguments); try { const b = $('invXlsxBtn'); if (b) b.parentNode.style.display = currentUser && ['admin', 'supervisor'].includes(currentUser.role) ? '' : 'none'; } catch (e) {} return r; };
+})();
+</script>
 <script id="inventoryTableJs">
 /* Inventory list (POS build 124): a plain table - code first, then product, category, stock on hand, cost, price,
    margin and Edit. Renaming a code and asking DukaGO to delete a product are inside the product's edit screen,
