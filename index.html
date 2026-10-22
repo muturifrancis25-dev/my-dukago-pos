@@ -4615,7 +4615,7 @@ async function pinLocalSignIn(u,pin,t){
         const inp = tr.querySelector('.stCountInput'); if (!inp || inp.value.trim() === '') continue;
         const c = Math.round(parseFloat(inp.value) * 1000) / 1000, p = prods.find(x => x.sku === tr.dataset.sku); if (isNaN(c) || !p || p.stock === null || p.stock === undefined) continue;
         const sys = tr.dataset.sys !== '' && tr.dataset.sys !== undefined ? parseFloat(tr.dataset.sys) : p.stock;
-        if (c !== sys) rows.push({ tr, sku: p.sku, name: p.name, counted: c, sys, diff: c - sys });
+        if (c !== sys) rows.push({ tr, sku: p.sku, name: p.name, counted: c, sys, diff: Math.round((c - sys) * 1000) / 1000 });   // 409.5 - 417.6 is -8.1, not -8.100000000000023
       }
       if (rows.length) {
         const pick = await ask(rows); if (!pick) return;
